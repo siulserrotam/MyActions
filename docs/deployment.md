@@ -49,6 +49,8 @@ JWT_SECRET=generate-a-long-random-value
 CRON_SECRET=generate-a-long-random-value
 ALERT_MIN_CONFIDENCE=75
 ALERT_SIGNALS=COMPRAR,VENDER,ESPERAR MEJOR ENTRADA
+INTRADAY_ALERT_THRESHOLD_PCT=10
+INTRADAY_SESSION_BARS=78
 WHATSAPP_PROVIDER=meta
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
@@ -101,6 +103,8 @@ La Fase 2 agrega:
 - `GET /alerts/evaluate`: evalua si la senal actual amerita alerta.
 - `GET /alerts/evaluate?notify=true`: envia WhatsApp si la condicion se cumple y la API key es valida.
 - `GET /cron/daily-signal`: endpoint para Vercel Cron.
+- `GET /alerts/intraday`: evalua subida o bajada intradia vs apertura.
+- `GET /cron/intraday-signal`: endpoint para scheduler externo con alertas intradia.
 
 Vercel Cron ejecuta un `GET` contra el path configurado en `vercel.json`. En Hobby, Vercel limita cron jobs a una ejecucion diaria y puede invocarlos en cualquier momento dentro de la hora configurada.
 
@@ -119,3 +123,36 @@ WHATSAPP_TO_PHONE=+573001112233
 ```
 
 Meta documenta el envio de mensajes con `POST https://graph.facebook.com/{version}/{phone-number-id}/messages`.
+
+## Alertas intradia 10%
+
+La Fase 2B agrega alertas cuando TSM sube o baja al menos `INTRADAY_ALERT_THRESHOLD_PCT` frente al precio de apertura del dia. Tambien calcula:
+
+- precio de apertura
+- precio actual
+- maximo y minimo intradia
+- cambio porcentual contra apertura
+- tendencia intradia
+- proyeccion de cierre del mismo dia
+- posible crecimiento o decrecimiento restante
+
+Endpoint manual:
+
+```text
+GET /alerts/intraday
+```
+
+Envio por WhatsApp, si las credenciales estan configuradas:
+
+```text
+GET /alerts/intraday?notify=true
+```
+
+Para automatizarlo varias veces al dia en Vercel Hobby, usa un scheduler externo como cron-job.org, EasyCron, GitHub Actions schedule o UptimeRobot. Vercel documenta que en Hobby los cron jobs solo pueden ejecutarse una vez por dia; para frecuencia por minuto se requiere Pro o Enterprise.
+
+Scheduler recomendado cada 5 o 15 minutos durante horario de mercado:
+
+```text
+GET https://api.manantiallodge.com/cron/intraday-signal
+Header: x-cron-secret: <CRON_SECRET>
+```

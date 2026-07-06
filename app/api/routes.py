@@ -117,6 +117,16 @@ def evaluate_alerts(
     return AlertService().evaluate(ticker, notify=notify).to_dict()
 
 
+@router.get("/alerts/intraday")
+def evaluate_intraday_alerts(
+    ticker: str = Query(settings.default_ticker),
+    notify: bool = Query(False),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    ticker = validate_ticker(ticker)
+    return AlertService().evaluate_intraday(ticker, notify=notify)
+
+
 @router.get("/cron/daily-signal")
 def daily_signal_cron(
     authorization: str | None = Header(default=None),
@@ -127,3 +137,15 @@ def daily_signal_cron(
         if authorization != expected and x_cron_secret != settings.cron_secret:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Cron secret invalido.")
     return AlertService().evaluate(settings.default_ticker, notify=True).to_dict()
+
+
+@router.get("/cron/intraday-signal")
+def intraday_signal_cron(
+    authorization: str | None = Header(default=None),
+    x_cron_secret: str | None = Header(default=None),
+) -> dict[str, Any]:
+    if settings.cron_secret:
+        expected = f"Bearer {settings.cron_secret}"
+        if authorization != expected and x_cron_secret != settings.cron_secret:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Cron secret invalido.")
+    return AlertService().evaluate_intraday(settings.default_ticker, notify=True)

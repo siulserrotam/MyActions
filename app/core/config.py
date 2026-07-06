@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     cron_secret: str = ""
     alert_min_confidence: float = 75.0
     alert_signals: str = "COMPRAR,VENDER,ESPERAR MEJOR ENTRADA"
+    intraday_alert_threshold_pct: float = 10.0
+    intraday_session_bars: int = 78
     whatsapp_provider: str = "meta"
     whatsapp_access_token: str = ""
     whatsapp_phone_number_id: str = ""

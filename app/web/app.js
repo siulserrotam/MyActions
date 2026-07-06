@@ -14,6 +14,7 @@ async function loadDashboard() {
     fetchJson("/history?limit=260"),
     fetchJson("/backtesting"),
   ]);
+  const intraday = await fetchJson("/alerts/intraday");
 
   document.getElementById("signal").textContent = prediction.senal;
   document.getElementById("price").textContent = money(prediction.precio_actual);
@@ -29,6 +30,12 @@ async function loadDashboard() {
   document.getElementById("backtesting").innerHTML = backtesting.strategies
     .map((item) => `<p><strong>${item.strategy}</strong>: ${money(item.final_capital)} (${(item.total_return * 100).toFixed(2)}%)</p>`)
     .join("");
+  document.getElementById("intraday-alert").innerHTML = `
+    <p><strong>${intraday.direction}</strong>: ${intraday.change_pct}% vs apertura.</p>
+    <p>Tendencia: <strong>${intraday.trend}</strong></p>
+    <p>Apertura ${money(intraday.open_price)} / actual ${money(intraday.current_price)}</p>
+    <p>Proyeccion cierre: ${intraday.projected_close_pct}%</p>
+  `;
 
   const rows = history.data;
   renderChart(rows);
