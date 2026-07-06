@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.config import settings
 from app.core.security import require_api_key
@@ -13,6 +15,7 @@ from app.schemas.responses import (
     PredictionResponse,
     TrainResponse,
 )
+from app.services.alerts import AlertService
 from app.services.backtesting import BacktestingService
 from app.services.data_provider import MarketDataService
 from app.services.indicators import IndicatorService
@@ -102,3 +105,25 @@ def train(ticker: str = Query(settings.default_ticker)) -> TrainResponse:
 def retrain(ticker: str = Query(settings.default_ticker)) -> TrainResponse:
     ticker = validate_ticker(ticker)
     return TrainingService().train(ticker, force=True)
+
+
+@router.get("/alerts/evaluate")
+def evaluate_alerts(
+    ticker: str = Query(settings.default_ticker),
+    notify: bool = Query(False),
+    _: None = Depends(require_api_key),
+) -> dict[str, Any]:
+    ticker = validate_ticker(ticker)
+    return AlertService().evaluate(ticker, notify=notify).to_dict()
+
+
+@router.get("/cron/daily-signal")
+def daily_signal_cron(
+    authorization: str | None = Header(default=None),
+    x_cron_secret: str | None = Header(default=None),
+) -> dict[str, Any]:
+    if settings.cron_secret:
+        expected = f"Bearer {settings.cron_secret}"
+        if authorization != expected and x_cron_secret != settings.cron_secret:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Cron secret invalido.")
+    return AlertService().evaluate(settings.default_ticker, notify=True).to_dict()

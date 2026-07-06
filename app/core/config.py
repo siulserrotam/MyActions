@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     supabase_url: str = ""
     supabase_anon_key: str = ""
+    cron_secret: str = ""
+    alert_min_confidence: float = 75.0
+    alert_signals: str = "COMPRAR,VENDER,ESPERAR MEJOR ENTRADA"
+    whatsapp_provider: str = "meta"
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_to_phone: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

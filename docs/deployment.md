@@ -46,6 +46,13 @@ DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/postgres
 REDIS_URL=
 API_KEY=generate-a-long-random-value
 JWT_SECRET=generate-a-long-random-value
+CRON_SECRET=generate-a-long-random-value
+ALERT_MIN_CONFIDENCE=75
+ALERT_SIGNALS=COMPRAR,VENDER,ESPERAR MEJOR ENTRADA
+WHATSAPP_PROVIDER=meta
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_TO_PHONE=
 ```
 
 Para Vercel/serverless conviene usar el pooler de Supabase cuando este disponible. Supabase documenta que el connection string se obtiene desde el boton `Connect` del dashboard.
@@ -86,3 +93,29 @@ Abrir:
 
 - http://127.0.0.1:8000/docs
 - http://127.0.0.1:8000/dashboard
+
+## Alertas WhatsApp
+
+La Fase 2 agrega:
+
+- `GET /alerts/evaluate`: evalua si la senal actual amerita alerta.
+- `GET /alerts/evaluate?notify=true`: envia WhatsApp si la condicion se cumple y la API key es valida.
+- `GET /cron/daily-signal`: endpoint para Vercel Cron.
+
+Vercel Cron ejecuta un `GET` contra el path configurado en `vercel.json`. En Hobby, Vercel limita cron jobs a una ejecucion diaria y puede invocarlos en cualquier momento dentro de la hora configurada.
+
+Para WhatsApp Cloud API necesitas crear una app en Meta Developers y configurar:
+
+```env
+WHATSAPP_ACCESS_TOKEN=token_de_meta
+WHATSAPP_PHONE_NUMBER_ID=id_del_numero_emisor
+WHATSAPP_TO_PHONE=numero_destino_en_formato_e164
+```
+
+Para Colombia, el formato E.164 es similar a:
+
+```env
+WHATSAPP_TO_PHONE=+573001112233
+```
+
+Meta documenta el envio de mensajes con `POST https://graph.facebook.com/{version}/{phone-number-id}/messages`.
