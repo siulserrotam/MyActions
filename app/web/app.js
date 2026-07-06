@@ -31,32 +31,48 @@ async function loadDashboard() {
     .join("");
 
   const rows = history.data;
-  Plotly.newPlot(
-    "chart",
-    [
-      {
-        type: "candlestick",
-        x: rows.map((row) => row.date),
-        open: rows.map((row) => row.open),
-        high: rows.map((row) => row.high),
-        low: rows.map((row) => row.low),
-        close: rows.map((row) => row.close),
-        name: "TSM",
-      },
-    ],
-    {
-      margin: { l: 42, r: 20, t: 24, b: 36 },
-      paper_bgcolor: "white",
-      plot_bgcolor: "white",
-      xaxis: { rangeslider: { visible: false } },
-      yaxis: { title: "Precio" },
-    },
-    { responsive: true, displayModeBar: false },
-  );
+  renderChart(rows);
 }
 
 document.getElementById("refresh").addEventListener("click", loadDashboard);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
+  document.getElementById("chart-fallback").textContent = "No se pudieron cargar los datos.";
   console.error(error);
 });
+
+function renderChart(rows) {
+  const chart = document.getElementById("chart");
+  chart.innerHTML = "";
+
+  const width = Math.max(chart.clientWidth, 320);
+  const height = 440;
+  const padding = { top: 24, right: 24, bottom: 34, left: 54 };
+  const closes = rows.map((row) => Number(row.close));
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const span = max - min || 1;
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const points = closes.map((close, index) => {
+    const x = padding.left + (index / Math.max(closes.length - 1, 1)) * plotWidth;
+    const y = padding.top + (1 - (close - min) / span) * plotHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = closes[closes.length - 1];
+  const first = closes[0];
+  const stroke = last >= first ? "#178a4c" : "#c62828";
+
+  chart.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Grafico de precio TSM">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="white"></rect>
+      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
+      <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
+      <polyline points="${points.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2.5"></polyline>
+      <text x="${padding.left}" y="20" fill="#596878" font-size="13">TSM 260 sesiones</text>
+      <text x="${padding.left}" y="${height - 10}" fill="#596878" font-size="12">${rows[0].date}</text>
+      <text x="${width - padding.right - 86}" y="${height - 10}" fill="#596878" font-size="12">${rows[rows.length - 1].date}</text>
+      <text x="${width - padding.right - 90}" y="24" fill="${stroke}" font-size="14" font-weight="700">${money(last)}</text>
+    </svg>
+  `;
+}

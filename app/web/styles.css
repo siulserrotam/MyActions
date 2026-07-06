@@ -95,6 +95,19 @@ a {
   background: white;
   border: 1px solid #dce3ea;
   border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #596878;
+  font-weight: 650;
+  padding: 24px;
+  text-align: center;
 }
 
 .grid {
