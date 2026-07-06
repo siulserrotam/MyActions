@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -12,7 +14,8 @@ def create_app() -> FastAPI:
         description="Explainable trading intelligence API for TSM.",
     )
     app.include_router(router)
-    app.mount("/dashboard", StaticFiles(directory="app/web", html=True), name="dashboard")
+    web_dir = Path(__file__).resolve().parent / "web"
+    app.mount("/dashboard", StaticFiles(directory=web_dir, html=True), name="dashboard")
     return app
 
 

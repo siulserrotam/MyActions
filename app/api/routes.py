@@ -38,6 +38,11 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok", app=settings.app_name, ticker=settings.default_ticker)
 
 
+@router.get("/", response_model=HealthResponse)
+def root() -> HealthResponse:
+    return health()
+
+
 @router.get("/predict", response_model=PredictionResponse)
 def predict(ticker: str = Query(settings.default_ticker)) -> PredictionResponse:
     ticker = validate_ticker(ticker)
