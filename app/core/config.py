@@ -1,0 +1,29 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "Trading Intelligence API"
+    app_env: str = "local"
+    default_ticker: str = "TSM"
+    data_dir: Path = Path("data")
+    model_dir: Path = Path("models")
+    database_url: str = "sqlite:///./data/trading.db"
+    redis_url: str = "redis://localhost:6379/0"
+    api_key: str = ""
+    jwt_secret: str = "change-me"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    settings = Settings()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.model_dir.mkdir(parents=True, exist_ok=True)
+    return settings
+
+
+settings = get_settings()

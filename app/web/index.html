@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trading Intelligence API</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <h1>TSM Intelligence</h1>
+        <div class="status" id="signal">Cargando...</div>
+        <dl>
+          <div><dt>Precio</dt><dd id="price">-</dd></div>
+          <div><dt>Confianza</dt><dd id="confidence">-</dd></div>
+          <div><dt>Riesgo</dt><dd id="risk">-</dd></div>
+          <div><dt>Modelo</dt><dd id="model">-</dd></div>
+        </dl>
+      </aside>
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="refresh">Actualizar</button>
+          <a href="/docs">Swagger</a>
+        </div>
+        <div id="chart" class="chart"></div>
+        <section class="grid">
+          <article>
+            <h2>Explicacion</h2>
+            <ul id="explanation"></ul>
+          </article>
+          <article>
+            <h2>Riesgo</h2>
+            <p id="risk-plan"></p>
+          </article>
+          <article>
+            <h2>Backtesting</h2>
+            <div id="backtesting"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>
