@@ -11,7 +11,9 @@ def _serializer() -> URLSafeSerializer:
 
 
 def verify_dashboard_credentials(username: str, password: str) -> bool:
-    return hmac.compare_digest(username, settings.admin_username) and hmac.compare_digest(
+    normalized_username = username.strip().casefold()
+    expected_username = settings.admin_username.strip().casefold()
+    return hmac.compare_digest(normalized_username, expected_username) and hmac.compare_digest(
         password,
         settings.admin_password,
     )
@@ -29,4 +31,4 @@ def is_dashboard_authenticated(request: Request) -> bool:
         payload = _serializer().loads(token)
     except BadSignature:
         return False
-    return payload.get("username") == settings.admin_username
+    return str(payload.get("username", "")).casefold() == settings.admin_username.casefold()

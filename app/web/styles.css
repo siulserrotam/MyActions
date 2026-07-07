@@ -45,6 +45,20 @@ body {
   font-weight: 650;
 }
 
+.login-error {
+  border: 1px solid #f0b4b4;
+  background: #fff1f1;
+  color: #9f1d1d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 700;
+}
+
+.login-hint {
+  color: #596878;
+  font-size: 14px;
+}
+
 .login-panel input {
   min-height: 42px;
   border: 1px solid #c9d3df;

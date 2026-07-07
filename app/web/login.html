@@ -11,17 +11,27 @@
       <form class="login-panel" method="post" action="/login">
         <h1>MyActions</h1>
         <p>Acceso privado al dashboard de Trading Intelligence.</p>
+        <div class="login-error" id="login-error" hidden>
+          Usuario o clave incorrectos. El usuario no distingue mayusculas; la clave si.
+        </div>
         <label>
           Usuario
-          <input name="username" autocomplete="username" required />
+          <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required />
         </label>
         <label>
           Clave
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
+        <p class="login-hint">Usuario esperado: admin. La clave distingue mayusculas, minusculas y simbolos.</p>
         <input name="next" type="hidden" value="/dashboard/" />
         <button type="submit">Entrar</button>
       </form>
     </main>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("error") === "1") {
+        document.getElementById("login-error").hidden = false;
+      }
+    </script>
   </body>
 </html>
