@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
     )
     @app.middleware("http")
     async def protect_dashboard(request: Request, call_next):
-        public_dashboard_assets = {"/dashboard/styles.css"}
+        public_dashboard_assets = {"/dashboard/styles.css", "/dashboard/app.js"}
         if (
             request.url.path.startswith("/dashboard")
             and request.url.path not in public_dashboard_assets
