@@ -4,21 +4,31 @@ async function fetchJson(path) {
   return response.json();
 }
 
+async function fetchOptional(path, fallback) {
+  try {
+    return await fetchJson(path);
+  } catch (error) {
+    console.warn(`No se pudo cargar ${path}`, error);
+    return fallback;
+  }
+}
+
 function money(value) {
   return Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
 async function loadDashboard() {
-  const [prediction, history, backtesting, alertEvaluation, news, opportunities, dividends] = await Promise.all([
-    fetchJson("/predict"),
-    fetchJson("/history?limit=260"),
-    fetchJson("/backtesting"),
-    fetchJson("/alerts/evaluate"),
-    fetchJson("/intelligence/news"),
-    fetchJson("/intelligence/opportunities"),
-    fetchJson("/intelligence/dividends"),
+  setLoadingState();
+  const prediction = await fetchJson("/predict");
+  const [history, backtesting, alertEvaluation, intraday, news, opportunities, dividends] = await Promise.all([
+    fetchOptional("/history?limit=260", { data: [] }),
+    fetchOptional("/backtesting", { strategies: [] }),
+    fetchOptional("/alerts/evaluate", { should_alert: false }),
+    fetchOptional("/alerts/intraday", { should_alert: false, direction: "SIN DATOS", change_pct: 0, trend: "SIN DATOS", open_price: 0, current_price: 0, projected_close_pct: 0 }),
+    fetchOptional("/intelligence/news", { path: "Sin datos de noticias", news_score: 0, combined_score: 0, summary: "No se pudieron cargar noticias." }),
+    fetchOptional("/intelligence/opportunities", { assets: [] }),
+    fetchOptional("/intelligence/dividends", { estimated_yield_pct: 0, estimated_annual_dividend: 0, official_source: "https://investor.tsmc.com/english/latest-dividend" }),
   ]);
-  const intraday = await fetchJson("/alerts/intraday");
 
   document.getElementById("signal").textContent = prediction.senal;
   document.getElementById("price").textContent = money(prediction.precio_actual);
@@ -33,7 +43,7 @@ async function loadDashboard() {
     `take profit ${money(prediction.take_profit)}, relacion ${prediction.riesgo_beneficio}.`;
   document.getElementById("backtesting").innerHTML = backtesting.strategies
     .map((item) => `<p><strong>${item.strategy}</strong>: ${money(item.final_capital)} (${(item.total_return * 100).toFixed(2)}%)</p>`)
-    .join("");
+    .join("") || "<p>No se pudo cargar backtesting.</p>";
   document.getElementById("intraday-alert").innerHTML = `
     <p><strong>${intraday.direction}</strong>: ${intraday.change_pct}% vs apertura.</p>
     <p>Tendencia: <strong>${intraday.trend}</strong></p>
@@ -48,7 +58,7 @@ async function loadDashboard() {
   document.getElementById("opportunities").innerHTML = opportunities.assets
     .slice(0, 4)
     .map((item) => `<p><strong>${item.asset_type}</strong> ${item.symbol}: ${item.action} (${item.score})</p>`)
-    .join("");
+    .join("") || "<p>No se pudieron cargar oportunidades.</p>";
   document.getElementById("dividends").innerHTML = `
     <p>Yield estimado: <strong>${dividends.estimated_yield_pct}%</strong></p>
     <p>Dividendo anual estimado: ${money(dividends.estimated_annual_dividend)}</p>
@@ -56,26 +66,46 @@ async function loadDashboard() {
   `;
   renderWebAlert(alertEvaluation, intraday);
 
-  const rows = history.data;
-  renderChart(rows);
+  if (history.data.length) {
+    renderChart(history.data);
+  } else {
+    document.getElementById("chart").innerHTML = '<div class="chart-fallback">No se pudieron cargar los datos del grafico.</div>';
+  }
 }
 
 document.getElementById("refresh").addEventListener("click", loadDashboard);
 document.getElementById("enable-notifications").addEventListener("click", requestBrowserNotifications);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
-  document.getElementById("chart-fallback").textContent = "No se pudieron cargar los datos.";
+  document.getElementById("web-alert").className = "web-alert error";
+  document.getElementById("web-alert").textContent =
+    "No se pudo cargar la senal principal. Revisa conexion e intenta Actualizar.";
+  const fallback = document.getElementById("chart-fallback");
+  if (fallback) fallback.textContent = "No se pudieron cargar los datos.";
   console.error(error);
 });
 
 async function requestBrowserNotifications() {
+  const alertBox = document.getElementById("web-alert");
   if (!("Notification" in window)) {
-    document.getElementById("web-alert").textContent = "Este navegador no soporta notificaciones.";
+    alertBox.className = "web-alert muted";
+    alertBox.textContent = "Este navegador no soporta notificaciones. Las alertas quedan visibles dentro de la web.";
+    return;
+  }
+  if (Notification.permission === "denied") {
+    alertBox.className = "web-alert error";
+    alertBox.textContent =
+      "Permiso bloqueado. En Chrome movil abre el candado del sitio > Permisos > Notificaciones > Permitir.";
     return;
   }
   const permission = await Notification.requestPermission();
-  document.getElementById("web-alert").textContent =
-    permission === "granted" ? "Alertas web activadas en este navegador." : "Permiso de alertas web no concedido.";
+  if (permission === "granted") {
+    alertBox.className = "web-alert active";
+    alertBox.textContent = "Alertas web activadas en este navegador.";
+  } else {
+    alertBox.className = "web-alert muted";
+    alertBox.textContent = "Permiso no concedido. Las alertas seguiran visibles dentro del dashboard.";
+  }
 }
 
 function renderWebAlert(alertEvaluation, intraday) {
@@ -105,7 +135,14 @@ function maybeNotify(title, body) {
   new Notification(title, { body });
 }
 
+function setLoadingState() {
+  document.getElementById("signal").textContent = "Cargando...";
+  document.getElementById("web-alert").className = "web-alert muted";
+  document.getElementById("web-alert").textContent = "Actualizando datos...";
+}
+
 function renderChart(rows) {
+  if (!rows.length) return;
   const chart = document.getElementById("chart");
   chart.innerHTML = "";
 

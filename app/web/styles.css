@@ -167,6 +167,12 @@ a {
   font-weight: 650;
 }
 
+.web-alert.error {
+  border-color: #f0b4b4;
+  background: #fff1f1;
+  color: #9f1d1d;
+}
+
 .chart {
   min-height: 440px;
   background: white;
