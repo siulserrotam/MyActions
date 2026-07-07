@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login - Trading Intelligence API</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <form class="login-panel" method="post" action="/login">
+        <h1>MyActions</h1>
+        <p>Acceso privado al dashboard de Trading Intelligence.</p>
+        <label>
+          Usuario
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label>
+          Clave
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <input name="next" type="hidden" value="/dashboard/" />
+        <button type="submit">Entrar</button>
+      </form>
+    </main>
+  </body>
+</html>

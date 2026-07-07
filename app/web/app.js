@@ -9,10 +9,11 @@ function money(value) {
 }
 
 async function loadDashboard() {
-  const [prediction, history, backtesting] = await Promise.all([
+  const [prediction, history, backtesting, alertEvaluation] = await Promise.all([
     fetchJson("/predict"),
     fetchJson("/history?limit=260"),
     fetchJson("/backtesting"),
+    fetchJson("/alerts/evaluate"),
   ]);
   const intraday = await fetchJson("/alerts/intraday");
 
@@ -36,17 +37,56 @@ async function loadDashboard() {
     <p>Apertura ${money(intraday.open_price)} / actual ${money(intraday.current_price)}</p>
     <p>Proyeccion cierre: ${intraday.projected_close_pct}%</p>
   `;
+  renderWebAlert(alertEvaluation, intraday);
 
   const rows = history.data;
   renderChart(rows);
 }
 
 document.getElementById("refresh").addEventListener("click", loadDashboard);
+document.getElementById("enable-notifications").addEventListener("click", requestBrowserNotifications);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
   document.getElementById("chart-fallback").textContent = "No se pudieron cargar los datos.";
   console.error(error);
 });
+
+async function requestBrowserNotifications() {
+  if (!("Notification" in window)) {
+    document.getElementById("web-alert").textContent = "Este navegador no soporta notificaciones.";
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  document.getElementById("web-alert").textContent =
+    permission === "granted" ? "Alertas web activadas en este navegador." : "Permiso de alertas web no concedido.";
+}
+
+function renderWebAlert(alertEvaluation, intraday) {
+  const alertBox = document.getElementById("web-alert");
+  const messages = [];
+  if (alertEvaluation.should_alert) {
+    messages.push(`${alertEvaluation.signal}: ${alertEvaluation.confidence}% de confianza.`);
+  }
+  if (intraday.should_alert) {
+    messages.push(`${intraday.direction}: ${intraday.change_pct}% vs apertura.`);
+  }
+  if (!messages.length) {
+    alertBox.className = "web-alert muted";
+    alertBox.textContent = "Sin alertas activas. La API sigue monitoreando TSM.";
+    return;
+  }
+  alertBox.className = "web-alert active";
+  alertBox.textContent = messages.join(" ");
+  maybeNotify("MyActions alerta TSM", messages.join("\n"));
+}
+
+function maybeNotify(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const key = `${title}:${body}`;
+  if (sessionStorage.getItem("lastNotification") === key) return;
+  sessionStorage.setItem("lastNotification", key);
+  new Notification(title, { body });
+}
 
 function renderChart(rows) {
   const chart = document.getElementById("chart");

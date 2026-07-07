@@ -1,8 +1,10 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
 
 from app.core.config import settings
+from app.core.auth import create_dashboard_session, verify_dashboard_credentials
 from app.core.security import require_api_key
 from app.schemas.responses import (
     BacktestResponse,
@@ -24,6 +26,7 @@ from app.services.training import TrainingService
 from app.services.trading_signal import TradingSignalService
 
 router = APIRouter()
+WEB_DIR = settings.model_dir.parent / "app" / "web"
 
 
 def validate_ticker(ticker: str) -> str:
@@ -44,6 +47,38 @@ def health() -> HealthResponse:
 @router.get("/", response_model=HealthResponse)
 def root() -> HealthResponse:
     return health()
+
+
+@router.get("/login")
+def login_page() -> FileResponse:
+    return FileResponse("app/web/login.html")
+
+
+@router.post("/login")
+def login(
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/dashboard/"),
+) -> RedirectResponse:
+    if not verify_dashboard_credentials(username, password):
+        return RedirectResponse(url="/login?error=1", status_code=303)
+    response = RedirectResponse(url=next if next.startswith("/") else "/dashboard/", status_code=303)
+    response.set_cookie(
+        settings.dashboard_session_cookie,
+        create_dashboard_session(),
+        httponly=True,
+        secure=settings.app_env == "production",
+        samesite="lax",
+        max_age=60 * 60 * 12,
+    )
+    return response
+
+
+@router.get("/logout")
+def logout() -> RedirectResponse:
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(settings.dashboard_session_cookie)
+    return response
 
 
 @router.get("/predict", response_model=PredictionResponse)
