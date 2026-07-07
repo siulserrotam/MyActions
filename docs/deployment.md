@@ -156,3 +156,51 @@ Scheduler recomendado cada 5 o 15 minutos durante horario de mercado:
 GET https://api.manantiallodge.com/cron/intraday-signal
 Header: x-cron-secret: <CRON_SECRET>
 ```
+
+## Login del dashboard
+
+Configura estas variables en Vercel para proteger el dashboard:
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=Admin123*
+JWT_SECRET=generate-a-long-random-value
+APP_ENV=production
+```
+
+Luego ejecuta un redeploy. El dashboard quedara en:
+
+```text
+https://api.manantiallodge.com/dashboard/
+```
+
+Credenciales iniciales:
+
+```text
+usuario: admin
+clave: Admin123*
+```
+
+## Inteligencia de mercado
+
+Endpoints:
+
+```text
+GET /intelligence/news
+GET /intelligence/opportunities
+GET /intelligence/dividends
+```
+
+La inteligencia de mercado combina:
+
+- senal tecnica de TSM
+- titulares recientes de Yahoo Finance RSS
+- ranking cuantitativo de acciones, ETFs, divisas ETF y cripto
+- dividendos historicos recientes via yfinance
+- enlace oficial de dividendos de TSMC
+
+Fuentes de referencia:
+
+- Vercel Environment Variables: https://vercel.com/docs/environment-variables
+- Yahoo Finance News: https://finance.yahoo.com/news/
+- Dividendos oficiales TSMC: https://investor.tsmc.com/english/latest-dividend

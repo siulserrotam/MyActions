@@ -9,11 +9,14 @@ function money(value) {
 }
 
 async function loadDashboard() {
-  const [prediction, history, backtesting, alertEvaluation] = await Promise.all([
+  const [prediction, history, backtesting, alertEvaluation, news, opportunities, dividends] = await Promise.all([
     fetchJson("/predict"),
     fetchJson("/history?limit=260"),
     fetchJson("/backtesting"),
     fetchJson("/alerts/evaluate"),
+    fetchJson("/intelligence/news"),
+    fetchJson("/intelligence/opportunities"),
+    fetchJson("/intelligence/dividends"),
   ]);
   const intraday = await fetchJson("/alerts/intraday");
 
@@ -36,6 +39,20 @@ async function loadDashboard() {
     <p>Tendencia: <strong>${intraday.trend}</strong></p>
     <p>Apertura ${money(intraday.open_price)} / actual ${money(intraday.current_price)}</p>
     <p>Proyeccion cierre: ${intraday.projected_close_pct}%</p>
+  `;
+  document.getElementById("news-intelligence").innerHTML = `
+    <p><strong>${news.path}</strong></p>
+    <p>Noticias: ${news.news_score} / Score: ${news.combined_score}</p>
+    <p>${news.summary}</p>
+  `;
+  document.getElementById("opportunities").innerHTML = opportunities.assets
+    .slice(0, 4)
+    .map((item) => `<p><strong>${item.asset_type}</strong> ${item.symbol}: ${item.action} (${item.score})</p>`)
+    .join("");
+  document.getElementById("dividends").innerHTML = `
+    <p>Yield estimado: <strong>${dividends.estimated_yield_pct}%</strong></p>
+    <p>Dividendo anual estimado: ${money(dividends.estimated_annual_dividend)}</p>
+    <p><a href="${dividends.official_source}" target="_blank" rel="noreferrer">Fuente oficial TSMC</a></p>
   `;
   renderWebAlert(alertEvaluation, intraday);
 

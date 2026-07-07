@@ -21,6 +21,7 @@ from app.services.alerts import AlertService
 from app.services.backtesting import BacktestingService
 from app.services.data_provider import MarketDataService
 from app.services.indicators import IndicatorService
+from app.services.market_intelligence import MarketIntelligenceService
 from app.services.model_registry import ModelRegistry
 from app.services.training import TrainingService
 from app.services.trading_signal import TradingSignalService
@@ -184,3 +185,20 @@ def intraday_signal_cron(
         if authorization != expected and x_cron_secret != settings.cron_secret:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Cron secret invalido.")
     return AlertService().evaluate_intraday(settings.default_ticker, notify=True)
+
+
+@router.get("/intelligence/news")
+def intelligence_news(ticker: str = Query(settings.default_ticker)) -> dict[str, Any]:
+    ticker = validate_ticker(ticker)
+    return MarketIntelligenceService().news_assessment(ticker)
+
+
+@router.get("/intelligence/opportunities")
+def intelligence_opportunities() -> dict[str, Any]:
+    return MarketIntelligenceService().opportunities()
+
+
+@router.get("/intelligence/dividends")
+def intelligence_dividends(ticker: str = Query(settings.default_ticker)) -> dict[str, Any]:
+    ticker = validate_ticker(ticker)
+    return MarketIntelligenceService().dividends(ticker)
