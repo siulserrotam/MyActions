@@ -19,6 +19,8 @@ function money(value) {
 
 async function loadDashboard() {
   setLoadingState();
+  renderPortfolioState();
+  const symbols = combinedSymbols();
   const prediction = await fetchJson("/predict");
   const [history, backtesting, alertEvaluation, intraday, activePlan, news, opportunities, dividends] = await Promise.all([
     fetchOptional("/history?limit=66", { data: [] }),
@@ -27,7 +29,7 @@ async function loadDashboard() {
     fetchOptional("/alerts/intraday", { should_alert: false, direction: "SIN DATOS", change_pct: 0, trend: "SIN DATOS", open_price: 0, current_price: 0, projected_close_pct: 0 }),
     fetchOptional("/plan/active-trading", { decision: "Sin plan", buy_zone: "-", sell_zone: "-", reentry_zone: "-", holding_rule: "-", explanation: [] }),
     fetchOptional("/intelligence/news", { path: "Sin datos de noticias", news_score: 0, combined_score: 0, summary: "No se pudieron cargar noticias." }),
-    fetchOptional("/intelligence/opportunities", { assets: [] }),
+    fetchOptional(`/intelligence/opportunities${symbols ? `?symbols=${encodeURIComponent(symbols)}` : ""}`, { assets: [], cheap_candidates: [] }),
     fetchOptional("/intelligence/dividends", { estimated_yield_pct: 0, estimated_annual_dividend: 0, official_source: "https://investor.tsmc.com/english/latest-dividend" }),
   ]);
 
@@ -63,11 +65,23 @@ async function loadDashboard() {
     <p><strong>${news.path}</strong></p>
     <p>Noticias: ${news.news_score} / Score: ${news.combined_score}</p>
     <p>${news.summary}</p>
+    ${(news.news || []).slice(0, 3).map((item) => `<p><strong>${item.sentiment}</strong>: ${item.title}</p>`).join("")}
   `;
   document.getElementById("opportunities").innerHTML = opportunities.assets
     .slice(0, 4)
-    .map((item) => `<p><strong>${item.asset_type}</strong> ${item.symbol}: ${item.action} (${item.score})</p>`)
+    .map((item) => `<p><strong>${item.symbol}</strong>: ${item.action} (${item.score})<br><span>${item.return_30d_pct}% 30d / ${item.drawdown_pct}% desde max.</span></p>`)
     .join("") || "<p>No se pudieron cargar oportunidades.</p>";
+  document.getElementById("cheap-opportunities").innerHTML = opportunities.cheap_candidates
+    .slice(0, 5)
+    .map((item) => `
+      <p>
+        <strong>${item.symbol}</strong>: ${item.cheap_action} (${item.cheap_rebound_score})<br>
+        Comprar: ${item.buy_zone}<br>
+        Vender: ${item.sell_zone}<br>
+        <span>${(item.why || []).slice(0, 2).join(" ")}</span>
+      </p>
+    `)
+    .join("") || "<p>No hay candidata barata clara. Mejor esperar.</p>";
   document.getElementById("dividends").innerHTML = `
     <p>Yield estimado: <strong>${dividends.estimated_yield_pct}%</strong></p>
     <p>Dividendo anual estimado: ${money(dividends.estimated_annual_dividend)}</p>
@@ -84,6 +98,8 @@ async function loadDashboard() {
 
 document.getElementById("refresh").addEventListener("click", loadDashboard);
 document.getElementById("enable-notifications").addEventListener("click", requestBrowserNotifications);
+document.getElementById("portfolio-form").addEventListener("submit", addPortfolioItem);
+document.getElementById("watchlist-form").addEventListener("submit", addWatchlistItem);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
   document.getElementById("web-alert").className = "web-alert error";
@@ -148,6 +164,85 @@ function setLoadingState() {
   document.getElementById("signal").textContent = "Cargando...";
   document.getElementById("web-alert").className = "web-alert muted";
   document.getElementById("web-alert").textContent = "Actualizando datos...";
+}
+
+function readJsonStore(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStore(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function portfolioItems() {
+  return readJsonStore("myactions_portfolio", [{ symbol: "TSM", shares: 0, average: 0 }]);
+}
+
+function watchlistItems() {
+  return readJsonStore("myactions_watchlist", ["NVDA", "AMD", "ASML", "QQQ"]);
+}
+
+function combinedSymbols() {
+  const symbols = new Set(["TSM"]);
+  portfolioItems().forEach((item) => symbols.add(item.symbol));
+  watchlistItems().forEach((symbol) => symbols.add(symbol));
+  return Array.from(symbols).filter(Boolean).join(",");
+}
+
+function addPortfolioItem(event) {
+  event.preventDefault();
+  const symbol = document.getElementById("portfolio-symbol").value.trim().toUpperCase();
+  if (!symbol) return;
+  const shares = Number(document.getElementById("portfolio-shares").value || 0);
+  const average = Number(document.getElementById("portfolio-average").value || 0);
+  const items = portfolioItems().filter((item) => item.symbol !== symbol);
+  items.push({ symbol, shares, average });
+  writeJsonStore("myactions_portfolio", items);
+  event.target.reset();
+  loadDashboard();
+}
+
+function addWatchlistItem(event) {
+  event.preventDefault();
+  const symbol = document.getElementById("watchlist-symbol").value.trim().toUpperCase();
+  if (!symbol) return;
+  const items = Array.from(new Set([...watchlistItems(), symbol]));
+  writeJsonStore("myactions_watchlist", items);
+  event.target.reset();
+  loadDashboard();
+}
+
+function removePortfolioItem(symbol) {
+  writeJsonStore("myactions_portfolio", portfolioItems().filter((item) => item.symbol !== symbol));
+  loadDashboard();
+}
+
+function removeWatchlistItem(symbol) {
+  writeJsonStore("myactions_watchlist", watchlistItems().filter((item) => item !== symbol));
+  loadDashboard();
+}
+
+function renderPortfolioState() {
+  document.getElementById("portfolio-list").innerHTML = portfolioItems()
+    .map((item) => `
+      <div class="pill-row">
+        <span><strong>${item.symbol}</strong> ${item.shares || 0} acc. @ ${money(item.average || 0)}</span>
+        <button type="button" onclick="removePortfolioItem('${item.symbol}')">Quitar</button>
+      </div>
+    `)
+    .join("");
+  document.getElementById("watchlist-list").innerHTML = watchlistItems()
+    .map((symbol) => `
+      <div class="pill-row">
+        <span><strong>${symbol}</strong></span>
+        <button type="button" onclick="removeWatchlistItem('${symbol}')">Quitar</button>
+      </div>
+    `)
+    .join("");
 }
 
 function isMarketWindow() {

@@ -195,8 +195,9 @@ def intelligence_news(ticker: str = Query(settings.default_ticker)) -> dict[str,
 
 
 @router.get("/intelligence/opportunities")
-def intelligence_opportunities() -> dict[str, Any]:
-    return MarketIntelligenceService().opportunities()
+def intelligence_opportunities(symbols: str | None = Query(default=None)) -> dict[str, Any]:
+    parsed_symbols = [item.strip().upper() for item in symbols.split(",")] if symbols else None
+    return MarketIntelligenceService().opportunities(parsed_symbols)
 
 
 @router.get("/intelligence/dividends")

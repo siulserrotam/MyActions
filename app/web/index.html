@@ -30,6 +30,26 @@
         <div id="chart" class="chart">
           <div class="chart-fallback" id="chart-fallback">Cargando datos de mercado...</div>
         </div>
+        <section class="portfolio-band">
+          <article>
+            <h2>Mi Portafolio</h2>
+            <form class="inline-form" id="portfolio-form">
+              <input id="portfolio-symbol" placeholder="TSM" autocomplete="off" />
+              <input id="portfolio-shares" placeholder="Acciones" type="number" step="0.0001" min="0" />
+              <input id="portfolio-average" placeholder="Precio compra" type="number" step="0.01" min="0" />
+              <button type="submit">Agregar</button>
+            </form>
+            <div id="portfolio-list"></div>
+          </article>
+          <article>
+            <h2>Favoritas / Deseos</h2>
+            <form class="inline-form" id="watchlist-form">
+              <input id="watchlist-symbol" placeholder="NVDA, AMD, QQQ..." autocomplete="off" />
+              <button type="submit">Agregar</button>
+            </form>
+            <div id="watchlist-list"></div>
+          </article>
+        </section>
         <section class="grid">
           <article>
             <h2>Explicacion</h2>
@@ -58,6 +78,10 @@
           <article>
             <h2>Oportunidades</h2>
             <div id="opportunities">Cargando...</div>
+          </article>
+          <article>
+            <h2>Baratas Con Potencial</h2>
+            <div id="cheap-opportunities">Cargando...</div>
           </article>
           <article>
             <h2>Dividendos</h2>

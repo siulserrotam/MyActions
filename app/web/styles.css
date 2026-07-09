@@ -200,12 +200,48 @@ a {
   gap: 18px;
 }
 
+.portfolio-band {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
 article {
   background: white;
   border: 1px solid #dce3ea;
   border-radius: 8px;
   padding: 18px;
   min-height: 190px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.inline-form input {
+  min-height: 38px;
+  border: 1px solid #c9d3df;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.pill-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #edf1f5;
+  padding: 8px 0;
+}
+
+.pill-row button {
+  min-height: 30px;
+  padding: 4px 8px;
 }
 
 ul {
@@ -224,6 +260,14 @@ p {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-band {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-form {
     grid-template-columns: 1fr;
   }
 }
