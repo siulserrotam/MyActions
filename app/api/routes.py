@@ -26,6 +26,7 @@ from app.services.model_registry import ModelRegistry
 from app.services.training import TrainingService
 from app.services.trading_signal import TradingSignalService
 from app.services.trading_plan import TradingPlanService
+from app.services.orb import OrbService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -210,3 +211,33 @@ def intelligence_dividends(ticker: str = Query(settings.default_ticker)) -> dict
 def active_trading_plan(ticker: str = Query(settings.default_ticker)) -> dict[str, Any]:
     ticker = validate_ticker(ticker)
     return TradingPlanService().build(ticker)
+
+
+@router.get("/orb/session")
+def orb_session(ticker: str = Query("NVDA")) -> dict[str, Any]:
+    try:
+        return OrbService().intraday_session(ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/orb/calculate")
+def orb_calculate(
+    ticker: str = Query("NVDA"),
+    opening_high: float = Query(..., gt=0),
+    opening_low: float = Query(..., gt=0),
+    entry_price: float = Query(..., gt=0),
+    wins_today: int = Query(0, ge=0, le=2),
+    losses_today: int = Query(0, ge=0, le=1),
+) -> dict[str, Any]:
+    try:
+        return OrbService().calculate(
+            ticker=ticker,
+            opening_high=opening_high,
+            opening_low=opening_low,
+            entry_price=entry_price,
+            wins_today=wins_today,
+            losses_today=losses_today,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

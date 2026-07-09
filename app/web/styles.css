@@ -173,6 +173,11 @@ a {
   color: #9f1d1d;
 }
 
+.danger-text {
+  color: #9f1d1d;
+  font-weight: 800;
+}
+
 .chart {
   min-height: 440px;
   background: white;
@@ -205,6 +210,55 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.orb-panel {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.orb-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.orb-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.orb-form input,
+.orb-form select {
+  min-height: 38px;
+  border: 1px solid #c9d3df;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.orb-result {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.orb-result table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.orb-result th,
+.orb-result td {
+  border-bottom: 1px solid #edf1f5;
+  padding: 8px;
+  text-align: left;
+}
+
+.rules p {
+  margin: 0 0 10px;
 }
 
 article {
@@ -267,7 +321,15 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .orb-panel {
+    grid-template-columns: 1fr;
+  }
+
   .inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .orb-form {
     grid-template-columns: 1fr;
   }
 }

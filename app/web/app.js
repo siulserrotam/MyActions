@@ -21,16 +21,19 @@ async function loadDashboard() {
   setLoadingState();
   renderPortfolioState();
   const symbols = combinedSymbols();
+  const orbTicker = document.getElementById("orb-ticker").value;
   const prediction = await fetchJson("/predict");
-  const [history, backtesting, alertEvaluation, intraday, activePlan, news, opportunities, dividends] = await Promise.all([
+  const [history, backtesting, alertEvaluation, intraday, activePlan, news, orbNews, opportunities, dividends, orbSession] = await Promise.all([
     fetchOptional("/history?limit=66", { data: [] }),
     fetchOptional("/backtesting", { strategies: [] }),
     fetchOptional("/alerts/evaluate", { should_alert: false }),
     fetchOptional("/alerts/intraday", { should_alert: false, direction: "SIN DATOS", change_pct: 0, trend: "SIN DATOS", open_price: 0, current_price: 0, projected_close_pct: 0 }),
     fetchOptional("/plan/active-trading", { decision: "Sin plan", buy_zone: "-", sell_zone: "-", reentry_zone: "-", holding_rule: "-", explanation: [] }),
     fetchOptional("/intelligence/news", { path: "Sin datos de noticias", news_score: 0, combined_score: 0, summary: "No se pudieron cargar noticias." }),
+    fetchOptional(`/intelligence/news?ticker=${encodeURIComponent(orbTicker)}`, { path: "Sin noticias", news: [], summary: "Sin noticias ORB disponibles." }),
     fetchOptional(`/intelligence/opportunities${symbols ? `?symbols=${encodeURIComponent(symbols)}` : ""}`, { assets: [], cheap_candidates: [] }),
     fetchOptional("/intelligence/dividends", { estimated_yield_pct: 0, estimated_annual_dividend: 0, official_source: "https://investor.tsmc.com/english/latest-dividend" }),
+    fetchOptional(`/orb/session?ticker=${encodeURIComponent(orbTicker)}`, { bars: [], opening_range: null }),
   ]);
 
   document.getElementById("signal").textContent = prediction.senal;
@@ -67,6 +70,10 @@ async function loadDashboard() {
     <p>${news.summary}</p>
     ${(news.news || []).slice(0, 3).map((item) => `<p><strong>${item.sentiment}</strong>: ${item.title}</p>`).join("")}
   `;
+  document.getElementById("orb-news").innerHTML = `
+    <p><strong>${orbTicker}</strong>: ${orbNews.summary}</p>
+    ${(orbNews.news || []).slice(0, 4).map((item) => `<p><strong>${item.sentiment}</strong>: ${item.title}</p>`).join("") || "<p>No hay titulares claros ahora.</p>"}
+  `;
   document.getElementById("opportunities").innerHTML = opportunities.assets
     .slice(0, 4)
     .map((item) => `<p><strong>${item.symbol}</strong>: ${item.action} (${item.score})<br><span>${item.return_30d_pct}% 30d / ${item.drawdown_pct}% desde max.</span></p>`)
@@ -89,10 +96,13 @@ async function loadDashboard() {
   `;
   renderWebAlert(alertEvaluation, intraday);
 
-  if (history.data.length) {
-    renderChart(history.data);
+  if (orbSession.bars.length) {
+    renderOrbChart(orbSession);
+    hydrateOpeningRange(orbSession);
+  } else if (history.data.length) {
+    renderLineChart(history.data);
   } else {
-    document.getElementById("chart").innerHTML = '<div class="chart-fallback">No se pudieron cargar los datos del grafico.</div>';
+    document.getElementById("orb-chart").innerHTML = '<div class="chart-fallback">No se pudieron cargar los datos del grafico.</div>';
   }
 }
 
@@ -100,6 +110,9 @@ document.getElementById("refresh").addEventListener("click", loadDashboard);
 document.getElementById("enable-notifications").addEventListener("click", requestBrowserNotifications);
 document.getElementById("portfolio-form").addEventListener("submit", addPortfolioItem);
 document.getElementById("watchlist-form").addEventListener("submit", addWatchlistItem);
+document.getElementById("orb-form").addEventListener("submit", calculateOrb);
+document.getElementById("load-orb-session").addEventListener("click", loadDashboard);
+document.getElementById("orb-ticker").addEventListener("change", loadDashboard);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
   document.getElementById("web-alert").className = "web-alert error";
@@ -274,9 +287,112 @@ function scheduleAutoRefresh() {
   }, refreshIntervalMs());
 }
 
-function renderChart(rows) {
+async function calculateOrb(event) {
+  event.preventDefault();
+  const params = new URLSearchParams({
+    ticker: document.getElementById("orb-ticker").value,
+    opening_high: document.getElementById("orb-high").value,
+    opening_low: document.getElementById("orb-low").value,
+    entry_price: document.getElementById("orb-entry").value,
+    wins_today: document.getElementById("orb-wins").value || "0",
+    losses_today: document.getElementById("orb-losses").value || "0",
+  });
+  const result = await fetchOptional(`/orb/calculate?${params.toString()}`, { error: "No se pudo calcular ORB." });
+  renderOrbResult(result);
+}
+
+function renderOrbResult(result) {
+  const box = document.getElementById("orb-result");
+  if (result.error || result.detail) {
+    box.innerHTML = `<p class="danger-text">${result.error || result.detail}</p>`;
+    return;
+  }
+  if (!result.allowed && result.direction === "SIN ROMPIMIENTO") {
+    box.innerHTML = `<p class="danger-text">${result.reason}</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <table>
+      <tr><th>Campo</th><th>Resultado</th></tr>
+      <tr><td>Direccion</td><td><strong>${result.direction}</strong></td></tr>
+      <tr><td>Stop Loss</td><td>${money(result.stop_loss)}</td></tr>
+      <tr><td>Take Profit</td><td>${money(result.take_profit)}</td></tr>
+      <tr><td>Acciones exactas</td><td>${result.exact_shares}</td></tr>
+      <tr><td>Acciones enteras</td><td>${result.whole_shares}</td></tr>
+      <tr><td>Poder de compra</td><td>${money(result.buying_power_used)} / ${money(result.buying_power_limit)}</td></tr>
+      <tr><td>Perdida esperada</td><td>${money(result.expected_loss)}</td></tr>
+      <tr><td>Ganancia esperada</td><td>${money(result.expected_profit)}</td></tr>
+      <tr><td>Estado diario</td><td>${result.daily_control.message}</td></tr>
+    </table>
+    <p><strong>${result.status}</strong></p>
+  `;
+}
+
+function hydrateOpeningRange(session) {
+  if (!session.opening_range) return;
+  const high = document.getElementById("orb-high");
+  const low = document.getElementById("orb-low");
+  if (!high.value) high.value = session.opening_range.high;
+  if (!low.value) low.value = session.opening_range.low;
+}
+
+function renderOrbChart(session) {
+  const rows = session.bars;
   if (!rows.length) return;
-  const chart = document.getElementById("chart");
+  const chart = document.getElementById("orb-chart");
+  chart.innerHTML = "";
+  const width = Math.max(chart.clientWidth, 320);
+  const height = 460;
+  const padding = { top: 30, right: 24, bottom: 42, left: 58 };
+  const lows = rows.map((row) => Number(row.low));
+  const highs = rows.map((row) => Number(row.high));
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const span = max - min || 1;
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const candleWidth = Math.max(3, plotWidth / rows.length * 0.55);
+  const y = (price) => padding.top + (1 - (price - min) / span) * plotHeight;
+  const x = (index) => padding.left + (index / Math.max(rows.length - 1, 1)) * plotWidth;
+  const candles = rows.map((row, index) => {
+    const cx = x(index);
+    const open = Number(row.open);
+    const close = Number(row.close);
+    const high = Number(row.high);
+    const low = Number(row.low);
+    const color = close >= open ? "#178a4c" : "#c62828";
+    const bodyTop = Math.min(y(open), y(close));
+    const bodyHeight = Math.max(Math.abs(y(open) - y(close)), 2);
+    return `
+      <line x1="${cx}" y1="${y(high)}" x2="${cx}" y2="${y(low)}" stroke="${color}" stroke-width="1.3"></line>
+      <rect x="${cx - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${color}" opacity="0.85"></rect>
+    `;
+  }).join("");
+  const range = session.opening_range;
+  const rangeLines = range ? `
+    <line x1="${padding.left}" y1="${y(range.high)}" x2="${width - padding.right}" y2="${y(range.high)}" stroke="#1f5eff" stroke-width="1.5" stroke-dasharray="6 4"></line>
+    <line x1="${padding.left}" y1="${y(range.low)}" x2="${width - padding.right}" y2="${y(range.low)}" stroke="#7a3cff" stroke-width="1.5" stroke-dasharray="6 4"></line>
+    <text x="${padding.left}" y="${y(range.high) - 6}" fill="#1f5eff" font-size="12">ORB High ${range.high}</text>
+    <text x="${padding.left}" y="${y(range.low) + 16}" fill="#7a3cff" font-size="12">ORB Low ${range.low}</text>
+  ` : "";
+
+  chart.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Grafico ORB 5 minutos">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="white"></rect>
+      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
+      <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
+      ${rangeLines}
+      ${candles}
+      <text x="${padding.left}" y="20" fill="#596878" font-size="13">${session.ticker} ORB 5m intradia</text>
+      <text x="${padding.left}" y="${height - 12}" fill="#596878" font-size="12">${rows[0].time}</text>
+      <text x="${width - padding.right - 170}" y="${height - 12}" fill="#596878" font-size="12">${rows[rows.length - 1].time}</text>
+    </svg>
+  `;
+}
+
+function renderLineChart(rows) {
+  if (!rows.length) return;
+  const chart = document.getElementById("orb-chart");
   chart.innerHTML = "";
 
   const width = Math.max(chart.clientWidth, 320);

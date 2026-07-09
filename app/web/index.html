@@ -9,14 +9,13 @@
   <body>
     <main class="shell">
       <aside class="sidebar">
-        <h1>TSM Intelligence</h1>
+        <h1>ORB Day Trading</h1>
         <div class="status" id="signal">Cargando...</div>
         <dl>
-          <div><dt>Precio</dt><dd id="price">-</dd></div>
-          <div><dt>Confianza</dt><dd id="confidence">-</dd></div>
-          <div><dt>Riesgo</dt><dd id="risk">-</dd></div>
+          <div><dt>Cuenta</dt><dd>$2,500</dd></div>
+          <div><dt>Riesgo</dt><dd>$20</dd></div>
+          <div><dt>Objetivo</dt><dd>$40</dd></div>
           <div><dt>Auto refresh</dt><dd id="refresh-status">-</dd></div>
-          <div><dt>Modelo</dt><dd id="model">-</dd></div>
         </dl>
       </aside>
       <section class="workspace">
@@ -27,8 +26,50 @@
           <a href="/logout">Salir</a>
         </div>
         <div class="web-alert" id="web-alert">Evaluando alertas...</div>
-        <div id="chart" class="chart">
-          <div class="chart-fallback" id="chart-fallback">Cargando datos de mercado...</div>
+        <section class="orb-panel">
+          <article>
+            <h2>Opening Range Breakout 5m</h2>
+            <form class="orb-form" id="orb-form">
+              <label>Ticker
+                <select id="orb-ticker">
+                  <option>NVDA</option>
+                  <option>AMD</option>
+                  <option>AAPL</option>
+                  <option>SPY</option>
+                </select>
+              </label>
+              <label>Max 9:30-9:35
+                <input id="orb-high" type="number" step="0.0001" min="0" required />
+              </label>
+              <label>Min 9:30-9:35
+                <input id="orb-low" type="number" step="0.0001" min="0" required />
+              </label>
+              <label>Entrada ruptura
+                <input id="orb-entry" type="number" step="0.0001" min="0" required />
+              </label>
+              <label>Ganadoras hoy
+                <input id="orb-wins" type="number" min="0" max="2" value="0" />
+              </label>
+              <label>Perdedoras hoy
+                <input id="orb-losses" type="number" min="0" max="1" value="0" />
+              </label>
+              <button type="submit">Calcular ORB</button>
+              <button type="button" id="load-orb-session">Cargar vela 5m</button>
+            </form>
+            <div id="orb-result" class="orb-result">Ingresa la primera vela de 5 minutos y el precio de ruptura.</div>
+          </article>
+          <article>
+            <h2>Reglas Del Dia</h2>
+            <div class="rules">
+              <p><strong>Operacion 1:</strong> si pierde, se cierra el dia.</p>
+              <p><strong>Maximo:</strong> 2 operaciones ganadoras.</p>
+              <p><strong>Riesgo/beneficio:</strong> $20 para buscar $40.</p>
+              <p><strong>Poder compra:</strong> no superar $10,000.</p>
+            </div>
+          </article>
+        </section>
+        <div id="orb-chart" class="chart">
+          <div class="chart-fallback" id="chart-fallback">Cargando grafico ORB 5m...</div>
         </div>
         <section class="portfolio-band">
           <article>
@@ -51,6 +92,10 @@
           </article>
         </section>
         <section class="grid">
+          <article>
+            <h2>Noticias ORB</h2>
+            <div id="orb-news">Cargando...</div>
+          </article>
           <article>
             <h2>Explicacion</h2>
             <ul id="explanation"></ul>
@@ -90,6 +135,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=mobile-alerts-2"></script>
+    <script src="/dashboard/app.js?v=orb-v1"></script>
   </body>
 </html>
