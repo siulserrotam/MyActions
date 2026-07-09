@@ -189,6 +189,7 @@ Endpoints:
 GET /intelligence/news
 GET /intelligence/opportunities
 GET /intelligence/dividends
+GET /plan/active-trading
 ```
 
 La inteligencia de mercado combina:
@@ -198,6 +199,7 @@ La inteligencia de mercado combina:
 - ranking cuantitativo de acciones, ETFs, divisas ETF y cripto
 - dividendos historicos recientes via yfinance
 - enlace oficial de dividendos de TSMC
+- plan de trading activo para comprar barato, vender por objetivo y recomprar
 
 Fuentes de referencia:
 

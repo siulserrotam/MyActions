@@ -20,11 +20,12 @@ function money(value) {
 async function loadDashboard() {
   setLoadingState();
   const prediction = await fetchJson("/predict");
-  const [history, backtesting, alertEvaluation, intraday, news, opportunities, dividends] = await Promise.all([
-    fetchOptional("/history?limit=260", { data: [] }),
+  const [history, backtesting, alertEvaluation, intraday, activePlan, news, opportunities, dividends] = await Promise.all([
+    fetchOptional("/history?limit=66", { data: [] }),
     fetchOptional("/backtesting", { strategies: [] }),
     fetchOptional("/alerts/evaluate", { should_alert: false }),
     fetchOptional("/alerts/intraday", { should_alert: false, direction: "SIN DATOS", change_pct: 0, trend: "SIN DATOS", open_price: 0, current_price: 0, projected_close_pct: 0 }),
+    fetchOptional("/plan/active-trading", { decision: "Sin plan", buy_zone: "-", sell_zone: "-", reentry_zone: "-", holding_rule: "-", explanation: [] }),
     fetchOptional("/intelligence/news", { path: "Sin datos de noticias", news_score: 0, combined_score: 0, summary: "No se pudieron cargar noticias." }),
     fetchOptional("/intelligence/opportunities", { assets: [] }),
     fetchOptional("/intelligence/dividends", { estimated_yield_pct: 0, estimated_annual_dividend: 0, official_source: "https://investor.tsmc.com/english/latest-dividend" }),
@@ -35,9 +36,17 @@ async function loadDashboard() {
   document.getElementById("confidence").textContent = `${prediction.confianza}%`;
   document.getElementById("risk").textContent = prediction.riesgo;
   document.getElementById("model").textContent = prediction.modelo;
+  document.getElementById("refresh-status").textContent = refreshLabel();
   document.getElementById("explanation").innerHTML = prediction.explicacion
     .map((item) => `<li>${item}</li>`)
     .join("");
+  document.getElementById("active-plan").innerHTML = `
+    <p><strong>${activePlan.decision}</strong></p>
+    <p><strong>Comprar barato:</strong> ${activePlan.buy_zone}</p>
+    <p><strong>Vender:</strong> ${activePlan.sell_zone}</p>
+    <p><strong>Recomprar:</strong> ${activePlan.reentry_zone}</p>
+    <p><strong>Regla:</strong> ${activePlan.holding_rule}</p>
+  `;
   document.getElementById("risk-plan").textContent =
     `Objetivo ${money(prediction.precio_objetivo)}, stop ${money(prediction.stop_loss)}, ` +
     `take profit ${money(prediction.take_profit)}, relacion ${prediction.riesgo_beneficio}.`;
@@ -141,6 +150,35 @@ function setLoadingState() {
   document.getElementById("web-alert").textContent = "Actualizando datos...";
 }
 
+function isMarketWindow() {
+  const now = new Date();
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
+  const bogotaHour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Bogota",
+      hour: "2-digit",
+      hour12: false,
+    }).format(now)
+  );
+  return bogotaHour >= 8 && bogotaHour < 16;
+}
+
+function refreshIntervalMs() {
+  return isMarketWindow() ? 15 * 60 * 1000 : 60 * 60 * 1000;
+}
+
+function refreshLabel() {
+  return isMarketWindow() ? "15 min" : "1 hora";
+}
+
+function scheduleAutoRefresh() {
+  window.setTimeout(async () => {
+    await loadDashboard();
+    scheduleAutoRefresh();
+  }, refreshIntervalMs());
+}
+
 function renderChart(rows) {
   if (!rows.length) return;
   const chart = document.getElementById("chart");
@@ -170,10 +208,12 @@ function renderChart(rows) {
       <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
       <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
       <polyline points="${points.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2.5"></polyline>
-      <text x="${padding.left}" y="20" fill="#596878" font-size="13">TSM 260 sesiones</text>
+      <text x="${padding.left}" y="20" fill="#596878" font-size="13">TSM ultimos 3 meses</text>
       <text x="${padding.left}" y="${height - 10}" fill="#596878" font-size="12">${rows[0].date}</text>
       <text x="${width - padding.right - 86}" y="${height - 10}" fill="#596878" font-size="12">${rows[rows.length - 1].date}</text>
       <text x="${width - padding.right - 90}" y="24" fill="${stroke}" font-size="14" font-weight="700">${money(last)}</text>
     </svg>
   `;
 }
+
+scheduleAutoRefresh();

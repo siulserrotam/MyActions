@@ -25,6 +25,7 @@ from app.services.market_intelligence import MarketIntelligenceService
 from app.services.model_registry import ModelRegistry
 from app.services.training import TrainingService
 from app.services.trading_signal import TradingSignalService
+from app.services.trading_plan import TradingPlanService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -202,3 +203,9 @@ def intelligence_opportunities() -> dict[str, Any]:
 def intelligence_dividends(ticker: str = Query(settings.default_ticker)) -> dict[str, Any]:
     ticker = validate_ticker(ticker)
     return MarketIntelligenceService().dividends(ticker)
+
+
+@router.get("/plan/active-trading")
+def active_trading_plan(ticker: str = Query(settings.default_ticker)) -> dict[str, Any]:
+    ticker = validate_ticker(ticker)
+    return TradingPlanService().build(ticker)
