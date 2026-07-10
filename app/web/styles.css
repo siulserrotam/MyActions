@@ -205,6 +205,90 @@ a {
   gap: 18px;
 }
 
+.top-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.decision-card h3 {
+  margin: 0 0 10px;
+  font-size: 26px;
+}
+
+.kicker {
+  margin: 0 0 6px;
+  color: #596878;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.metric-row span,
+.compact-result {
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.muted-text {
+  color: #596878;
+}
+
+.daily-form {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.daily-form input,
+.daily-form select {
+  min-height: 38px;
+  border: 1px solid #c9d3df;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 10px;
+  border-top: 1px solid #edf1f5;
+  padding: 10px 0;
+}
+
+.candidate-row button {
+  width: 64px;
+  align-self: start;
+}
+
+.candidate-row p {
+  margin: 4px 0;
+}
+
+.candidate-row small {
+  color: #596878;
+}
+
+.compact-grid article {
+  min-height: 250px;
+}
+
 .portfolio-band {
   margin-top: 18px;
   display: grid;
@@ -314,6 +398,14 @@ p {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .top-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-row {
     grid-template-columns: 1fr;
   }
 

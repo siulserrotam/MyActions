@@ -27,6 +27,7 @@ from app.services.training import TrainingService
 from app.services.trading_signal import TradingSignalService
 from app.services.trading_plan import TradingPlanService
 from app.services.orb import OrbService
+from app.services.orb_dashboard import OrbDashboardService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -219,6 +220,11 @@ def orb_session(ticker: str = Query("NVDA")) -> dict[str, Any]:
         return OrbService().intraday_session(ticker)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/orb/dashboard")
+def orb_dashboard(ticker: str = Query("NVDA")) -> dict[str, Any]:
+    return OrbDashboardService().build(ticker)
 
 
 @router.get("/orb/calculate")
