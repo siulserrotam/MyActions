@@ -18,7 +18,7 @@ class OrbAccountRules:
 
 
 class OrbService:
-    allowed_tickers = {"NVDA", "AMD", "AAPL", "SPY"}
+    allowed_tickers = {"NVDA", "AMD", "AAPL", "SPY", "TSM"}
 
     def calculate(
         self,
@@ -28,12 +28,13 @@ class OrbService:
         entry_price: float,
         wins_today: int = 0,
         losses_today: int = 0,
+        account_capital: float | None = None,
     ) -> dict[str, object]:
         ticker = ticker.upper().strip()
         if ticker not in self.allowed_tickers:
-            raise ValueError("Ticker ORB soportado: NVDA, AMD, AAPL o SPY.")
+            raise ValueError("Ticker ORB soportado: NVDA, AMD, AAPL, SPY o TSM.")
 
-        rules = OrbAccountRules()
+        rules = self._rules(account_capital)
         high = self._money(opening_high)
         low = self._money(opening_low)
         entry = self._money(entry_price)
@@ -93,6 +94,12 @@ class OrbService:
             "risk_amount": self._fmt(rules.risk_amount),
             "reward_amount": self._fmt(rules.reward_amount),
             "risk_reward": "1:2",
+            "broker": "XTB",
+            "instrument_type": "CFD",
+            "short_strategy": (
+                "Para ganar cuando cae, la entrada debe romper por debajo del minimo ORB. "
+                "En CFD esto se ejecuta como venta/corto, con stop en el maximo ORB y take profit 1:2."
+            ),
             "daily_control": control,
             "status": self._status(buying_power_used, rules.buying_power),
             "instructions": [
@@ -106,7 +113,7 @@ class OrbService:
     def intraday_session(self, ticker: str) -> dict[str, object]:
         ticker = ticker.upper().strip()
         if ticker not in self.allowed_tickers:
-            raise ValueError("Ticker ORB soportado: NVDA, AMD, AAPL o SPY.")
+            raise ValueError("Ticker ORB soportado: NVDA, AMD, AAPL, SPY o TSM.")
         frame = self._download_intraday(ticker)
         rows = []
         for index, row in frame.tail(90).iterrows():
@@ -144,6 +151,17 @@ class OrbService:
             raise ValueError("No hay datos intradia 5m disponibles.")
         raw.columns = [str(col[0] if isinstance(col, tuple) else col).lower().replace(" ", "_") for col in raw.columns]
         return raw.dropna(subset=["open", "high", "low", "close"])
+
+    def _rules(self, account_capital: float | None) -> OrbAccountRules:
+        if not account_capital or account_capital <= 0:
+            return OrbAccountRules()
+        capital = Decimal(str(account_capital)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return OrbAccountRules(
+            capital=capital,
+            risk_amount=(capital * Decimal("0.008")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            reward_amount=(capital * Decimal("0.016")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            buying_power=(capital * Decimal("4")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        )
 
     def _direction(self, entry: Decimal, high: Decimal, low: Decimal) -> str:
         if entry > high:

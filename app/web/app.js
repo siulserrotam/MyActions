@@ -1,14 +1,14 @@
 const DAILY_KEY = "myactions_daily_records";
 
-async function fetchJson(path) {
-  const response = await fetch(path);
+async function fetchJson(path, init) {
+  const response = await fetch(path, init);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
 
-async function fetchOptional(path, fallback) {
+async function fetchOptional(path, fallback, init) {
   try {
-    return await fetchJson(path);
+    return await fetchJson(path, init);
   } catch (error) {
     console.warn(`No se pudo cargar ${path}`, error);
     return fallback;
@@ -24,10 +24,32 @@ function todayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
 }
 
+function updateLocalClock() {
+  const now = new Date();
+  document.getElementById("ny-clock").textContent = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(now);
+}
+
+function renderClock(clock) {
+  updateLocalClock();
+  const status = document.getElementById("market-status");
+  if (!clock) {
+    status.textContent = isMarketWindow() ? "ABIERTO" : "CERRADO";
+    return;
+  }
+  status.textContent = clock.status || "-";
+}
+
 async function loadDashboard() {
   setLoadingState();
   renderPortfolioState();
   renderDailySummary();
+  updateLocalClock();
 
   const ticker = document.getElementById("orb-ticker").value;
   const fallback = {
@@ -38,9 +60,16 @@ async function loadDashboard() {
     candidates: [],
     session: { ticker, bars: [], opening_range: null },
     rules: { capital: 2500, risk_amount: 20, reward_amount: 40, buying_power: 10000, risk_reward: "1:2" },
+    capital: null,
+    broker: { name: "XTB", instrument_type: "CFD" },
   };
-  const data = await fetchOptional(`/orb/dashboard?ticker=${encodeURIComponent(ticker)}`, fallback);
+  const [data, clock] = await Promise.all([
+    fetchOptional(`/orb/dashboard?ticker=${encodeURIComponent(ticker)}`, fallback),
+    fetchOptional("/market/clock", null),
+  ]);
 
+  renderClock(clock);
+  renderServerCapital(data.capital);
   renderHeader(data);
   renderDecision(data);
   renderCandidates(data.candidates || []);
@@ -90,7 +119,8 @@ function renderRules(rules) {
     <p><strong>Maximo:</strong> ${rules.max_wins || 2} operaciones ganadoras.</p>
     <p><strong>Base:</strong> arriesgar ${money(rules.risk_amount)} para buscar ${money(rules.reward_amount)}.</p>
     <p><strong>Poder compra:</strong> no superar ${money(rules.buying_power)}.</p>
-    <p class="muted-text">Usa esto como control educativo; valida en tu broker antes de ejecutar.</p>
+    <p><strong>CFD XTB:</strong> largo gana si sube; corto/venta gana si cae.</p>
+    <p class="muted-text">Regla calculada con ${rules.source === "capital_guardado" ? "tu capital guardado" : "parametros base"}. Valida spread, swap y margen en XTB antes de ejecutar.</p>
   `;
 }
 
@@ -140,6 +170,8 @@ async function calculateOrb(event) {
     wins_today: document.getElementById("orb-wins").value || "0",
     losses_today: document.getElementById("orb-losses").value || "0",
   });
+  const record = currentDailyRecord();
+  if (record && record.balance) params.set("account_capital", record.balance);
   const result = await fetchOptional(`/orb/calculate?${params.toString()}`, { error: "No se pudo calcular ORB." });
   renderOrbResult(result);
 }
@@ -158,6 +190,7 @@ function renderOrbResult(result) {
     <table>
       <tr><th>Campo</th><th>Resultado</th></tr>
       <tr><td>Direccion</td><td><strong>${result.direction}</strong></td></tr>
+      <tr><td>Estrategia CFD</td><td>${result.direction === "CORTO / VENTA" ? "Venta en corto: gana si el precio cae; stop arriba." : "Compra/largo: gana si el precio sube; stop abajo."}</td></tr>
       <tr><td>Entrada</td><td>${money(result.entry_price)}</td></tr>
       <tr><td>Stop Loss</td><td>${money(result.stop_loss)}</td></tr>
       <tr><td>Take Profit</td><td>${money(result.take_profit)}</td></tr>
@@ -241,19 +274,44 @@ function dailyRecords() {
   return readJsonStore(DAILY_KEY, {});
 }
 
-function saveDailyRecord(event) {
+function currentDailyRecord() {
+  return dailyRecords()[todayKey()] || null;
+}
+
+async function saveDailyRecord(event) {
   event.preventDefault();
   const balance = Number(document.getElementById("daily-balance").value || 0);
   const target = Number(document.getElementById("daily-target").value || 0);
   const targetType = document.getElementById("daily-target-type").value;
+  const payload = {
+    trade_date: todayKey(),
+    balance,
+    target_value: target,
+    target_type: targetType,
+    notes: "Guardado desde dashboard MyActions XTB CFD",
+  };
+  const saved = await fetchOptional("/capital/daily", null, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   const records = dailyRecords();
-  records[todayKey()] = { balance, target, targetType, savedAt: new Date().toISOString() };
+  records[todayKey()] = saved
+    ? {
+        balance: saved.balance,
+        target: saved.target_value,
+        targetType: saved.target_type,
+        savedAt: saved.updated_at,
+        source: "database",
+      }
+    : { balance, target, targetType, savedAt: new Date().toISOString(), source: "local" };
   writeJsonStore(DAILY_KEY, records);
   renderDailySummary();
+  loadDashboard();
 }
 
 function renderDailySummary() {
-  const record = dailyRecords()[todayKey()];
+  const record = currentDailyRecord();
   const box = document.getElementById("daily-summary");
   if (!record) {
     box.innerHTML = isAfterClose()
@@ -270,7 +328,22 @@ function renderDailySummary() {
   box.innerHTML = `
     <p><strong>Saldo:</strong> ${money(record.balance)} | <strong>Meta:</strong> ${money(targetProfit)} (${targetPct.toFixed(2)}%).</p>
     <p><strong>Perdida maxima automatica:</strong> ${money(maxLoss)}. Si se alcanza, cerrar el dia.</p>
+    <p class="muted-text">Fuente: ${record.source === "database" ? "base de datos" : "local del navegador"}.</p>
   `;
+}
+
+function renderServerCapital(capital) {
+  if (!capital) return;
+  const records = dailyRecords();
+  records[capital.trade_date] = {
+    balance: capital.balance,
+    target: capital.target_value,
+    targetType: capital.target_type,
+    savedAt: capital.updated_at,
+    source: "database",
+  };
+  writeJsonStore(DAILY_KEY, records);
+  if (capital.trade_date === todayKey()) renderDailySummary();
 }
 
 function isAfterClose() {
@@ -284,7 +357,7 @@ function portfolioItems() {
 }
 
 function watchlistItems() {
-  return readJsonStore("myactions_watchlist", ["NVDA", "AMD", "AAPL", "SPY"]);
+  return readJsonStore("myactions_watchlist", ["NVDA", "AMD", "AAPL", "SPY", "TSM"]);
 }
 
 function addPortfolioItem(event) {
@@ -343,10 +416,10 @@ function isMarketWindow() {
   const now = new Date();
   const day = now.getDay();
   if (day === 0 || day === 6) return false;
-  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Bogota", hour: "2-digit", hour12: false }).format(now));
-  const minute = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Bogota", minute: "2-digit" }).format(now));
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }).format(now));
+  const minute = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", minute: "2-digit" }).format(now));
   const total = hour * 60 + minute;
-  return total >= 8 * 60 + 30 && total <= 15 * 60;
+  return total >= 9 * 60 + 30 && total < 16 * 60;
 }
 
 function refreshIntervalMs() {
@@ -427,6 +500,7 @@ document.getElementById("orb-form").addEventListener("submit", calculateOrb);
 document.getElementById("load-orb-session").addEventListener("click", loadDashboard);
 document.getElementById("orb-ticker").addEventListener("change", loadDashboard);
 
+setInterval(updateLocalClock, 1000);
 loadDashboard().catch((error) => {
   document.getElementById("signal").textContent = "Error";
   document.getElementById("web-alert").className = "web-alert error";

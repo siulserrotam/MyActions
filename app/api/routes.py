@@ -1,11 +1,15 @@
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.auth import create_dashboard_session, verify_dashboard_credentials
 from app.core.security import require_api_key
+from app.db.session import get_session
 from app.schemas.responses import (
     BacktestResponse,
     ForecastResponse,
@@ -28,9 +32,19 @@ from app.services.trading_signal import TradingSignalService
 from app.services.trading_plan import TradingPlanService
 from app.services.orb import OrbService
 from app.services.orb_dashboard import OrbDashboardService
+from app.services.capital import CapitalService
+from app.services.market_clock import MarketClockService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
+
+
+class DailyCapitalRequest(BaseModel):
+    trade_date: date
+    balance: float = Field(gt=0)
+    target_value: float = Field(ge=0)
+    target_type: str = "money"
+    notes: str = ""
 
 
 def validate_ticker(ticker: str) -> str:
@@ -223,8 +237,12 @@ def orb_session(ticker: str = Query("NVDA")) -> dict[str, Any]:
 
 
 @router.get("/orb/dashboard")
-def orb_dashboard(ticker: str = Query("NVDA")) -> dict[str, Any]:
-    return OrbDashboardService().build(ticker)
+def orb_dashboard(ticker: str = Query("NVDA"), session: Session = Depends(get_session)) -> dict[str, Any]:
+    try:
+        capital = CapitalService().latest(session)
+    except Exception:
+        capital = None
+    return OrbDashboardService().build(ticker, capital=capital)
 
 
 @router.get("/orb/calculate")
@@ -235,6 +253,7 @@ def orb_calculate(
     entry_price: float = Query(..., gt=0),
     wins_today: int = Query(0, ge=0, le=2),
     losses_today: int = Query(0, ge=0, le=1),
+    account_capital: float | None = Query(default=None, gt=0),
 ) -> dict[str, Any]:
     try:
         return OrbService().calculate(
@@ -244,6 +263,51 @@ def orb_calculate(
             entry_price=entry_price,
             wins_today=wins_today,
             losses_today=losses_today,
+            account_capital=account_capital,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/market/clock")
+def market_clock() -> dict[str, object]:
+    return MarketClockService().snapshot()
+
+
+@router.get("/capital/daily")
+def daily_capital(
+    limit: int = Query(30, ge=1, le=120),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    service = CapitalService()
+    try:
+        return {
+            "latest": service.latest(session),
+            "history": service.history(session, limit=limit),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Base de datos no disponible: {exc}",
+        ) from exc
+
+
+@router.post("/capital/daily")
+def save_daily_capital(
+    payload: DailyCapitalRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return CapitalService().save(
+            session=session,
+            trade_date=payload.trade_date,
+            balance=payload.balance,
+            target_value=payload.target_value,
+            target_type=payload.target_type,
+            notes=payload.notes,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Base de datos no disponible: {exc}",
+        ) from exc

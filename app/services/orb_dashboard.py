@@ -6,18 +6,19 @@ from app.services.orb import OrbAccountRules, OrbService
 
 
 class OrbDashboardService:
-    tickers = ("NVDA", "AMD", "AAPL", "SPY")
+    tickers = ("NVDA", "AMD", "AAPL", "SPY", "TSM")
 
     def __init__(self) -> None:
         self.orb = OrbService()
         self.intelligence = MarketIntelligenceService()
 
-    def build(self, selected_ticker: str = "NVDA") -> dict[str, Any]:
+    def build(self, selected_ticker: str = "NVDA", capital: dict[str, Any] | None = None) -> dict[str, Any]:
         selected = selected_ticker.upper().strip()
         if selected not in self.tickers:
             selected = "NVDA"
 
-        candidates = [self._candidate(ticker, include_news=False) for ticker in self.tickers]
+        capital_value = float(capital["balance"]) if capital and capital.get("balance") else None
+        candidates = [self._candidate(ticker, include_news=False, account_capital=capital_value) for ticker in self.tickers]
         candidates = sorted(candidates, key=lambda item: item["score"], reverse=True)
         best = candidates[0] if candidates else None
         selected_candidate = next((item for item in candidates if item["ticker"] == selected), best)
@@ -27,7 +28,7 @@ class OrbDashboardService:
         candidates = sorted(candidates, key=lambda item: item["score"], reverse=True)
         best = candidates[0] if candidates else None
         selected_candidate = next((item for item in candidates if item["ticker"] == selected), best)
-        rules = OrbAccountRules()
+        rules = self.orb._rules(capital_value)
 
         return {
             "generated_at": datetime.now(UTC).isoformat(),
@@ -41,6 +42,13 @@ class OrbDashboardService:
                 "max_wins": rules.max_wins,
                 "max_losses": rules.max_losses,
                 "risk_reward": "1:2",
+                "source": "capital_guardado" if capital_value else "parametros_base",
+            },
+            "capital": capital,
+            "broker": {
+                "name": "XTB",
+                "instrument_type": "CFD",
+                "note": "CFD permite operar largo o corto. Confirma spreads, swap, margen y disponibilidad del simbolo en XTB antes de entrar.",
             },
             "recommendation": best,
             "selected": selected_candidate,
@@ -49,7 +57,12 @@ class OrbDashboardService:
             "disclaimer": "Apoyo educativo para controlar riesgo. No es asesoria financiera ni garantia de resultado.",
         }
 
-    def _candidate(self, ticker: str, include_news: bool = True) -> dict[str, Any]:
+    def _candidate(
+        self,
+        ticker: str,
+        include_news: bool = True,
+        account_capital: float | None = None,
+    ) -> dict[str, Any]:
         base: dict[str, Any] = {
             "ticker": ticker,
             "score": -999.0,
@@ -80,7 +93,7 @@ class OrbDashboardService:
             news_score = sum(int(item.get("score", 0)) for item in news_items[:6])
             direction, action = self._direction(price, high, low, news_score)
             suggested_entry = self._entry(direction, high, low, price)
-            plan = self._plan(ticker, high, low, suggested_entry)
+            plan = self._plan(ticker, high, low, suggested_entry, account_capital)
             quality = self._range_quality(range_pct)
             momentum = abs(change_from_open_pct) * 3
             breakout_bonus = 18 if price > high or price < low else 0
@@ -152,9 +165,22 @@ class OrbDashboardService:
             return min(price, low - tick)
         return max(price, high + tick)
 
-    def _plan(self, ticker: str, high: float, low: float, entry: float) -> dict[str, Any]:
+    def _plan(
+        self,
+        ticker: str,
+        high: float,
+        low: float,
+        entry: float,
+        account_capital: float | None,
+    ) -> dict[str, Any]:
         try:
-            return self.orb.calculate(ticker=ticker, opening_high=high, opening_low=low, entry_price=entry)
+            return self.orb.calculate(
+                ticker=ticker,
+                opening_high=high,
+                opening_low=low,
+                entry_price=entry,
+                account_capital=account_capital,
+            )
         except Exception as exc:
             return {"allowed": False, "status": str(exc)}
 

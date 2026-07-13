@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -33,3 +33,18 @@ class PredictionLog(Base):
     risk_level: Mapped[str] = mapped_column(String(32))
     model_name: Mapped[str] = mapped_column(String(128))
     explanation: Mapped[str] = mapped_column(Text)
+
+
+class DailyCapital(Base):
+    __tablename__ = "daily_capital"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_date: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    balance: Mapped[float] = mapped_column(Float)
+    target_value: Mapped[float] = mapped_column(Float)
+    target_type: Mapped[str] = mapped_column(String(16), default="money")
+    broker: Mapped[str] = mapped_column(String(32), default="XTB")
+    instrument_type: Mapped[str] = mapped_column(String(32), default="CFD")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, index=True)

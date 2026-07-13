@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -7,6 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
 from app.core.auth import is_dashboard_authenticated
 from app.core.config import settings
+from app.db import models  # noqa: F401
+from app.db.session import Base, engine
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -15,6 +20,14 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Explainable trading intelligence API for TSM.",
     )
+
+    @app.on_event("startup")
+    def create_runtime_tables() -> None:
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as exc:
+            logger.warning("No se pudieron crear/verificar tablas de base de datos: %s", exc)
+
     @app.middleware("http")
     async def protect_dashboard(request: Request, call_next):
         public_dashboard_assets = {"/dashboard/styles.css", "/dashboard/app.js"}
