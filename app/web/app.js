@@ -1,551 +1,283 @@
-const DAILY_KEY = "myactions_daily_records";
-const DEFAULT_CAPITAL = 560;
-const DEFAULT_TARGET_RATE = 0.016;
+const assetGroups = {
+  favorites: [
+    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1 },
+    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1 },
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1 },
+    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100 },
+    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1 },
+  ],
+  forex: [
+    { symbol: "EURUSD", name: "Euro / US Dollar", category: "forex", multiplier: 100000 },
+    { symbol: "GBPUSD", name: "British Pound / US Dollar", category: "forex", multiplier: 100000 },
+    { symbol: "USDJPY", name: "US Dollar / Yen", category: "forex", multiplier: 100000 },
+  ],
+  indices: [
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1 },
+    { symbol: "US500", name: "S&P 500 CFD", category: "indices", multiplier: 1 },
+    { symbol: "DE40", name: "DAX 40 CFD", category: "indices", multiplier: 1 },
+  ],
+  commodities: [
+    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100 },
+    { symbol: "OIL", name: "Oil CFD", category: "commodities", multiplier: 1000 },
+    { symbol: "NATGAS", name: "Natural Gas CFD", category: "commodities", multiplier: 10000 },
+  ],
+  crypto: [
+    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1 },
+    { symbol: "ETHUSD", name: "Ethereum CFD", category: "crypto", multiplier: 1 },
+  ],
+  stocks: [
+    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1 },
+    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1 },
+    { symbol: "AMD.US", name: "AMD CFD", category: "stocks", multiplier: 1 },
+    { symbol: "AAPL.US", name: "Apple CFD", category: "stocks", multiplier: 1 },
+    { symbol: "SPY.US", name: "SPY ETF CFD", category: "stocks", multiplier: 1 },
+  ],
+};
 
-async function fetchJson(path, init) {
-  const response = await fetch(path, init);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
+const categoryLabels = {
+  favorites: "Favoritos",
+  forex: "Divisas / Forex",
+  indices: "Indices",
+  commodities: "Materias Primas",
+  crypto: "Criptomonedas",
+  stocks: "Acciones / ETFs CFD",
+};
 
-async function fetchOptional(path, fallback, init) {
-  try {
-    return await fetchJson(path, init);
-  } catch (error) {
-    console.warn(`No se pudo cargar ${path}`, error);
-    return fallback;
-  }
-}
+let activeCategory = "favorites";
+let selectedAsset = assetGroups.favorites[0];
+let lastResult = null;
 
 function money(value) {
-  if (value === undefined || value === null || Number.isNaN(Number(value))) return "-";
   return Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-function todayKey() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+function numberText(value) {
+  return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
-function updateLocalClock() {
+function allAssets() {
+  return Object.values(assetGroups).flat();
+}
+
+function uniqueAssets() {
+  const seen = new Set();
+  return allAssets().filter((asset) => {
+    if (seen.has(asset.symbol)) return false;
+    seen.add(asset.symbol);
+    return true;
+  });
+}
+
+function findAsset(symbol) {
+  return uniqueAssets().find((asset) => asset.symbol === symbol.toUpperCase()) || {
+    symbol: symbol.toUpperCase(),
+    name: `${symbol.toUpperCase()} CFD`,
+    category: symbol.toUpperCase().endsWith(".US") ? "stocks" : "indices",
+    multiplier: 1,
+  };
+}
+
+function updateGoldenWindow() {
   const now = new Date();
-  document.getElementById("ny-clock").textContent = new Intl.DateTimeFormat("es-CO", {
-    timeZone: "America/New_York",
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).format(now);
-}
-
-function renderClock(clock) {
-  updateLocalClock();
-  const status = document.getElementById("market-status");
-  if (!clock) {
-    status.textContent = isMarketWindow() ? "ABIERTO" : "CERRADO";
-    return;
-  }
-  status.textContent = clock.status || "-";
-}
-
-async function loadDashboard() {
-  setLoadingState();
-  seedDefaultCapital();
-  renderPortfolioState();
-  renderDailySummary();
-  updateLocalClock();
-
-  const ticker = document.getElementById("orb-ticker").value;
-  const capital = currentDailyRecord();
-  const dashboardParams = new URLSearchParams({ ticker });
-  if (capital && capital.balance) dashboardParams.set("account_capital", capital.balance);
-  const fallback = {
-    selected_ticker: ticker,
-    best_ticker: ticker,
-    selected: { ticker, status: "SIN DATOS", action: "ESPERAR", reason: "No se pudieron cargar datos.", news: [] },
-    recommendation: { ticker, status: "SIN DATOS", action: "ESPERAR", reason: "No se pudieron cargar datos.", news: [] },
-    candidates: [],
-    session: { ticker, bars: [], opening_range: null },
-    rules: { capital: DEFAULT_CAPITAL, risk_amount: 4.48, reward_amount: 8.96, buying_power: 2240, risk_reward: "1:2" },
-    capital: null,
-    broker: { name: "XTB", instrument_type: "CFD" },
-  };
-  const [data, clock] = await Promise.all([
-    fetchOptional(`/orb/dashboard?${dashboardParams.toString()}`, fallback),
-    fetchOptional("/market/clock", null),
-  ]);
-
-  renderClock(clock);
-  renderServerCapital(data.capital);
-  renderHeader(data);
-  renderDecision(data);
-  renderCandidates(data.candidates || []);
-  renderNews(data.recommendation || data.selected || {});
-  renderRules(data.rules || fallback.rules);
-  renderXtbHelper(data.rules || fallback.rules);
-  renderWebAlert(data.recommendation || data.selected || {});
-
-  const session = data.session || {};
-  if ((session.bars || []).length) {
-    renderOrbChart(session);
-    hydrateOpeningRange(session);
-    hydrateSuggestedEntry(data.selected || data.recommendation || {});
-  } else {
-    document.getElementById("orb-chart").innerHTML =
-      '<div class="chart-fallback">No hay datos intradia 5m disponibles ahora. Reintenta cuando el mercado haya abierto.</div>';
-  }
-}
-
-function renderHeader(data) {
-  const candidate = data.recommendation || data.selected || {};
-  document.getElementById("signal").textContent = candidate.status || "ESPERAR";
-  document.getElementById("best-ticker").textContent = data.best_ticker || candidate.ticker || "-";
-  document.getElementById("side-entry").textContent = money(candidate.suggested_entry);
-  document.getElementById("side-sell").textContent = money(candidate.suggested_sell);
-  document.getElementById("refresh-status").textContent = refreshLabel();
-}
-
-function renderDecision(data) {
-  const best = data.recommendation || {};
-  const selected = data.selected || best;
-  document.getElementById("daily-decision").innerHTML = `
-    <p class="kicker">Mejor candidata ahora</p>
-    <h3>${best.ticker || "-"} - ${best.action || "ESPERAR"}</h3>
-    <p>${best.reason || "Sin lectura suficiente."}</p>
-    <div class="metric-row">
-      <span>Entrada: <strong>${money(best.suggested_entry)}</strong></span>
-      <span>Stop: <strong>${money(best.suggested_stop)}</strong></span>
-      <span>Venta: <strong>${money(best.suggested_sell)}</strong></span>
-    </div>
-    <p class="muted-text">Seleccion actual: ${selected.ticker || "-"} (${selected.status || "SIN DATOS"}). No entrar si no hay ruptura limpia y volumen.</p>
-    <p class="muted-text">Con capital ${money((data.rules || {}).capital)}, la app busca riesgo pequeno: perder aprox. ${money((data.rules || {}).risk_amount)} para intentar ganar ${money((data.rules || {}).reward_amount)}.</p>
-  `;
-}
-
-function renderRules(rules) {
-  document.getElementById("rules-box").innerHTML = `
-    <p><strong>Operacion 1:</strong> si pierde, se cierra el dia.</p>
-    <p><strong>Maximo:</strong> ${rules.max_wins || 2} operaciones ganadoras.</p>
-    <p><strong>Base:</strong> arriesgar ${money(rules.risk_amount)} para buscar ${money(rules.reward_amount)}.</p>
-    <p><strong>Poder compra:</strong> no superar ${money(rules.buying_power)}.</p>
-    <p><strong>CFD XTB:</strong> largo gana si sube; corto/venta gana si cae.</p>
-    <p class="muted-text">Regla calculada con ${rules.source === "capital_guardado" ? "tu capital guardado" : "parametros base"}. Valida spread, swap y margen en XTB antes de ejecutar.</p>
-  `;
-}
-
-function renderXtbHelper(rules) {
-  const risk = Number(rules.risk_amount || DEFAULT_CAPITAL * 0.008);
-  const reward = Number(rules.reward_amount || DEFAULT_CAPITAL * 0.016);
-  const capital = Number(rules.capital || DEFAULT_CAPITAL);
-  document.getElementById("xtb-helper").innerHTML = `
-    <div class="metric-row">
-      <span>Capital actual <strong>${money(capital)}</strong></span>
-      <span>Perdida maxima por trade <strong>${money(risk)}</strong></span>
-      <span>Ganancia objetivo por trade <strong>${money(reward)}</strong></span>
-    </div>
-    <ol class="simple-steps">
-      <li>Si ya tienes un <strong>Sell Limit</strong>, ese volumen queda bloqueado.</li>
-      <li>Para proteger una compra, usa <strong>Stop Loss</strong> o <strong>Sell Stop</strong> por el volumen libre.</li>
-      <li>Para tomar ganancia, usa <strong>Take Profit</strong> o <strong>Sell Limit</strong>.</li>
-      <li>No pongas Take Profit + Stop Loss por mas volumen del que tienes disponible.</li>
-    </ol>
-    <p class="muted-text">Ejemplo: si tienes 1.3311 acciones y bloqueas 0.65 en Take Profit, solo quedan libres 0.6811 para otra orden.</p>
-  `;
-}
-
-function renderCandidates(candidates) {
-  document.getElementById("candidates").innerHTML = candidates
-    .map((item) => `
-      <div class="candidate-row">
-        <button type="button" onclick="selectTicker('${item.ticker}')">${item.ticker}</button>
-        <div>
-          <strong>${item.action || "ESPERAR"}</strong>
-          <p>${item.reason || "Sin razon disponible."}</p>
-          <small>Precio ${money(item.price)} | Entrada ${money(item.suggested_entry)} | Venta ${money(item.suggested_sell)} | Score ${item.score}</small>
-        </div>
-      </div>
-    `)
-    .join("") || "<p>No hay candidatas disponibles ahora.</p>";
-}
-
-function renderNews(candidate) {
-  const items = candidate.news || [];
-  document.getElementById("news-impact").innerHTML = `
-    <p><strong>${candidate.ticker || "-"}</strong>: score noticias ${candidate.news_score || 0}.</p>
-    ${items.map((item) => `<p><strong>${item.sentiment || "NEUTRAL"}</strong>: ${item.title || ""}</p>`).join("") || "<p>No hay titulares claros ahora.</p>"}
-  `;
-}
-
-function renderWebAlert(candidate) {
-  const alertBox = document.getElementById("web-alert");
-  const text = `${candidate.ticker || "ORB"}: ${candidate.action || "ESPERAR"}. Entrada ${money(candidate.suggested_entry)}, venta ${money(candidate.suggested_sell)}, stop ${money(candidate.suggested_stop)}.`;
-  if ((candidate.status || "").includes("RUPTURA")) {
-    alertBox.className = "web-alert active";
-    alertBox.textContent = text;
-    maybeNotify("MyActions ORB", text);
-    return;
-  }
-  alertBox.className = "web-alert muted";
-  alertBox.textContent = text;
-}
-
-async function calculateOrb(event) {
-  event.preventDefault();
-  const params = new URLSearchParams({
-    ticker: document.getElementById("orb-ticker").value,
-    opening_high: document.getElementById("orb-high").value,
-    opening_low: document.getElementById("orb-low").value,
-    entry_price: document.getElementById("orb-entry").value,
-    wins_today: document.getElementById("orb-wins").value || "0",
-    losses_today: document.getElementById("orb-losses").value || "0",
   });
-  const record = currentDailyRecord();
-  if (record && record.balance) params.set("account_capital", record.balance);
-  const result = await fetchOptional(`/orb/calculate?${params.toString()}`, { error: "No se pudo calcular ORB." });
-  renderOrbResult(result);
-}
+  const parts = formatter.formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  const second = Number(parts.second);
+  const total = hour * 60 + minute + second / 60;
+  document.getElementById("co-clock").textContent = `${parts.hour}:${parts.minute}:${parts.second}`;
 
-function renderOrbResult(result) {
-  const box = document.getElementById("orb-result");
-  if (result.error || result.detail) {
-    box.innerHTML = `<p class="danger-text">${result.error || result.detail}</p>`;
-    return;
-  }
-  if (!result.allowed && result.direction === "SIN ROMPIMIENTO") {
-    box.innerHTML = `<p class="danger-text">${result.reason}</p>`;
-    return;
-  }
-  box.innerHTML = `
-    <table>
-      <tr><th>Campo</th><th>Resultado</th></tr>
-      <tr><td>Direccion</td><td><strong>${result.direction}</strong></td></tr>
-      <tr><td>Estrategia CFD</td><td>${result.direction === "CORTO / VENTA" ? "Venta en corto: gana si el precio cae; stop arriba." : "Compra/largo: gana si el precio sube; stop abajo."}</td></tr>
-      <tr><td>Entrada</td><td>${money(result.entry_price)}</td></tr>
-      <tr><td>Stop Loss</td><td>${money(result.stop_loss)}</td></tr>
-      <tr><td>Take Profit</td><td>${money(result.take_profit)}</td></tr>
-      <tr><td>Acciones exactas</td><td>${result.exact_shares}</td></tr>
-      <tr><td>Poder de compra</td><td>${money(result.buying_power_used)} / ${money(result.buying_power_limit)}</td></tr>
-      <tr><td>Perdida esperada</td><td>${money(result.expected_loss)}</td></tr>
-      <tr><td>Ganancia esperada</td><td>${money(result.expected_profit)}</td></tr>
-      <tr><td>Estado diario</td><td>${result.daily_control.message}</td></tr>
-    </table>
-    <p><strong>${result.status}</strong></p>
-  `;
-}
-
-function hydrateOpeningRange(session) {
-  if (!session.opening_range) return;
-  document.getElementById("orb-high").value = session.opening_range.high;
-  document.getElementById("orb-low").value = session.opening_range.low;
-}
-
-function hydrateSuggestedEntry(candidate) {
-  if (candidate.suggested_entry) {
-    document.getElementById("orb-entry").value = candidate.suggested_entry;
-  }
-}
-
-function selectTicker(ticker) {
-  document.getElementById("orb-ticker").value = ticker;
-  loadDashboard();
-}
-
-async function requestBrowserNotifications() {
-  const alertBox = document.getElementById("web-alert");
-  if (!("Notification" in window)) {
-    alertBox.className = "web-alert muted";
-    alertBox.textContent = "Este navegador no soporta notificaciones. Las alertas quedan visibles dentro de la web.";
-    return;
-  }
-  if (Notification.permission === "denied") {
-    alertBox.className = "web-alert error";
-    alertBox.textContent =
-      "Permiso bloqueado. En Chrome movil abre candado del sitio > Permisos > Notificaciones > Permitir.";
-    return;
-  }
-  const permission = await Notification.requestPermission();
-  if (permission === "granted") {
-    alertBox.className = "web-alert active";
-    alertBox.textContent = "Alertas web activadas en este navegador.";
+  const widget = document.getElementById("golden-window");
+  widget.className = "mt-4 rounded-xl border p-3 text-sm font-bold transition-all";
+  if (total >= 9 * 60 && total < 9 * 60 + 30) {
+    widget.classList.add("border-gold/50", "bg-gold/10", "text-gold");
+    widget.textContent = "Esperando apertura del mercado...";
+  } else if (total >= 9 * 60 + 30 && total < 9 * 60 + 35) {
+    widget.classList.add("blink", "border-orange-400/60", "bg-orange-500/10", "text-orange-300");
+    widget.textContent = "Esperando cierre del Rango de 5 Minutos (ORB)...";
+  } else if (total >= 9 * 60 + 35 && total < 9 * 60 + 45) {
+    widget.classList.add("border-bull/70", "bg-bull/15", "text-bull", "shadow-lg", "shadow-bull/20");
+    widget.textContent = "VENTANA DE ORO: Toma la decision del dia y programa tus ordenes ahora.";
   } else {
-    alertBox.className = "web-alert muted";
-    alertBox.textContent = "Permiso no concedido. Las alertas seguiran visibles dentro del dashboard.";
+    widget.classList.add("border-white/10", "bg-panel2", "text-zinc-400");
+    widget.textContent = "Fuera de la ventana operativa principal.";
   }
 }
 
-function maybeNotify(title, body) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const key = `${title}:${body}`;
-  if (sessionStorage.getItem("lastNotification") === key) return;
-  sessionStorage.setItem("lastNotification", key);
-  new Notification(title, { body });
+function renderTabs() {
+  document.querySelectorAll(".tab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.category === activeCategory);
+    button.addEventListener("click", () => {
+      activeCategory = button.dataset.category;
+      selectedAsset = assetGroups[activeCategory][0];
+      document.getElementById("symbol").value = selectedAsset.symbol;
+      renderTabs();
+      renderAssets();
+      calculate();
+    }, { once: true });
+  });
 }
 
-function setLoadingState() {
-  document.getElementById("signal").textContent = "Cargando...";
-  document.getElementById("web-alert").className = "web-alert muted";
-  document.getElementById("web-alert").textContent = "Actualizando ORB, noticias y candidatos...";
+function renderAssets() {
+  document.getElementById("category-copy").textContent =
+    `${categoryLabels[activeCategory]}: multiplicadores aplicados automaticamente.`;
+  document.getElementById("asset-grid").innerHTML = assetGroups[activeCategory].map((asset) => `
+    <button type="button" class="asset-card ${asset.symbol === selectedAsset.symbol ? "selected" : ""}" data-symbol="${asset.symbol}">
+      <span class="text-base font-black">${asset.symbol}</span>
+      <span class="text-xs text-zinc-400">${asset.name}</span>
+      <span class="mt-2 text-xs font-bold text-zinc-500">Multiplicador x${numberText(asset.multiplier)}</span>
+    </button>
+  `).join("");
+  document.querySelectorAll(".asset-card").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedAsset = findAsset(button.dataset.symbol);
+      document.getElementById("symbol").value = selectedAsset.symbol;
+      renderAssets();
+      calculate();
+    });
+  });
 }
 
-function readJsonStore(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonStore(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function dailyRecords() {
-  return readJsonStore(DAILY_KEY, {});
-}
-
-function currentDailyRecord() {
-  return dailyRecords()[todayKey()] || null;
-}
-
-function seedDefaultCapital() {
-  const records = dailyRecords();
-  if (records[todayKey()]) return;
-  records[todayKey()] = {
-    balance: DEFAULT_CAPITAL,
-    target: Number((DEFAULT_CAPITAL * DEFAULT_TARGET_RATE).toFixed(2)),
-    targetType: "money",
-    savedAt: new Date().toISOString(),
-    source: "local",
-  };
-  writeJsonStore(DAILY_KEY, records);
-}
-
-async function saveDailyRecord(event) {
-  event.preventDefault();
-  const balance = Number(document.getElementById("daily-balance").value || 0);
-  const target = Number(document.getElementById("daily-target").value || 0);
-  const targetType = document.getElementById("daily-target-type").value;
+async function calculate() {
+  const symbol = document.getElementById("symbol").value.trim().toUpperCase();
+  selectedAsset = findAsset(symbol);
   const payload = {
-    trade_date: todayKey(),
-    balance,
-    target_value: target,
-    target_type: targetType,
-    notes: "Guardado desde dashboard MyActions XTB CFD",
+    symbol,
+    direction: document.getElementById("direction").value,
+    account_balance: Number(document.getElementById("account-balance").value || 0),
+    risk_pct: Number(document.getElementById("risk-pct").value || 0),
+    entry_price: Number(document.getElementById("entry-price").value || 0),
+    stop_price: Number(document.getElementById("stop-price").value || 0),
+    take_profit_price: Number(document.getElementById("take-profit-price").value || 0) || null,
   };
-  const saved = await fetchOptional("/capital/daily", null, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const records = dailyRecords();
-  records[todayKey()] = saved
-    ? {
-        balance: saved.balance,
-        target: saved.target_value,
-        targetType: saved.target_type,
-        savedAt: saved.updated_at,
-        source: "database",
-      }
-    : { balance, target, targetType, savedAt: new Date().toISOString(), source: "local" };
-  writeJsonStore(DAILY_KEY, records);
-  renderDailySummary();
-  loadDashboard();
-}
-
-function renderDailySummary() {
-  const record = currentDailyRecord();
-  const box = document.getElementById("daily-summary");
-  if (!record) {
-    box.innerHTML = isAfterClose()
-      ? '<strong>Falta guardar el saldo de cierre de hoy.</strong>'
-      : "Registra tu saldo y meta para que la perdida limite salga automatica.";
-    return;
+  document.getElementById("risk-usd-pill").textContent = money(payload.account_balance * payload.risk_pct / 100);
+  try {
+    const response = await fetch("/engine/calculate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    lastResult = await response.json();
+  } catch (error) {
+    console.warn("Usando calculo local", error);
+    lastResult = localCalculate(payload);
   }
-  document.getElementById("daily-balance").value = record.balance || "";
-  document.getElementById("daily-target").value = record.target || "";
-  document.getElementById("daily-target-type").value = record.targetType || "money";
-  const targetProfit = record.targetType === "percent" ? record.balance * (record.target / 100) : record.target;
-  const maxLoss = targetProfit / 2;
-  const targetPct = record.balance ? (targetProfit / record.balance) * 100 : 0;
-  box.innerHTML = `
-    <p><strong>Saldo:</strong> ${money(record.balance)} | <strong>Meta:</strong> ${money(targetProfit)} (${targetPct.toFixed(2)}%).</p>
-    <p><strong>Perdida maxima automatica:</strong> ${money(maxLoss)}. Si se alcanza, cerrar el dia.</p>
-    <p class="muted-text">Fuente: ${record.source === "database" ? "base de datos" : "local del navegador"}.</p>
-  `;
+  renderWarnings();
+  renderTicket();
+  renderMath();
 }
 
-function renderServerCapital(capital) {
-  if (!capital) return;
-  const records = dailyRecords();
-  records[capital.trade_date] = {
-    balance: capital.balance,
-    target: capital.target_value,
-    targetType: capital.target_type,
-    savedAt: capital.updated_at,
-    source: "database",
+function localCalculate(payload) {
+  const asset = findAsset(payload.symbol);
+  const distance = Math.abs(payload.entry_price - payload.stop_price);
+  const riskAmount = payload.account_balance * payload.risk_pct / 100;
+  const rawVolume = riskAmount / (distance * asset.multiplier);
+  const volume = asset.category === "stocks" ? Number(rawVolume.toFixed(4)) : Number(rawVolume.toFixed(3));
+  const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
+  const takeProfit = payload.take_profit_price ||
+    (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
+  return {
+    asset,
+    direction: payload.direction,
+    order_type: orderType,
+    simple_order_explanation: payload.direction === "LONG" ? "Compra si rompe hacia arriba." : "Vende si rompe hacia abajo.",
+    entry_price: payload.entry_price,
+    stop_loss: payload.stop_price,
+    take_profit: takeProfit,
+    account_balance: payload.account_balance,
+    risk_pct: payload.risk_pct,
+    risk_amount: Number(riskAmount.toFixed(2)),
+    multiplier: asset.multiplier,
+    raw_volume: rawVolume,
+    volume,
+    expected_loss: Number((distance * asset.multiplier * volume).toFixed(2)),
+    expected_profit: Number((Math.abs(takeProfit - payload.entry_price) * asset.multiplier * volume).toFixed(2)),
+    risk_reward: "1:2",
+    warnings: buildWarnings(asset, payload.direction),
   };
-  writeJsonStore(DAILY_KEY, records);
-  if (capital.trade_date === todayKey()) renderDailySummary();
 }
 
-function isAfterClose() {
-  const now = new Date();
-  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Bogota", hour: "2-digit", hour12: false }).format(now));
-  return hour >= 16;
+function buildWarnings(asset, direction) {
+  const warnings = [];
+  if (direction === "SHORT") {
+    warnings.push({ level: "danger", message: `ATENCION: Esta es una operacion bajista. Abre la pestana ${asset.symbol} [CFD] en XTB. NUNCA uses la pestana de Acciones Reales.` });
+  }
+  if (asset.category === "forex" || asset.category === "crypto") {
+    warnings.push({ level: "info", message: "APALANCAMIENTO ALTO: Verifica el spread en XTB antes de activar." });
+  }
+  return warnings;
 }
 
-function portfolioItems() {
-  return readJsonStore("myactions_portfolio", []);
+function renderWarnings() {
+  const box = document.getElementById("warnings");
+  const warnings = lastResult?.warnings || [];
+  box.innerHTML = warnings.map((warning) => `
+    <div class="rounded-2xl border p-4 text-sm font-black ${warning.level === "danger" ? "border-bear/70 bg-bear/15 text-bear" : "border-sky-400/60 bg-sky-500/10 text-sky-300"}">
+      ${warning.message}
+    </div>
+  `).join("");
 }
 
-function watchlistItems() {
-  return readJsonStore("myactions_watchlist", ["NVDA", "AMD", "AAPL", "SPY", "TSM"]);
-}
-
-function addPortfolioItem(event) {
-  event.preventDefault();
-  const symbol = document.getElementById("portfolio-symbol").value.trim().toUpperCase();
-  if (!symbol) return;
-  const shares = Number(document.getElementById("portfolio-shares").value || 0);
-  const average = Number(document.getElementById("portfolio-average").value || 0);
-  const items = portfolioItems().filter((item) => item.symbol !== symbol);
-  items.push({ symbol, shares, average });
-  writeJsonStore("myactions_portfolio", items);
-  event.target.reset();
-  renderPortfolioState();
-}
-
-function addWatchlistItem(event) {
-  event.preventDefault();
-  const symbol = document.getElementById("watchlist-symbol").value.trim().toUpperCase();
-  if (!symbol) return;
-  const items = Array.from(new Set([...watchlistItems(), symbol]));
-  writeJsonStore("myactions_watchlist", items);
-  event.target.reset();
-  renderPortfolioState();
-}
-
-function removePortfolioItem(symbol) {
-  writeJsonStore("myactions_portfolio", portfolioItems().filter((item) => item.symbol !== symbol));
-  renderPortfolioState();
-}
-
-function removeWatchlistItem(symbol) {
-  writeJsonStore("myactions_watchlist", watchlistItems().filter((item) => item !== symbol));
-  renderPortfolioState();
-}
-
-function renderPortfolioState() {
-  document.getElementById("portfolio-list").innerHTML = portfolioItems()
-    .map((item) => `
-      <div class="pill-row">
-        <span><strong>${item.symbol}</strong> ${item.shares || 0} acc. @ ${money(item.average || 0)}</span>
-        <button type="button" onclick="removePortfolioItem('${item.symbol}')">Quitar</button>
+function renderTicket() {
+  const rows = [
+    ["Activo", lastResult.asset.symbol],
+    ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`],
+    ["Precio de Entrada", numberText(lastResult.entry_price)],
+    ["Stop Loss (Escudo)", numberText(lastResult.stop_loss)],
+    ["Take Profit (Meta)", numberText(lastResult.take_profit)],
+    ["Volumen a colocar", numberText(lastResult.volume)],
+  ];
+  document.getElementById("ticket").innerHTML = rows.map(([label, value]) => `
+    <div class="copy-row">
+      <div>
+        <p class="text-xs font-bold uppercase text-zinc-500">${label}</p>
+        <p class="mt-1 text-lg font-black text-white">${value}</p>
       </div>
-    `)
-    .join("");
-  document.getElementById("watchlist-list").innerHTML = watchlistItems()
-    .map((symbol) => `
-      <div class="pill-row">
-        <span><strong>${symbol}</strong></span>
-        <button type="button" onclick="removeWatchlistItem('${symbol}')">Quitar</button>
-      </div>
-    `)
-    .join("");
+      <button type="button" class="copy-btn" data-copy="${String(value).replace(/"/g, "&quot;")}">Copiar</button>
+    </div>
+  `).join("");
+  document.querySelectorAll(".copy-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(button.dataset.copy);
+      button.textContent = "Copiado";
+      setTimeout(() => button.textContent = "Copiar", 900);
+    });
+  });
 }
 
-function isMarketWindow() {
-  const now = new Date();
-  const day = now.getDay();
-  if (day === 0 || day === 6) return false;
-  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }).format(now));
-  const minute = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", minute: "2-digit" }).format(now));
-  const total = hour * 60 + minute;
-  return total >= 9 * 60 + 30 && total < 16 * 60;
-}
-
-function refreshIntervalMs() {
-  return isMarketWindow() ? 5 * 60 * 1000 : 60 * 60 * 1000;
-}
-
-function refreshLabel() {
-  return isMarketWindow() ? "5 min" : "1 hora";
-}
-
-function scheduleAutoRefresh() {
-  window.setTimeout(async () => {
-    await loadDashboard();
-    scheduleAutoRefresh();
-  }, refreshIntervalMs());
-}
-
-function renderOrbChart(session) {
-  const rows = session.bars || [];
-  if (!rows.length) return;
-  const chart = document.getElementById("orb-chart");
-  chart.innerHTML = "";
-  const width = Math.max(chart.clientWidth, 320);
-  const height = 460;
-  const padding = { top: 30, right: 24, bottom: 42, left: 58 };
-  const lows = rows.map((row) => Number(row.low));
-  const highs = rows.map((row) => Number(row.high));
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
-  const span = max - min || 1;
-  const plotWidth = width - padding.left - padding.right;
-  const plotHeight = height - padding.top - padding.bottom;
-  const candleWidth = Math.max(3, (plotWidth / rows.length) * 0.55);
-  const y = (price) => padding.top + (1 - (price - min) / span) * plotHeight;
-  const x = (index) => padding.left + (index / Math.max(rows.length - 1, 1)) * plotWidth;
-  const candles = rows.map((row, index) => {
-    const cx = x(index);
-    const open = Number(row.open);
-    const close = Number(row.close);
-    const high = Number(row.high);
-    const low = Number(row.low);
-    const color = close >= open ? "#178a4c" : "#c62828";
-    const bodyTop = Math.min(y(open), y(close));
-    const bodyHeight = Math.max(Math.abs(y(open) - y(close)), 2);
-    return `
-      <line x1="${cx}" y1="${y(high)}" x2="${cx}" y2="${y(low)}" stroke="${color}" stroke-width="1.3"></line>
-      <rect x="${cx - candleWidth / 2}" y="${bodyTop}" width="${candleWidth}" height="${bodyHeight}" fill="${color}" opacity="0.85"></rect>
-    `;
-  }).join("");
-  const range = session.opening_range;
-  const rangeLines = range ? `
-    <line x1="${padding.left}" y1="${y(range.high)}" x2="${width - padding.right}" y2="${y(range.high)}" stroke="#1f5eff" stroke-width="1.5" stroke-dasharray="6 4"></line>
-    <line x1="${padding.left}" y1="${y(range.low)}" x2="${width - padding.right}" y2="${y(range.low)}" stroke="#7a3cff" stroke-width="1.5" stroke-dasharray="6 4"></line>
-    <text x="${padding.left}" y="${y(range.high) - 6}" fill="#1f5eff" font-size="12">Max ORB ${range.high}</text>
-    <text x="${padding.left}" y="${y(range.low) + 16}" fill="#7a3cff" font-size="12">Min ORB ${range.low}</text>
-  ` : "";
-
-  chart.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="Grafico ORB 5 minutos">
-      <rect x="0" y="0" width="${width}" height="${height}" fill="white"></rect>
-      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
-      <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#dce3ea"></line>
-      ${rangeLines}
-      ${candles}
-      <text x="${padding.left}" y="20" fill="#596878" font-size="13">${session.ticker} ORB 5m intradia</text>
-      <text x="${padding.left}" y="${height - 12}" fill="#596878" font-size="12">${rows[0].time}</text>
-      <text x="${width - padding.right - 170}" y="${height - 12}" fill="#596878" font-size="12">${rows[rows.length - 1].time}</text>
-    </svg>
+function renderMath() {
+  document.getElementById("math-summary").innerHTML = `
+    <div class="summary-row"><span>Saldo</span><strong>${money(lastResult.account_balance)}</strong></div>
+    <div class="summary-row"><span>Riesgo configurado</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
+    <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
+    <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
+    <div class="summary-row"><span>Perdida esperada</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
+    <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
+    <div class="summary-row"><span>Relacion R/B</span><strong>${lastResult.risk_reward}</strong></div>
   `;
 }
 
-document.getElementById("refresh").addEventListener("click", loadDashboard);
-document.getElementById("enable-notifications").addEventListener("click", requestBrowserNotifications);
-document.getElementById("portfolio-form").addEventListener("submit", addPortfolioItem);
-document.getElementById("watchlist-form").addEventListener("submit", addWatchlistItem);
-document.getElementById("daily-form").addEventListener("submit", saveDailyRecord);
-document.getElementById("orb-form").addEventListener("submit", calculateOrb);
-document.getElementById("load-orb-session").addEventListener("click", loadDashboard);
-document.getElementById("orb-ticker").addEventListener("change", loadDashboard);
+function bindInputs() {
+  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", calculate);
+    document.getElementById(id).addEventListener("change", calculate);
+  });
+  document.getElementById("calculate-btn").addEventListener("click", calculate);
+}
 
-setInterval(updateLocalClock, 1000);
-loadDashboard().catch((error) => {
-  document.getElementById("signal").textContent = "Error";
-  document.getElementById("web-alert").className = "web-alert error";
-  document.getElementById("web-alert").textContent = "No se pudo cargar ORB. Revisa conexion e intenta Actualizar.";
-  console.error(error);
-});
-scheduleAutoRefresh();
+renderTabs();
+renderAssets();
+bindInputs();
+updateGoldenWindow();
+setInterval(updateGoldenWindow, 1000);
+calculate();

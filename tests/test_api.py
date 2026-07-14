@@ -115,3 +115,56 @@ def test_save_daily_capital() -> None:
     assert payload["instrument_type"] == "CFD"
     assert payload["target_profit"] == 52
     assert payload["max_loss"] == 26
+
+
+def test_engine_universe() -> None:
+    client = TestClient(app)
+    response = client.get("/engine/universe")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] >= 10
+    assert any(item["symbol"] == "GOLD" for item in payload["groups"]["commodities"])
+
+
+def test_engine_calculates_dynamic_volume() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/engine/calculate",
+        json={
+            "symbol": "GOLD",
+            "direction": "LONG",
+            "account_balance": 1059.59,
+            "risk_pct": 0.8,
+            "entry_price": 2400,
+            "stop_price": 2390,
+            "take_profit_price": 2420,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["multiplier"] == 100
+    assert payload["risk_amount"] == 8.48
+    assert payload["volume"] == 0.008
+    assert payload["order_type"] == "BUY STOP"
+
+
+def test_engine_short_warning() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/engine/calculate",
+        json={
+            "symbol": "TSM.US",
+            "direction": "SHORT",
+            "account_balance": 560,
+            "risk_pct": 0.8,
+            "entry_price": 410,
+            "stop_price": 420,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["order_type"] == "SELL STOP"
+    assert payload["warnings"][0]["level"] == "danger"

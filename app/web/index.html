@@ -3,142 +3,143 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MyActions ORB</title>
-    <link rel="stylesheet" href="/dashboard/styles.css?v=xtb-capital-v1" />
+    <title>Day Trading Decision Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              ink: "#121214",
+              panel: "#1e1e24",
+              panel2: "#26262e",
+              bull: "#39ff88",
+              bear: "#ff5a66",
+              gold: "#f6c453",
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="/dashboard/styles.css?v=decision-engine-v1" />
   </head>
-  <body>
-    <main class="shell">
-      <aside class="sidebar">
-        <h1>MyActions ORB</h1>
-        <div class="status" id="signal">Cargando...</div>
-        <dl>
-          <div><dt>New York</dt><dd id="ny-clock">-</dd></div>
-          <div><dt>Mercado</dt><dd id="market-status">-</dd></div>
-          <div><dt>Accion del dia</dt><dd id="best-ticker">-</dd></div>
-          <div><dt>Entrada sugerida</dt><dd id="side-entry">-</dd></div>
-          <div><dt>Venta sugerida</dt><dd id="side-sell">-</dd></div>
-          <div><dt>Auto refresh</dt><dd id="refresh-status">-</dd></div>
-        </dl>
-      </aside>
-      <section class="workspace">
-        <div class="toolbar">
-          <button id="enable-notifications">Activar alertas web</button>
-          <button id="refresh">Actualizar</button>
-          <a href="/docs">Swagger</a>
-          <a href="/logout">Salir</a>
-        </div>
-
-        <div class="web-alert" id="web-alert">Actualizando datos...</div>
-
-        <section class="top-grid">
-          <article class="decision-card">
-            <h2>Decision Del Dia</h2>
-            <div id="daily-decision">Cargando recomendacion...</div>
-          </article>
-          <article>
-            <h2>Saldo Y Meta</h2>
-            <form class="daily-form" id="daily-form">
-              <label>Saldo cierre / actual
-                <input id="daily-balance" type="number" step="0.01" min="0" placeholder="560" required />
-              </label>
-              <label>Meta
-                <input id="daily-target" type="number" step="0.01" min="0" placeholder="8.96" required />
-              </label>
-              <label>Tipo
-                <select id="daily-target-type">
-                  <option value="money">USD</option>
-                  <option value="percent">%</option>
-                </select>
-              </label>
-              <button type="submit">Guardar</button>
-            </form>
-            <div id="daily-summary" class="compact-result">Sin saldo registrado hoy.</div>
-          </article>
-        </section>
-
-        <section class="orb-panel">
-          <article>
-            <h2>Opening Range Breakout 5m</h2>
-            <form class="orb-form" id="orb-form">
-              <label>Ticker
-                <select id="orb-ticker">
-                  <option>NVDA</option>
-                  <option>AMD</option>
-                  <option>AAPL</option>
-                  <option>SPY</option>
-                  <option>TSM</option>
-                </select>
-              </label>
-              <label>Max 9:30-9:35
-                <input id="orb-high" type="number" step="0.0001" min="0" required />
-              </label>
-              <label>Min 9:30-9:35
-                <input id="orb-low" type="number" step="0.0001" min="0" required />
-              </label>
-              <label>Entrada ruptura
-                <input id="orb-entry" type="number" step="0.0001" min="0" required />
-              </label>
-              <label>Ganadoras hoy
-                <input id="orb-wins" type="number" min="0" max="2" value="0" />
-              </label>
-              <label>Perdedoras hoy
-                <input id="orb-losses" type="number" min="0" max="1" value="0" />
-              </label>
-              <button type="submit">Calcular operacion</button>
-              <button type="button" id="load-orb-session">Cargar datos</button>
-            </form>
-            <div id="orb-result" class="orb-result">La app cargara la primera vela si el mercado ya entrego datos.</div>
-          </article>
-          <article>
-            <h2>Reglas De Riesgo</h2>
-            <div class="rules" id="rules-box">
-              <p><strong>Operacion 1:</strong> si pierde, se cierra el dia.</p>
-              <p><strong>Maximo:</strong> 2 operaciones ganadoras.</p>
-              <p><strong>Base:</strong> arriesgar $20 para buscar $40.</p>
-              <p><strong>Poder compra:</strong> no superar $10,000.</p>
-              <p><strong>CFD XTB:</strong> largo gana si sube; corto/venta gana si cae.</p>
+  <body class="bg-ink text-zinc-100">
+    <main class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-4 px-4 py-4 md:px-6">
+      <header class="rounded-2xl border border-white/10 bg-panel p-4 shadow-2xl shadow-black/30">
+        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p class="text-xs font-bold uppercase tracking-[0.22em] text-bull">XTB CFD Decision Engine</p>
+            <h1 class="mt-1 text-2xl font-black tracking-tight md:text-4xl">Day Trading Decision Engine & Calculator</h1>
+            <p class="mt-2 max-w-2xl text-sm text-zinc-400">Escanea activos, calcula lotes y copia la receta exacta para programar tus ordenes en XTB.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-right">
+            <div class="rounded-xl border border-white/10 bg-ink px-4 py-3">
+              <p class="text-xs text-zinc-500">Hora Colombia</p>
+              <p id="co-clock" class="text-xl font-black">--:--:--</p>
             </div>
-          </article>
-        </section>
-
-        <section class="xtb-help">
-          <article>
-            <h2>Ayuda XTB Para Posiciones Abiertas</h2>
-            <div id="xtb-helper">Cargando guia...</div>
-          </article>
-        </section>
-
-        <div id="orb-chart" class="chart">
-          <div class="chart-fallback" id="chart-fallback">Cargando grafico ORB 5m...</div>
+            <div class="rounded-xl border border-white/10 bg-ink px-4 py-3">
+              <p class="text-xs text-zinc-500">Riesgo USD</p>
+              <p id="risk-usd-pill" class="text-xl font-black text-gold">$0.00</p>
+            </div>
+          </div>
         </div>
+        <div id="golden-window" class="mt-4 rounded-xl border border-white/10 bg-panel2 p-3 text-sm font-bold">Calculando ventana operativa...</div>
+      </header>
 
-        <section class="grid compact-grid">
-          <article>
-            <h2>Candidatas Hoy</h2>
-            <div id="candidates">Cargando...</div>
-          </article>
-          <article>
-            <h2>Noticias Que Influyen</h2>
-            <div id="news-impact">Cargando...</div>
-          </article>
-          <article>
-            <h2>Portafolio Y Favoritas</h2>
-            <form class="inline-form" id="portfolio-form">
-              <input id="portfolio-symbol" placeholder="Ticker" autocomplete="off" />
-              <input id="portfolio-shares" placeholder="Acciones" type="number" step="0.0001" min="0" />
-              <input id="portfolio-average" placeholder="Precio" type="number" step="0.01" min="0" />
-              <button type="submit">Agregar</button>
-            </form>
-            <form class="inline-form watch-form" id="watchlist-form">
-              <input id="watchlist-symbol" placeholder="Favorita: NVDA, AMD..." autocomplete="off" />
-              <button type="submit">Favorita</button>
-            </form>
-            <div id="portfolio-list"></div>
-            <div id="watchlist-list"></div>
-          </article>
+      <section class="grid gap-4 lg:grid-cols-[320px_1fr]">
+        <aside class="rounded-2xl border border-white/10 bg-panel p-4">
+          <h2 class="text-lg font-black">Configuracion</h2>
+          <div class="mt-4 grid gap-3">
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Saldo actual USD
+              <input id="account-balance" class="field" type="number" step="0.01" value="1059.59" />
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Riesgo por operacion %
+              <input id="risk-pct" class="field" type="number" step="0.01" value="0.8" />
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Direccion
+              <select id="direction" class="field">
+                <option value="LONG">LONG / Compra</option>
+                <option value="SHORT">SHORT / Venta en corto</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mt-5 rounded-xl border border-white/10 bg-ink p-3">
+            <p class="text-xs font-bold uppercase text-zinc-500">Regla matematica</p>
+            <p class="mt-2 text-sm text-zinc-300">Volumen = Riesgo USD / (|Entrada - Stop| x Multiplicador)</p>
+          </div>
+
+          <a href="/logout" class="mt-4 block rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-bold text-zinc-300">Salir</a>
+        </aside>
+
+        <section class="grid gap-4">
+          <nav id="tabs" class="flex gap-2 overflow-x-auto rounded-2xl border border-white/10 bg-panel p-2">
+            <button class="tab active" data-category="favorites">Favoritos</button>
+            <button class="tab" data-category="forex">Divisas</button>
+            <button class="tab" data-category="indices">Indices</button>
+            <button class="tab" data-category="commodities">Materias Primas</button>
+            <button class="tab" data-category="crypto">Criptomonedas</button>
+            <button class="tab" data-category="stocks">Acciones / ETFs</button>
+          </nav>
+
+          <section class="grid gap-4 xl:grid-cols-[1fr_420px]">
+            <article class="rounded-2xl border border-white/10 bg-panel p-4">
+              <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 class="text-xl font-black">Scanner Multi-Activo</h2>
+                  <p id="category-copy" class="text-sm text-zinc-400">Selecciona un activo para calcular orden.</p>
+                </div>
+                <button id="calculate-btn" class="rounded-xl bg-bull px-5 py-3 text-sm font-black text-black shadow-lg shadow-bull/20">Calcular receta</button>
+              </div>
+              <div id="asset-grid" class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"></div>
+            </article>
+
+            <article class="rounded-2xl border border-white/10 bg-panel p-4">
+              <h2 class="text-xl font-black">Parametros ORB / Orden</h2>
+              <div class="mt-4 grid gap-3">
+                <label class="grid gap-1 text-sm font-bold text-zinc-300">
+                  Activo seleccionado
+                  <input id="symbol" class="field" value="TSM.US" />
+                </label>
+                <label class="grid gap-1 text-sm font-bold text-zinc-300">
+                  Precio entrada
+                  <input id="entry-price" class="field" type="number" step="0.00001" value="442.50" />
+                </label>
+                <label class="grid gap-1 text-sm font-bold text-zinc-300">
+                  Stop Loss / Escudo
+                  <input id="stop-price" class="field" type="number" step="0.00001" value="410.00" />
+                </label>
+                <label class="grid gap-1 text-sm font-bold text-zinc-300">
+                  Take Profit / Meta
+                  <input id="take-profit-price" class="field" type="number" step="0.00001" value="507.50" />
+                </label>
+              </div>
+            </article>
+          </section>
+
+          <div id="warnings" class="grid gap-3"></div>
+
+          <section class="grid gap-4 xl:grid-cols-[1fr_420px]">
+            <article class="rounded-2xl border border-bull/30 bg-panel p-4 shadow-xl shadow-bull/5">
+              <h2 class="text-xl font-black">Quick Copy Card Para XTB</h2>
+              <p class="mt-1 text-sm text-zinc-400">Copia cada valor y pegalo en tu celular. Sin memoria, sin adivinar.</p>
+              <div id="ticket" class="mt-4 grid gap-3"></div>
+            </article>
+
+            <article class="rounded-2xl border border-white/10 bg-panel p-4">
+              <h2 class="text-xl font-black">Resumen Matematico</h2>
+              <div id="math-summary" class="mt-4 grid gap-3 text-sm text-zinc-300"></div>
+              <div class="mt-4 rounded-xl border border-bear/40 bg-bear/10 p-3 text-sm text-bear">
+                No es asesoria financiera. Verifica spread, margen, swap y simbolo CFD en XTB antes de enviar.
+              </div>
+            </article>
+          </section>
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=xtb-capital-v1"></script>
+    <script src="/dashboard/app.js?v=decision-engine-v1"></script>
   </body>
 </html>

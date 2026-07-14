@@ -34,6 +34,7 @@ from app.services.orb import OrbService
 from app.services.orb_dashboard import OrbDashboardService
 from app.services.capital import CapitalService
 from app.services.market_clock import MarketClockService
+from app.services.decision_engine import DecisionEngineService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -45,6 +46,16 @@ class DailyCapitalRequest(BaseModel):
     target_value: float = Field(ge=0)
     target_type: str = "money"
     notes: str = ""
+
+
+class EngineCalculateRequest(BaseModel):
+    symbol: str
+    direction: str = Field(pattern="^(LONG|SHORT)$")
+    account_balance: float = Field(gt=0)
+    risk_pct: float = Field(gt=0, le=10)
+    entry_price: float = Field(gt=0)
+    stop_price: float = Field(gt=0)
+    take_profit_price: float | None = Field(default=None, gt=0)
 
 
 def validate_ticker(ticker: str) -> str:
@@ -290,6 +301,27 @@ def orb_calculate(
 @router.get("/market/clock")
 def market_clock() -> dict[str, object]:
     return MarketClockService().snapshot()
+
+
+@router.get("/engine/universe")
+def engine_universe() -> dict[str, object]:
+    return DecisionEngineService().universe()
+
+
+@router.post("/engine/calculate")
+def engine_calculate(payload: EngineCalculateRequest) -> dict[str, object]:
+    try:
+        return DecisionEngineService().calculate(
+            symbol=payload.symbol,
+            direction=payload.direction,  # type: ignore[arg-type]
+            account_balance=payload.account_balance,
+            risk_pct=payload.risk_pct,
+            entry_price=payload.entry_price,
+            stop_price=payload.stop_price,
+            take_profit_price=payload.take_profit_price,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/capital/daily")
