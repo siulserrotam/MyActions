@@ -303,6 +303,19 @@ a {
   margin-bottom: 18px;
 }
 
+.xtb-help {
+  margin-bottom: 18px;
+}
+
+.simple-steps {
+  margin: 14px 0 0;
+  padding-left: 22px;
+}
+
+.simple-steps li {
+  margin-bottom: 8px;
+}
+
 .orb-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

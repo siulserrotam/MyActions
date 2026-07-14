@@ -237,11 +237,29 @@ def orb_session(ticker: str = Query("NVDA")) -> dict[str, Any]:
 
 
 @router.get("/orb/dashboard")
-def orb_dashboard(ticker: str = Query("NVDA"), session: Session = Depends(get_session)) -> dict[str, Any]:
+def orb_dashboard(
+    ticker: str = Query("NVDA"),
+    account_capital: float | None = Query(default=None, gt=0),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
     try:
         capital = CapitalService().latest(session)
     except Exception:
         capital = None
+    if account_capital:
+        capital = {
+            "balance": account_capital,
+            "target_value": round(account_capital * 0.016, 2),
+            "target_type": "money",
+            "target_profit": round(account_capital * 0.016, 2),
+            "max_loss": round(account_capital * 0.008, 2),
+            "risk_per_trade": round(account_capital * 0.008, 2),
+            "reward_per_trade": round(account_capital * 0.016, 2),
+            "buying_power": round(account_capital * 4, 2),
+            "broker": "XTB",
+            "instrument_type": "CFD",
+            "source": "dashboard",
+        }
     return OrbDashboardService().build(ticker, capital=capital)
 
 

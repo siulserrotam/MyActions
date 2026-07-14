@@ -1,4 +1,6 @@
 const DAILY_KEY = "myactions_daily_records";
+const DEFAULT_CAPITAL = 560;
+const DEFAULT_TARGET_RATE = 0.016;
 
 async function fetchJson(path, init) {
   const response = await fetch(path, init);
@@ -47,11 +49,15 @@ function renderClock(clock) {
 
 async function loadDashboard() {
   setLoadingState();
+  seedDefaultCapital();
   renderPortfolioState();
   renderDailySummary();
   updateLocalClock();
 
   const ticker = document.getElementById("orb-ticker").value;
+  const capital = currentDailyRecord();
+  const dashboardParams = new URLSearchParams({ ticker });
+  if (capital && capital.balance) dashboardParams.set("account_capital", capital.balance);
   const fallback = {
     selected_ticker: ticker,
     best_ticker: ticker,
@@ -59,12 +65,12 @@ async function loadDashboard() {
     recommendation: { ticker, status: "SIN DATOS", action: "ESPERAR", reason: "No se pudieron cargar datos.", news: [] },
     candidates: [],
     session: { ticker, bars: [], opening_range: null },
-    rules: { capital: 2500, risk_amount: 20, reward_amount: 40, buying_power: 10000, risk_reward: "1:2" },
+    rules: { capital: DEFAULT_CAPITAL, risk_amount: 4.48, reward_amount: 8.96, buying_power: 2240, risk_reward: "1:2" },
     capital: null,
     broker: { name: "XTB", instrument_type: "CFD" },
   };
   const [data, clock] = await Promise.all([
-    fetchOptional(`/orb/dashboard?ticker=${encodeURIComponent(ticker)}`, fallback),
+    fetchOptional(`/orb/dashboard?${dashboardParams.toString()}`, fallback),
     fetchOptional("/market/clock", null),
   ]);
 
@@ -75,6 +81,7 @@ async function loadDashboard() {
   renderCandidates(data.candidates || []);
   renderNews(data.recommendation || data.selected || {});
   renderRules(data.rules || fallback.rules);
+  renderXtbHelper(data.rules || fallback.rules);
   renderWebAlert(data.recommendation || data.selected || {});
 
   const session = data.session || {};
@@ -110,6 +117,7 @@ function renderDecision(data) {
       <span>Venta: <strong>${money(best.suggested_sell)}</strong></span>
     </div>
     <p class="muted-text">Seleccion actual: ${selected.ticker || "-"} (${selected.status || "SIN DATOS"}). No entrar si no hay ruptura limpia y volumen.</p>
+    <p class="muted-text">Con capital ${money((data.rules || {}).capital)}, la app busca riesgo pequeno: perder aprox. ${money((data.rules || {}).risk_amount)} para intentar ganar ${money((data.rules || {}).reward_amount)}.</p>
   `;
 }
 
@@ -121,6 +129,26 @@ function renderRules(rules) {
     <p><strong>Poder compra:</strong> no superar ${money(rules.buying_power)}.</p>
     <p><strong>CFD XTB:</strong> largo gana si sube; corto/venta gana si cae.</p>
     <p class="muted-text">Regla calculada con ${rules.source === "capital_guardado" ? "tu capital guardado" : "parametros base"}. Valida spread, swap y margen en XTB antes de ejecutar.</p>
+  `;
+}
+
+function renderXtbHelper(rules) {
+  const risk = Number(rules.risk_amount || DEFAULT_CAPITAL * 0.008);
+  const reward = Number(rules.reward_amount || DEFAULT_CAPITAL * 0.016);
+  const capital = Number(rules.capital || DEFAULT_CAPITAL);
+  document.getElementById("xtb-helper").innerHTML = `
+    <div class="metric-row">
+      <span>Capital actual <strong>${money(capital)}</strong></span>
+      <span>Perdida maxima por trade <strong>${money(risk)}</strong></span>
+      <span>Ganancia objetivo por trade <strong>${money(reward)}</strong></span>
+    </div>
+    <ol class="simple-steps">
+      <li>Si ya tienes un <strong>Sell Limit</strong>, ese volumen queda bloqueado.</li>
+      <li>Para proteger una compra, usa <strong>Stop Loss</strong> o <strong>Sell Stop</strong> por el volumen libre.</li>
+      <li>Para tomar ganancia, usa <strong>Take Profit</strong> o <strong>Sell Limit</strong>.</li>
+      <li>No pongas Take Profit + Stop Loss por mas volumen del que tienes disponible.</li>
+    </ol>
+    <p class="muted-text">Ejemplo: si tienes 1.3311 acciones y bloqueas 0.65 en Take Profit, solo quedan libres 0.6811 para otra orden.</p>
   `;
 }
 
@@ -276,6 +304,19 @@ function dailyRecords() {
 
 function currentDailyRecord() {
   return dailyRecords()[todayKey()] || null;
+}
+
+function seedDefaultCapital() {
+  const records = dailyRecords();
+  if (records[todayKey()]) return;
+  records[todayKey()] = {
+    balance: DEFAULT_CAPITAL,
+    target: Number((DEFAULT_CAPITAL * DEFAULT_TARGET_RATE).toFixed(2)),
+    targetType: "money",
+    savedAt: new Date().toISOString(),
+    source: "local",
+  };
+  writeJsonStore(DAILY_KEY, records);
 }
 
 async function saveDailyRecord(event) {
