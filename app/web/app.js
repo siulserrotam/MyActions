@@ -340,6 +340,7 @@ function currentConfigPayload() {
     stop_price: Number(document.getElementById("stop-price").value || 0),
     take_profit_price: Number(document.getElementById("take-profit-price").value || 0),
     direction: document.getElementById("direction").value,
+    expiry_mode: document.getElementById("expiry-mode").value,
     target_value: Number((accountBalance * riskPct / 100 * 2).toFixed(2)),
     target_type: "money",
     monthly_contribution: monthlyInvested,
@@ -379,6 +380,7 @@ function loadConfigLocal() {
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
     if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
     if (config.take_profit_price) document.getElementById("take-profit-price").value = config.take_profit_price;
+    if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
       document.getElementById("account-balance").value = defaultAccountBalance;
       document.getElementById("risk-pct").value = defaultRiskPct;
@@ -511,12 +513,15 @@ function renderTicket() {
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
+  const expiryMode = document.getElementById("expiry-mode").value;
+  const expiryLabel = expiryMode === "DAY" ? "Hoy / fin del dia" : "Sin vencimiento manual";
   const rows = [
     ["Activo", lastResult.asset.symbol, true],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
     ["Precio de Entrada", numberText(lastResult.entry_price), true],
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
+    ["Vencimiento", expiryLabel, true],
     ["Volumen a colocar", numberText(lastResult.volume), true],
     ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
     ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
@@ -557,7 +562,8 @@ function renderMath() {
     <div class="summary-row"><span>Ganancias acumuladas</span><strong class="text-bull">${money(gainsAccumulated)}</strong></div>
     <div class="summary-row"><span>Ganancias dia</span><strong class="text-bull">${money(dailyGains)}</strong></div>
     <div class="summary-row"><span>Patrimonio manual estimado</span><strong>${money(estimatedEquity)}</strong></div>
-    <div class="summary-row"><span>Riesgo configurado</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
+    <div class="summary-row"><span>Riesgo sobre saldo total</span><strong>${lastResult.risk_pct}% de ${money(lastResult.account_balance)}</strong></div>
+    <div class="summary-row"><span>Perdida maxima permitida</span><strong>${money(lastResult.risk_amount)}</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
     <div class="summary-row"><span>Volumen por saldo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
@@ -569,7 +575,7 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
+  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "expiry-mode", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
