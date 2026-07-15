@@ -160,7 +160,10 @@ def test_engine_calculates_dynamic_volume() -> None:
     payload = response.json()
     assert payload["multiplier"] == 100
     assert payload["risk_amount"] == 8.48
-    assert payload["volume"] == 0.008
+    assert payload["raw_volume"] == 0.00848
+    assert payload["capital_volume"] == 0.00441496
+    assert payload["volume"] == 0.004
+    assert payload["volume_basis"] == "saldo"
     assert payload["order_type"] == "BUY STOP"
 
 

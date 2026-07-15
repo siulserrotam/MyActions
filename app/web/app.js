@@ -52,6 +52,7 @@ let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
 let lastResult = null;
 let notificationsEnabled = false;
 let postbackTimer = null;
+let autoRefreshTimer = null;
 
 function favoriteSymbols() {
   try {
@@ -190,6 +191,38 @@ function updateGoldenWindow() {
   }
 }
 
+function isMarketOpenNow() {
+  const now = new Date();
+  const nyParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const weekday = nyParts.weekday;
+  const hour = Number(nyParts.hour);
+  const minute = Number(nyParts.minute);
+  const total = hour * 60 + minute;
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  return isWeekday && total >= 9 * 60 + 30 && total < 16 * 60;
+}
+
+function scheduleAutoRefresh() {
+  window.clearTimeout(autoRefreshTimer);
+  const marketOpen = isMarketOpenNow();
+  const refreshMs = marketOpen ? 5 * 60 * 1000 : 60 * 60 * 1000;
+  const label = marketOpen ? "mercado abierto, cada 5 min" : "mercado cerrado, cada 1 hora";
+  document.getElementById("refresh-status").textContent = `Auto refresh: ${label}.`;
+  autoRefreshTimer = window.setTimeout(() => {
+    calculate();
+    scheduleAutoRefresh();
+  }, refreshMs);
+}
+
 function renderTabs() {
   assetGroups.favorites = getFavoriteAssets();
   document.querySelectorAll(".tab").forEach((button) => {
@@ -256,11 +289,13 @@ function renderBestDecisionNote() {
 async function calculate() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
   selectedAsset = selectedAssetFromForm();
+  const riskPct = Math.min(Math.max(Number(document.getElementById("risk-pct").value || defaultRiskPct), 0.5), 1);
+  document.getElementById("risk-pct").value = String(riskPct);
   const payload = {
     symbol,
     direction: document.getElementById("direction").value,
     account_balance: Number(document.getElementById("account-balance").value || 0),
-    risk_pct: Number(document.getElementById("risk-pct").value || 0),
+    risk_pct: riskPct,
     entry_price: Number(document.getElementById("entry-price").value || 0),
     stop_price: Number(document.getElementById("stop-price").value || 0),
     take_profit_price: Number(document.getElementById("take-profit-price").value || 0) || null,
@@ -291,7 +326,7 @@ function todayKey() {
 
 function currentConfigPayload() {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
-  const riskPct = Number(document.getElementById("risk-pct").value || defaultRiskPct);
+  const riskPct = Math.min(Math.max(Number(document.getElementById("risk-pct").value || defaultRiskPct), 0.5), 1);
   const investedAccumulated = Number(document.getElementById("invested-accumulated").value || 0);
   const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
   const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
@@ -389,9 +424,13 @@ async function postbackConfig() {
 function localCalculate(payload) {
   const asset = findAsset(payload.symbol);
   const distance = Math.abs(payload.entry_price - payload.stop_price);
-  const riskAmount = payload.account_balance * payload.risk_pct / 100;
+  const normalizedRiskPct = Math.min(Math.max(payload.risk_pct, 0.5), 1);
+  const riskAmount = payload.account_balance * normalizedRiskPct / 100;
   const rawVolume = riskAmount / (distance * asset.multiplier);
-  const volume = asset.category === "stocks" ? Number(rawVolume.toFixed(4)) : Number(rawVolume.toFixed(3));
+  const capitalVolume = payload.account_balance / (payload.entry_price * asset.multiplier);
+  const selectedRawVolume = Math.min(rawVolume, capitalVolume);
+  const volume = asset.category === "stocks" ? Number(selectedRawVolume.toFixed(4)) : Number(selectedRawVolume.toFixed(3));
+  const volumeBasis = rawVolume <= capitalVolume ? "riesgo" : "saldo";
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
   const takeProfit = payload.take_profit_price ||
     (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
@@ -406,10 +445,12 @@ function localCalculate(payload) {
     stop_loss: payload.stop_price,
     take_profit: takeProfit,
     account_balance: payload.account_balance,
-    risk_pct: payload.risk_pct,
+    risk_pct: normalizedRiskPct,
     risk_amount: Number(riskAmount.toFixed(2)),
     multiplier: asset.multiplier,
     raw_volume: rawVolume,
+    capital_volume: capitalVolume,
+    volume_basis: volumeBasis,
     volume,
     position_value: positionValue,
     capital_usage_pct: capitalUsagePct,
@@ -469,6 +510,7 @@ function renderTicket() {
   if (!lastResult) return;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
+  const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
   const rows = [
     ["Activo", lastResult.asset.symbol, true],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
@@ -476,6 +518,9 @@ function renderTicket() {
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
     ["Volumen a colocar", numberText(lastResult.volume), true],
+    ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
+    ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
+    ["Regla que manda", volumeBasis, false],
     ["Valor aprox. de posicion", money(positionValue), false],
     ["Uso aprox. de tu capital", `${numberText(capitalUsagePct)}%`, false],
     ["Perdida maxima estimada", money(lastResult.expected_loss), false],
@@ -515,6 +560,8 @@ function renderMath() {
     <div class="summary-row"><span>Riesgo configurado</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
+    <div class="summary-row"><span>Volumen por saldo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
+    <div class="summary-row"><span>Freno activo</span><strong>${lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo"}</strong></div>
     <div class="summary-row"><span>Perdida esperada</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Relacion R/B</span><strong>${lastResult.risk_reward}</strong></div>
@@ -558,3 +605,4 @@ setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();
 resetOrderFieldsForAsset(selectedAsset);
 calculate();
+scheduleAutoRefresh();

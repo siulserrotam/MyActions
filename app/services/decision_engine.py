@@ -62,12 +62,16 @@ class DecisionEngineService:
         take_profit_price: float | None = None,
     ) -> dict[str, object]:
         asset = self.resolve(symbol)
-        risk_amount = round(account_balance * (risk_pct / 100), 2)
+        normalized_risk_pct = min(max(risk_pct, 0.5), 1)
+        risk_amount = round(account_balance * (normalized_risk_pct / 100), 2)
         distance = abs(entry_price - stop_price)
         if distance <= 0:
             raise ValueError("La entrada y el stop no pueden ser iguales.")
         raw_volume = risk_amount / (distance * asset.multiplier)
-        volume = self._round_volume(raw_volume, asset.category)
+        capital_volume = account_balance / (entry_price * asset.multiplier)
+        selected_raw_volume = min(raw_volume, capital_volume)
+        volume = self._round_volume(selected_raw_volume, asset.category)
+        volume_basis = "riesgo" if raw_volume <= capital_volume else "saldo"
         order_type = "BUY STOP" if direction == "LONG" else "SELL STOP"
         take_profit = take_profit_price
         if take_profit is None:
@@ -89,10 +93,12 @@ class DecisionEngineService:
             "stop_loss": round(stop_price, 5),
             "take_profit": round(take_profit, 5),
             "account_balance": round(account_balance, 2),
-            "risk_pct": round(risk_pct, 4),
+            "risk_pct": round(normalized_risk_pct, 4),
             "risk_amount": risk_amount,
             "multiplier": asset.multiplier,
             "raw_volume": round(raw_volume, 8),
+            "capital_volume": round(capital_volume, 8),
+            "volume_basis": volume_basis,
             "volume": volume,
             "position_value": position_value,
             "capital_usage_pct": capital_usage_pct,
