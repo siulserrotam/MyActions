@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -146,11 +147,13 @@ class DecisionEngineService:
         }
 
     def _round_volume(self, volume: float, category: AssetCategory) -> float:
+        if category == "stocks":
+            return float(math.floor(volume))
         if category == "forex":
             return round(volume, 3)
         if category in {"commodities", "crypto", "indices"}:
             return round(volume, 3)
-        return round(volume, 4)
+        return round(volume, 3)
 
     def _risk_reward(self, loss: float, profit: float) -> str:
         if loss <= 0:

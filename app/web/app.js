@@ -78,6 +78,11 @@ function numberText(value) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function roundVolumeForXtb(volume, asset) {
+  if (asset.category === "stocks") return Math.floor(volume);
+  return Number(volume.toFixed(3));
+}
+
 function allAssets() {
   return Object.entries(assetGroups)
     .filter(([category]) => category !== "favorites")
@@ -282,8 +287,35 @@ function toggleFavorite() {
 }
 
 function renderBestDecisionNote() {
-  document.getElementById("best-decision-note").textContent =
-    "Modo manual seguro: eliges activo y precios. La app calcula el volumen exacto y el ticket para XTB; no se conecta a tu cuenta.";
+  const suggestion = buildDailySuggestion();
+  document.getElementById("best-decision-note").innerHTML = `
+    <div class="grid gap-1">
+      <span class="text-xs uppercase tracking-wide text-gold/80">Sugerencia principal del dia</span>
+      <strong>${suggestion.symbol} ${suggestion.directionLabel}</strong>
+      <span class="text-sm text-zinc-200">${suggestion.reason}</span>
+      <span class="text-xs text-zinc-400">Sin feed de noticias real conectado: esta sugerencia usa precios manuales, ventana ORB y categorias CFD.</span>
+    </div>
+  `;
+}
+
+function buildDailySuggestion() {
+  const candidates = uniqueAssets().map((asset) => {
+    const step = priceStepPct(asset);
+    const momentumScore = step * 1000;
+    const capitalFit = asset.marketPrice * asset.multiplier <= defaultAccountBalance ? 2 : 0;
+    const categoryScore = ({ indices: 5, commodities: 4, stocks: 3, crypto: 2, forex: 1 }[asset.category] || 0);
+    return {
+      asset,
+      score: categoryScore + momentumScore + capitalFit,
+    };
+  }).sort((a, b) => b.score - a.score);
+  const pick = candidates[0]?.asset || selectedAsset;
+  const directionLabel = pick.category === "commodities" || pick.category === "indices" ? "LONG/SHORT segun ruptura" : "LONG si rompe, SHORT si pierde soporte";
+  return {
+    symbol: pick.symbol,
+    directionLabel,
+    reason: `Prioriza ${pick.name}: buena liquidez relativa, multiplicador x${numberText(pick.multiplier)} y lectura rapida para operar un solo CFD del dia.`,
+  };
 }
 
 async function calculate() {
@@ -431,7 +463,7 @@ function localCalculate(payload) {
   const rawVolume = riskAmount / (distance * asset.multiplier);
   const capitalVolume = payload.account_balance / (payload.entry_price * asset.multiplier);
   const selectedRawVolume = Math.min(rawVolume, capitalVolume);
-  const volume = asset.category === "stocks" ? Number(selectedRawVolume.toFixed(4)) : Number(selectedRawVolume.toFixed(3));
+  const volume = roundVolumeForXtb(selectedRawVolume, asset);
   const volumeBasis = rawVolume <= capitalVolume ? "riesgo" : "saldo";
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
   const takeProfit = payload.take_profit_price ||
@@ -476,7 +508,10 @@ function buildWarnings(asset, direction) {
 
 function renderWarnings() {
   const box = document.getElementById("warnings");
-  const warnings = lastResult?.warnings || [];
+  const warnings = [...(lastResult?.warnings || [])];
+  if (lastResult?.asset?.category === "stocks" && lastResult.volume < 1) {
+    warnings.push({ level: "danger", message: "NO OPERAR: XTB exige volumen entero en este CFD y el volumen seguro queda por debajo de 1. Con 1 unidad podrias superar tu riesgo permitido." });
+  }
   box.innerHTML = warnings.map((warning) => `
     <div class="rounded-2xl border p-4 text-sm font-black ${warning.level === "danger" ? "border-bear/70 bg-bear/15 text-bear" : "border-sky-400/60 bg-sky-500/10 text-sky-300"}">
       ${warning.message}
@@ -513,6 +548,7 @@ function renderTicket() {
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
+  const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
   const expiryMode = document.getElementById("expiry-mode").value;
   const expiryLabel = expiryMode === "DAY" ? "Hoy / fin del dia" : "Sin vencimiento manual";
   const rows = [
@@ -522,7 +558,7 @@ function renderTicket() {
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
     ["Vencimiento", expiryLabel, true],
-    ["Volumen a colocar", numberText(lastResult.volume), true],
+    [volumeLabel, numberText(lastResult.volume), true],
     ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
     ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
     ["Regla que manda", volumeBasis, false],
