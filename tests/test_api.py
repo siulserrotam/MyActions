@@ -106,6 +106,9 @@ def test_save_daily_capital() -> None:
             "balance": 2600,
             "target_value": 2,
             "target_type": "percent",
+            "monthly_contribution": 100,
+            "daily_profit": 12.5,
+            "risk_pct": 0.8,
         },
     )
 
@@ -115,6 +118,9 @@ def test_save_daily_capital() -> None:
     assert payload["instrument_type"] == "CFD"
     assert payload["target_profit"] == 52
     assert payload["max_loss"] == 26
+    assert payload["monthly_contribution"] == 100
+    assert payload["daily_profit"] == 12.5
+    assert payload["risk_per_trade"] == 20.8
 
 
 def test_engine_universe() -> None:

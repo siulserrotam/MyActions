@@ -47,6 +47,7 @@ let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
 let lastResult = null;
 let notificationsEnabled = false;
+let postbackTimer = null;
 
 function favoriteSymbols() {
   try {
@@ -205,6 +206,7 @@ async function calculate() {
     stop_price: Number(document.getElementById("stop-price").value || 0),
     take_profit_price: Number(document.getElementById("take-profit-price").value || 0) || null,
   };
+  saveConfigLocal();
   document.getElementById("risk-usd-pill").textContent = money(payload.account_balance * payload.risk_pct / 100);
   try {
     const response = await fetch("/engine/calculate", {
@@ -222,6 +224,76 @@ async function calculate() {
   renderTicket();
   renderMath();
   notifyIfNeeded();
+}
+
+function todayKey() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+}
+
+function currentConfigPayload() {
+  const accountBalance = Number(document.getElementById("account-balance").value || 0);
+  const riskPct = Number(document.getElementById("risk-pct").value || 0.8);
+  const dailyProfit = Number(document.getElementById("daily-profit").value || 0);
+  const monthlyContribution = Number(document.getElementById("monthly-contribution").value || 0);
+  return {
+    trade_date: todayKey(),
+    balance: accountBalance,
+    target_value: Number((accountBalance * riskPct / 100 * 2).toFixed(2)),
+    target_type: "money",
+    monthly_contribution: monthlyContribution,
+    daily_profit: dailyProfit,
+    risk_pct: riskPct,
+    notes: "Auto postback Decision Engine XTB",
+  };
+}
+
+function saveConfigLocal() {
+  localStorage.setItem("decision_engine_config", JSON.stringify(currentConfigPayload()));
+}
+
+function loadConfigLocal() {
+  try {
+    const config = JSON.parse(localStorage.getItem("decision_engine_config") || "null");
+    if (!config) return;
+    if (config.balance) document.getElementById("account-balance").value = config.balance;
+    if (config.risk_pct) document.getElementById("risk-pct").value = config.risk_pct;
+    if (config.daily_profit !== undefined) document.getElementById("daily-profit").value = config.daily_profit;
+    if (config.monthly_contribution !== undefined) document.getElementById("monthly-contribution").value = config.monthly_contribution;
+  } catch {
+    return;
+  }
+}
+
+function updatePostbackStatus(text, tone = "muted") {
+  const box = document.getElementById("postback-status");
+  box.textContent = text;
+  box.className = "mt-3 rounded-xl border bg-ink p-3 text-xs font-bold";
+  if (tone === "ok") box.classList.add("border-bull/40", "text-bull");
+  else if (tone === "error") box.classList.add("border-bear/40", "text-bear");
+  else box.classList.add("border-white/10", "text-zinc-500");
+}
+
+function schedulePostback() {
+  saveConfigLocal();
+  updatePostbackStatus("Postback: preparando guardado...");
+  window.clearTimeout(postbackTimer);
+  postbackTimer = window.setTimeout(postbackConfig, 900);
+}
+
+async function postbackConfig() {
+  const payload = currentConfigPayload();
+  if (!payload.balance || payload.balance <= 0) return;
+  try {
+    const response = await fetch("/capital/daily", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    updatePostbackStatus("Postback: guardado en base de datos.", "ok");
+  } catch (error) {
+    updatePostbackStatus("Postback: guardado local. Base de datos no disponible.", "error");
+  }
 }
 
 function localCalculate(payload) {
@@ -329,6 +401,8 @@ function renderTicket() {
 function renderMath() {
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Saldo</span><strong>${money(lastResult.account_balance)}</strong></div>
+    <div class="summary-row"><span>Ganancia/perdida dia</span><strong>${money(Number(document.getElementById("daily-profit").value || 0))}</strong></div>
+    <div class="summary-row"><span>Aporte mensual app</span><strong>${money(Number(document.getElementById("monthly-contribution").value || 0))}</strong></div>
     <div class="summary-row"><span>Riesgo configurado</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
@@ -339,15 +413,20 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price"].forEach((id) => {
+  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price", "daily-profit", "monthly-contribution"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
+  });
+  ["account-balance", "risk-pct", "daily-profit", "monthly-contribution"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", schedulePostback);
+    document.getElementById(id).addEventListener("change", schedulePostback);
   });
   document.getElementById("calculate-btn").addEventListener("click", calculate);
   document.getElementById("toggle-favorite-btn").addEventListener("click", toggleFavorite);
   document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
 }
 
+loadConfigLocal();
 renderTabs();
 renderAssets();
 bindInputs();

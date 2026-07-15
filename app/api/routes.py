@@ -45,6 +45,9 @@ class DailyCapitalRequest(BaseModel):
     balance: float = Field(gt=0)
     target_value: float = Field(ge=0)
     target_type: str = "money"
+    monthly_contribution: float = 0
+    daily_profit: float = 0
+    risk_pct: float = Field(default=0.8, gt=0, le=10)
     notes: str = ""
 
 
@@ -354,6 +357,9 @@ def save_daily_capital(
             balance=payload.balance,
             target_value=payload.target_value,
             target_type=payload.target_type,
+            monthly_contribution=payload.monthly_contribution,
+            daily_profit=payload.daily_profit,
+            risk_pct=payload.risk_pct,
             notes=payload.notes,
         )
     except Exception as exc:

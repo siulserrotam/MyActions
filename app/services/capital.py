@@ -30,6 +30,9 @@ class CapitalService:
         balance: float,
         target_value: float,
         target_type: str,
+        monthly_contribution: float = 0,
+        daily_profit: float = 0,
+        risk_pct: float = 0.8,
         notes: str = "",
     ) -> dict[str, object]:
         normalized_type = target_type if target_type in {"money", "percent"} else "money"
@@ -41,6 +44,9 @@ class CapitalService:
                 balance=balance,
                 target_value=target_value,
                 target_type=normalized_type,
+                monthly_contribution=monthly_contribution,
+                daily_profit=daily_profit,
+                risk_pct=risk_pct,
                 broker="XTB",
                 instrument_type="CFD",
                 notes=notes,
@@ -52,6 +58,9 @@ class CapitalService:
             record.balance = balance
             record.target_value = target_value
             record.target_type = normalized_type
+            record.monthly_contribution = monthly_contribution
+            record.daily_profit = daily_profit
+            record.risk_pct = risk_pct
             record.notes = notes
             record.updated_at = now
         session.commit()
@@ -73,8 +82,11 @@ class CapitalService:
             "target_type": record.target_type,
             "target_profit": round(target_profit, 2),
             "max_loss": round(max_loss, 2),
-            "risk_per_trade": round(record.balance * 0.008, 2),
-            "reward_per_trade": round(record.balance * 0.016, 2),
+            "monthly_contribution": round(record.monthly_contribution or 0, 2),
+            "daily_profit": round(record.daily_profit or 0, 2),
+            "risk_pct": round(record.risk_pct or 0.8, 4),
+            "risk_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100), 2),
+            "reward_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100) * 2, 2),
             "buying_power": round(record.balance * 4, 2),
             "broker": record.broker,
             "instrument_type": record.instrument_type,
