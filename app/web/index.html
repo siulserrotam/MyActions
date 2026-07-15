@@ -43,6 +43,10 @@
             </div>
           </div>
         </div>
+        <div class="mt-4 grid gap-2 md:grid-cols-[1fr_auto]">
+          <div id="notification-status" class="rounded-xl border border-white/10 bg-ink px-4 py-3 text-sm font-bold text-zinc-400">Notificaciones web: inactivas.</div>
+          <button id="enable-notifications" class="rounded-xl border border-bull/40 px-4 py-3 text-sm font-black text-bull">Activar notificaciones</button>
+        </div>
         <div id="golden-window" class="mt-4 rounded-xl border border-white/10 bg-panel2 p-3 text-sm font-bold">Calculando ventana operativa...</div>
       </header>
 
@@ -92,8 +96,12 @@
                   <h2 class="text-xl font-black">Scanner Multi-Activo</h2>
                   <p id="category-copy" class="text-sm text-zinc-400">Selecciona un activo para calcular orden.</p>
                 </div>
-                <button id="calculate-btn" class="rounded-xl bg-bull px-5 py-3 text-sm font-black text-black shadow-lg shadow-bull/20">Calcular receta</button>
+                <div class="flex flex-wrap gap-2">
+                  <button id="toggle-favorite-btn" class="rounded-xl border border-white/10 px-4 py-3 text-sm font-black text-zinc-200">Favorito</button>
+                  <button id="calculate-btn" class="rounded-xl bg-bull px-5 py-3 text-sm font-black text-black shadow-lg shadow-bull/20">Calcular receta</button>
+                </div>
               </div>
+              <div id="best-decision-note" class="mt-4 rounded-xl border border-gold/30 bg-gold/10 p-3 text-sm font-bold text-gold"></div>
               <div id="asset-grid" class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"></div>
             </article>
 

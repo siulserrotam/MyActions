@@ -44,8 +44,25 @@ const categoryLabels = {
 };
 
 let activeCategory = "favorites";
-let selectedAsset = assetGroups.favorites[0];
+let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
 let lastResult = null;
+let notificationsEnabled = false;
+
+function favoriteSymbols() {
+  try {
+    return JSON.parse(localStorage.getItem("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD"];
+  } catch {
+    return ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD"];
+  }
+}
+
+function setFavoriteSymbols(symbols) {
+  localStorage.setItem("decision_engine_favorites", JSON.stringify(Array.from(new Set(symbols))));
+}
+
+function getFavoriteAssets() {
+  return favoriteSymbols().map(findAsset);
+}
 
 function money(value) {
   return Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -56,7 +73,9 @@ function numberText(value) {
 }
 
 function allAssets() {
-  return Object.values(assetGroups).flat();
+  return Object.entries(assetGroups)
+    .filter(([category]) => category !== "favorites")
+    .flatMap(([, assets]) => assets);
 }
 
 function uniqueAssets() {
@@ -114,11 +133,12 @@ function updateGoldenWindow() {
 }
 
 function renderTabs() {
+  assetGroups.favorites = getFavoriteAssets();
   document.querySelectorAll(".tab").forEach((button) => {
     button.classList.toggle("active", button.dataset.category === activeCategory);
     button.addEventListener("click", () => {
       activeCategory = button.dataset.category;
-      selectedAsset = assetGroups[activeCategory][0];
+      selectedAsset = assetGroups[activeCategory][0] || selectedAsset;
       document.getElementById("symbol").value = selectedAsset.symbol;
       renderTabs();
       renderAssets();
@@ -128,9 +148,11 @@ function renderTabs() {
 }
 
 function renderAssets() {
+  assetGroups.favorites = getFavoriteAssets();
+  const activeAssets = assetGroups[activeCategory] || [];
   document.getElementById("category-copy").textContent =
     `${categoryLabels[activeCategory]}: multiplicadores aplicados automaticamente.`;
-  document.getElementById("asset-grid").innerHTML = assetGroups[activeCategory].map((asset) => `
+  document.getElementById("asset-grid").innerHTML = activeAssets.map((asset) => `
     <button type="button" class="asset-card ${asset.symbol === selectedAsset.symbol ? "selected" : ""}" data-symbol="${asset.symbol}">
       <span class="text-base font-black">${asset.symbol}</span>
       <span class="text-xs text-zinc-400">${asset.name}</span>
@@ -145,6 +167,30 @@ function renderAssets() {
       calculate();
     });
   });
+  renderFavoriteButton();
+  renderBestDecisionNote();
+}
+
+function renderFavoriteButton() {
+  const button = document.getElementById("toggle-favorite-btn");
+  const isFavorite = favoriteSymbols().includes(selectedAsset.symbol);
+  button.textContent = isFavorite ? "Quitar favorito" : "Agregar favorito";
+  button.className = isFavorite
+    ? "rounded-xl border border-bear/40 px-4 py-3 text-sm font-black text-bear"
+    : "rounded-xl border border-bull/40 px-4 py-3 text-sm font-black text-bull";
+}
+
+function toggleFavorite() {
+  const symbols = favoriteSymbols();
+  const exists = symbols.includes(selectedAsset.symbol);
+  setFavoriteSymbols(exists ? symbols.filter((symbol) => symbol !== selectedAsset.symbol) : [...symbols, selectedAsset.symbol]);
+  renderTabs();
+  renderAssets();
+}
+
+function renderBestDecisionNote() {
+  document.getElementById("best-decision-note").textContent =
+    "Mejor decision real del dia: requiere precios vivos/spread de XTB. Esta pantalla calcula la receta exacta del activo que selecciones; el ranking global queda limitado hasta conectar feed/API.";
 }
 
 async function calculate() {
@@ -175,6 +221,7 @@ async function calculate() {
   renderWarnings();
   renderTicket();
   renderMath();
+  notifyIfNeeded();
 }
 
 function localCalculate(payload) {
@@ -228,6 +275,30 @@ function renderWarnings() {
   `).join("");
 }
 
+function updateNotificationStatus(text) {
+  document.getElementById("notification-status").textContent = text;
+}
+
+async function enableNotifications() {
+  if (!("Notification" in window)) {
+    updateNotificationStatus("Notificaciones web: tu navegador no las soporta.");
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  notificationsEnabled = permission === "granted";
+  updateNotificationStatus(notificationsEnabled ? "Notificaciones web: activas." : "Notificaciones web: permiso no concedido.");
+}
+
+function notifyIfNeeded() {
+  if (!notificationsEnabled || !lastResult || !("Notification" in window)) return;
+  const importantWarning = (lastResult.warnings || [])[0]?.message;
+  const body = importantWarning || `${lastResult.asset.symbol}: ${lastResult.order_type}, entrada ${lastResult.entry_price}, volumen ${lastResult.volume}.`;
+  const key = `decision:${body}`;
+  if (sessionStorage.getItem("lastDecisionNotification") === key) return;
+  sessionStorage.setItem("lastDecisionNotification", key);
+  new Notification("Decision Engine XTB", { body });
+}
+
 function renderTicket() {
   const rows = [
     ["Activo", lastResult.asset.symbol],
@@ -273,6 +344,8 @@ function bindInputs() {
     document.getElementById(id).addEventListener("change", calculate);
   });
   document.getElementById("calculate-btn").addEventListener("click", calculate);
+  document.getElementById("toggle-favorite-btn").addEventListener("click", toggleFavorite);
+  document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
 }
 
 renderTabs();
