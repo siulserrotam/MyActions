@@ -51,7 +51,7 @@ class DailyCapitalRequest(BaseModel):
     monthly_invested: float = 0
     gains_accumulated: float = 0
     daily_gains: float = 0
-    risk_pct: float = Field(default=0.8, gt=0, le=10)
+    risk_pct: float = Field(default=1, gt=0, le=10)
     notes: str = ""
 
 

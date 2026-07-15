@@ -36,7 +36,7 @@ class CapitalService:
         monthly_invested: float = 0,
         gains_accumulated: float = 0,
         daily_gains: float = 0,
-        risk_pct: float = 0.8,
+        risk_pct: float = 1,
         notes: str = "",
     ) -> dict[str, object]:
         normalized_type = target_type if target_type in {"money", "percent"} else "money"
@@ -100,9 +100,9 @@ class CapitalService:
             "monthly_invested": round(record.monthly_invested or 0, 2),
             "gains_accumulated": round(record.gains_accumulated or 0, 2),
             "daily_gains": round(record.daily_gains or 0, 2),
-            "risk_pct": round(record.risk_pct or 0.8, 4),
-            "risk_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100), 2),
-            "reward_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100) * 2, 2),
+            "risk_pct": round(record.risk_pct or 1, 4),
+            "risk_per_trade": round(record.balance * ((record.risk_pct or 1) / 100), 2),
+            "reward_per_trade": round(record.balance * ((record.risk_pct or 1) / 100) * 2, 2),
             "buying_power": round(record.balance * 4, 2),
             "broker": record.broker,
             "instrument_type": record.instrument_type,

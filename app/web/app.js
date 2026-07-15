@@ -1,36 +1,36 @@
 const assetGroups = {
   favorites: [
-    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1 },
-    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1 },
-    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1 },
-    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100 },
-    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1 },
+    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1, marketPrice: 420.5 },
+    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1, marketPrice: 172.2 },
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1, marketPrice: 23000 },
+    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100, marketPrice: 3400 },
+    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
   ],
   forex: [
-    { symbol: "EURUSD", name: "Euro / US Dollar", category: "forex", multiplier: 100000 },
-    { symbol: "GBPUSD", name: "British Pound / US Dollar", category: "forex", multiplier: 100000 },
-    { symbol: "USDJPY", name: "US Dollar / Yen", category: "forex", multiplier: 100000 },
+    { symbol: "EURUSD", name: "Euro / US Dollar", category: "forex", multiplier: 100000, marketPrice: 1.09 },
+    { symbol: "GBPUSD", name: "British Pound / US Dollar", category: "forex", multiplier: 100000, marketPrice: 1.34 },
+    { symbol: "USDJPY", name: "US Dollar / Yen", category: "forex", multiplier: 100000, marketPrice: 148 },
   ],
   indices: [
-    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1 },
-    { symbol: "US500", name: "S&P 500 CFD", category: "indices", multiplier: 1 },
-    { symbol: "DE40", name: "DAX 40 CFD", category: "indices", multiplier: 1 },
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1, marketPrice: 23000 },
+    { symbol: "US500", name: "S&P 500 CFD", category: "indices", multiplier: 1, marketPrice: 6500 },
+    { symbol: "DE40", name: "DAX 40 CFD", category: "indices", multiplier: 1, marketPrice: 24000 },
   ],
   commodities: [
-    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100 },
-    { symbol: "OIL", name: "Oil CFD", category: "commodities", multiplier: 1000 },
-    { symbol: "NATGAS", name: "Natural Gas CFD", category: "commodities", multiplier: 10000 },
+    { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100, marketPrice: 3400 },
+    { symbol: "OIL", name: "Oil CFD", category: "commodities", multiplier: 1000, marketPrice: 85 },
+    { symbol: "NATGAS", name: "Natural Gas CFD", category: "commodities", multiplier: 10000, marketPrice: 2.9 },
   ],
   crypto: [
-    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1 },
-    { symbol: "ETHUSD", name: "Ethereum CFD", category: "crypto", multiplier: 1 },
+    { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
+    { symbol: "ETHUSD", name: "Ethereum CFD", category: "crypto", multiplier: 1, marketPrice: 3400 },
   ],
   stocks: [
-    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1 },
-    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1 },
-    { symbol: "AMD.US", name: "AMD CFD", category: "stocks", multiplier: 1 },
-    { symbol: "AAPL.US", name: "Apple CFD", category: "stocks", multiplier: 1 },
-    { symbol: "SPY.US", name: "SPY ETF CFD", category: "stocks", multiplier: 1 },
+    { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1, marketPrice: 420.5 },
+    { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1, marketPrice: 172.2 },
+    { symbol: "AMD.US", name: "AMD CFD", category: "stocks", multiplier: 1, marketPrice: 155 },
+    { symbol: "AAPL.US", name: "Apple CFD", category: "stocks", multiplier: 1, marketPrice: 230 },
+    { symbol: "SPY.US", name: "SPY ETF CFD", category: "stocks", multiplier: 1, marketPrice: 625 },
   ],
 };
 
@@ -42,6 +42,10 @@ const categoryLabels = {
   crypto: "Criptomonedas",
   stocks: "Acciones / ETFs CFD",
 };
+
+const defaultAccountBalance = 1000;
+const defaultRiskPct = 1;
+const defaultsVersion = "capital-1000-risk-1";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -94,6 +98,59 @@ function findAsset(symbol) {
     name: `${symbol.toUpperCase()} CFD`,
     category: symbol.toUpperCase().endsWith(".US") ? "stocks" : "indices",
     multiplier: 1,
+    marketPrice: 100,
+  };
+}
+
+function priceDecimals(asset) {
+  if (asset.category === "forex") return asset.symbol.includes("JPY") ? 3 : 5;
+  if (asset.category === "crypto" || asset.category === "indices") return 1;
+  return 2;
+}
+
+function formatPriceForAsset(value, asset) {
+  return Number(value).toFixed(priceDecimals(asset));
+}
+
+function priceStepPct(asset) {
+  if (asset.category === "forex") return 0.0015;
+  if (asset.category === "indices") return 0.003;
+  if (asset.category === "commodities") return 0.004;
+  if (asset.category === "crypto") return 0.006;
+  return 0.01;
+}
+
+function resetOrderFieldsForAsset(asset) {
+  const direction = document.getElementById("direction").value;
+  const market = Number(asset.marketPrice || 100);
+  const step = priceStepPct(asset);
+  const entry = direction === "LONG" ? market * (1 + step) : market * (1 - step);
+  const stop = direction === "LONG" ? market * (1 - step * 1.5) : market * (1 + step * 1.5);
+  const riskDistance = Math.abs(entry - stop);
+  const takeProfit = direction === "LONG" ? entry + riskDistance * 2 : entry - riskDistance * 2;
+
+  document.getElementById("market-price").value = formatPriceForAsset(market, asset);
+  document.getElementById("entry-price").value = formatPriceForAsset(entry, asset);
+  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
+}
+
+function resetOrderFieldsFromMarketInput() {
+  const marketInput = Number(document.getElementById("market-price").value || 0);
+  selectedAsset = {
+    ...findAsset(document.getElementById("symbol").value.trim().toUpperCase()),
+    marketPrice: marketInput > 0 ? marketInput : selectedAsset.marketPrice,
+  };
+  resetOrderFieldsForAsset(selectedAsset);
+}
+
+function selectedAssetFromForm() {
+  const symbol = document.getElementById("symbol").value.trim().toUpperCase();
+  const baseAsset = findAsset(symbol);
+  const marketInput = Number(document.getElementById("market-price").value || 0);
+  return {
+    ...baseAsset,
+    marketPrice: marketInput > 0 ? marketInput : baseAsset.marketPrice,
   };
 }
 
@@ -141,6 +198,7 @@ function renderTabs() {
       activeCategory = button.dataset.category;
       selectedAsset = assetGroups[activeCategory][0] || selectedAsset;
       document.getElementById("symbol").value = selectedAsset.symbol;
+      resetOrderFieldsForAsset(selectedAsset);
       renderTabs();
       renderAssets();
       calculate();
@@ -164,6 +222,7 @@ function renderAssets() {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.symbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
+      resetOrderFieldsForAsset(selectedAsset);
       renderAssets();
       calculate();
     });
@@ -196,7 +255,7 @@ function renderBestDecisionNote() {
 
 async function calculate() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
-  selectedAsset = findAsset(symbol);
+  selectedAsset = selectedAssetFromForm();
   const payload = {
     symbol,
     direction: document.getElementById("direction").value,
@@ -231,8 +290,8 @@ function todayKey() {
 }
 
 function currentConfigPayload() {
-  const accountBalance = Number(document.getElementById("account-balance").value || 0);
-  const riskPct = Number(document.getElementById("risk-pct").value || 0.8);
+  const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const riskPct = Number(document.getElementById("risk-pct").value || defaultRiskPct);
   const investedAccumulated = Number(document.getElementById("invested-accumulated").value || 0);
   const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
   const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
@@ -240,6 +299,12 @@ function currentConfigPayload() {
   return {
     trade_date: todayKey(),
     balance: accountBalance,
+    symbol: document.getElementById("symbol").value.trim().toUpperCase(),
+    market_price: Number(document.getElementById("market-price").value || 0),
+    entry_price: Number(document.getElementById("entry-price").value || 0),
+    stop_price: Number(document.getElementById("stop-price").value || 0),
+    take_profit_price: Number(document.getElementById("take-profit-price").value || 0),
+    direction: document.getElementById("direction").value,
     target_value: Number((accountBalance * riskPct / 100 * 2).toFixed(2)),
     target_type: "money",
     monthly_contribution: monthlyInvested,
@@ -260,13 +325,30 @@ function saveConfigLocal() {
 function loadConfigLocal() {
   try {
     const config = JSON.parse(localStorage.getItem("decision_engine_config") || "null");
-    if (!config) return;
+    const alreadyMigrated = localStorage.getItem("decision_engine_defaults_version") === defaultsVersion;
+    if (!config) {
+      document.getElementById("account-balance").value = defaultAccountBalance;
+      document.getElementById("risk-pct").value = defaultRiskPct;
+      localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
+      return;
+    }
     if (config.balance) document.getElementById("account-balance").value = config.balance;
     if (config.risk_pct) document.getElementById("risk-pct").value = config.risk_pct;
     if (config.invested_accumulated !== undefined) document.getElementById("invested-accumulated").value = config.invested_accumulated;
     if (config.monthly_invested !== undefined) document.getElementById("monthly-invested").value = config.monthly_invested;
     if (config.gains_accumulated !== undefined) document.getElementById("gains-accumulated").value = config.gains_accumulated;
     if (config.daily_gains !== undefined) document.getElementById("daily-gains").value = config.daily_gains;
+    if (config.symbol) document.getElementById("symbol").value = config.symbol;
+    if (config.direction) document.getElementById("direction").value = config.direction;
+    if (config.market_price) document.getElementById("market-price").value = config.market_price;
+    if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
+    if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
+    if (config.take_profit_price) document.getElementById("take-profit-price").value = config.take_profit_price;
+    if (!alreadyMigrated) {
+      document.getElementById("account-balance").value = defaultAccountBalance;
+      document.getElementById("risk-pct").value = defaultRiskPct;
+      localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
+    }
   } catch {
     return;
   }
@@ -429,9 +511,23 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
+  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
+  });
+  document.getElementById("direction").addEventListener("change", () => {
+    resetOrderFieldsForAsset(selectedAsset);
+    calculate();
+  });
+  document.getElementById("symbol").addEventListener("change", () => {
+    selectedAsset = findAsset(document.getElementById("symbol").value.trim().toUpperCase());
+    resetOrderFieldsForAsset(selectedAsset);
+    renderAssets();
+    calculate();
+  });
+  document.getElementById("market-price").addEventListener("change", () => {
+    resetOrderFieldsFromMarketInput();
+    calculate();
   });
   ["account-balance", "risk-pct", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
@@ -448,4 +544,6 @@ renderAssets();
 bindInputs();
 updateGoldenWindow();
 setInterval(updateGoldenWindow, 1000);
+selectedAsset = selectedAssetFromForm();
+resetOrderFieldsForAsset(selectedAsset);
 calculate();
