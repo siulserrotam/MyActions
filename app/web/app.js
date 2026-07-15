@@ -53,6 +53,7 @@ let lastResult = null;
 let notificationsEnabled = false;
 let postbackTimer = null;
 let autoRefreshTimer = null;
+let lastResetSymbol = selectedAsset.symbol;
 
 function favoriteSymbols() {
   try {
@@ -139,6 +140,7 @@ function resetOrderFieldsForAsset(asset) {
   document.getElementById("entry-price").value = formatPriceForAsset(entry, asset);
   document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
   document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
+  lastResetSymbol = asset.symbol;
 }
 
 function resetOrderFieldsFromMarketInput() {
@@ -154,6 +156,9 @@ function selectedAssetFromForm() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
   const baseAsset = findAsset(symbol);
   const marketInput = Number(document.getElementById("market-price").value || 0);
+  if (symbol !== lastResetSymbol) {
+    return baseAsset;
+  }
   return {
     ...baseAsset,
     marketPrice: marketInput > 0 ? marketInput : baseAsset.marketPrice,
@@ -549,10 +554,12 @@ function renderTicket() {
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
+  const marketPrice = Number(document.getElementById("market-price").value || 0);
   const expiryMode = document.getElementById("expiry-mode").value;
   const expiryLabel = expiryMode === "DAY" ? "Hoy / fin del dia" : "Sin vencimiento manual";
   const rows = [
     ["Activo", lastResult.asset.symbol, true],
+    ["Precio mercado base", numberText(marketPrice), false],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
     ["Precio de Entrada", numberText(lastResult.entry_price), true],
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
@@ -624,6 +631,16 @@ function bindInputs() {
     resetOrderFieldsForAsset(selectedAsset);
     renderAssets();
     calculate();
+  });
+  document.getElementById("symbol").addEventListener("input", () => {
+    const typedSymbol = document.getElementById("symbol").value.trim().toUpperCase();
+    const typedAsset = uniqueAssets().find((asset) => asset.symbol === typedSymbol);
+    if (typedAsset) {
+      selectedAsset = typedAsset;
+      resetOrderFieldsForAsset(selectedAsset);
+      renderAssets();
+      calculate();
+    }
   });
   document.getElementById("market-price").addEventListener("change", () => {
     resetOrderFieldsFromMarketInput();
