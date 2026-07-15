@@ -191,7 +191,7 @@ function toggleFavorite() {
 
 function renderBestDecisionNote() {
   document.getElementById("best-decision-note").textContent =
-    "Mejor decision real del dia: requiere precios vivos/spread de XTB. Esta pantalla calcula la receta exacta del activo que selecciones; el ranking global queda limitado hasta conectar feed/API.";
+    "Modo manual seguro: eliges activo y precios. La app calcula el volumen exacto y el ticket para XTB; no se conecta a tu cuenta.";
 }
 
 async function calculate() {
@@ -233,15 +233,21 @@ function todayKey() {
 function currentConfigPayload() {
   const accountBalance = Number(document.getElementById("account-balance").value || 0);
   const riskPct = Number(document.getElementById("risk-pct").value || 0.8);
-  const dailyProfit = Number(document.getElementById("daily-profit").value || 0);
-  const monthlyContribution = Number(document.getElementById("monthly-contribution").value || 0);
+  const investedAccumulated = Number(document.getElementById("invested-accumulated").value || 0);
+  const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
+  const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
+  const dailyGains = Number(document.getElementById("daily-gains").value || 0);
   return {
     trade_date: todayKey(),
     balance: accountBalance,
     target_value: Number((accountBalance * riskPct / 100 * 2).toFixed(2)),
     target_type: "money",
-    monthly_contribution: monthlyContribution,
-    daily_profit: dailyProfit,
+    monthly_contribution: monthlyInvested,
+    daily_profit: dailyGains,
+    invested_accumulated: investedAccumulated,
+    monthly_invested: monthlyInvested,
+    gains_accumulated: gainsAccumulated,
+    daily_gains: dailyGains,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
   };
@@ -257,8 +263,10 @@ function loadConfigLocal() {
     if (!config) return;
     if (config.balance) document.getElementById("account-balance").value = config.balance;
     if (config.risk_pct) document.getElementById("risk-pct").value = config.risk_pct;
-    if (config.daily_profit !== undefined) document.getElementById("daily-profit").value = config.daily_profit;
-    if (config.monthly_contribution !== undefined) document.getElementById("monthly-contribution").value = config.monthly_contribution;
+    if (config.invested_accumulated !== undefined) document.getElementById("invested-accumulated").value = config.invested_accumulated;
+    if (config.monthly_invested !== undefined) document.getElementById("monthly-invested").value = config.monthly_invested;
+    if (config.gains_accumulated !== undefined) document.getElementById("gains-accumulated").value = config.gains_accumulated;
+    if (config.daily_gains !== undefined) document.getElementById("daily-gains").value = config.daily_gains;
   } catch {
     return;
   }
@@ -399,10 +407,18 @@ function renderTicket() {
 }
 
 function renderMath() {
+  const investedAccumulated = Number(document.getElementById("invested-accumulated").value || 0);
+  const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
+  const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
+  const dailyGains = Number(document.getElementById("daily-gains").value || 0);
+  const estimatedEquity = investedAccumulated + gainsAccumulated + dailyGains;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Saldo</span><strong>${money(lastResult.account_balance)}</strong></div>
-    <div class="summary-row"><span>Ganancia/perdida dia</span><strong>${money(Number(document.getElementById("daily-profit").value || 0))}</strong></div>
-    <div class="summary-row"><span>Aporte mensual app</span><strong>${money(Number(document.getElementById("monthly-contribution").value || 0))}</strong></div>
+    <div class="summary-row"><span>Invertido acumulado</span><strong>${money(investedAccumulated)}</strong></div>
+    <div class="summary-row"><span>Invertido mensual</span><strong>${money(monthlyInvested)}</strong></div>
+    <div class="summary-row"><span>Ganancias acumuladas</span><strong class="text-bull">${money(gainsAccumulated)}</strong></div>
+    <div class="summary-row"><span>Ganancias dia</span><strong class="text-bull">${money(dailyGains)}</strong></div>
+    <div class="summary-row"><span>Patrimonio manual estimado</span><strong>${money(estimatedEquity)}</strong></div>
     <div class="summary-row"><span>Riesgo configurado</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
@@ -413,11 +429,11 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price", "daily-profit", "monthly-contribution"].forEach((id) => {
+  ["account-balance", "risk-pct", "direction", "symbol", "entry-price", "stop-price", "take-profit-price", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
-  ["account-balance", "risk-pct", "daily-profit", "monthly-contribution"].forEach((id) => {
+  ["account-balance", "risk-pct", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });

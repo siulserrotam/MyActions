@@ -32,6 +32,10 @@ class CapitalService:
         target_type: str,
         monthly_contribution: float = 0,
         daily_profit: float = 0,
+        invested_accumulated: float = 0,
+        monthly_invested: float = 0,
+        gains_accumulated: float = 0,
+        daily_gains: float = 0,
         risk_pct: float = 0.8,
         notes: str = "",
     ) -> dict[str, object]:
@@ -46,6 +50,10 @@ class CapitalService:
                 target_type=normalized_type,
                 monthly_contribution=monthly_contribution,
                 daily_profit=daily_profit,
+                invested_accumulated=invested_accumulated,
+                monthly_invested=monthly_invested,
+                gains_accumulated=gains_accumulated,
+                daily_gains=daily_gains,
                 risk_pct=risk_pct,
                 broker="XTB",
                 instrument_type="CFD",
@@ -60,6 +68,10 @@ class CapitalService:
             record.target_type = normalized_type
             record.monthly_contribution = monthly_contribution
             record.daily_profit = daily_profit
+            record.invested_accumulated = invested_accumulated
+            record.monthly_invested = monthly_invested
+            record.gains_accumulated = gains_accumulated
+            record.daily_gains = daily_gains
             record.risk_pct = risk_pct
             record.notes = notes
             record.updated_at = now
@@ -84,6 +96,10 @@ class CapitalService:
             "max_loss": round(max_loss, 2),
             "monthly_contribution": round(record.monthly_contribution or 0, 2),
             "daily_profit": round(record.daily_profit or 0, 2),
+            "invested_accumulated": round(record.invested_accumulated or 0, 2),
+            "monthly_invested": round(record.monthly_invested or 0, 2),
+            "gains_accumulated": round(record.gains_accumulated or 0, 2),
+            "daily_gains": round(record.daily_gains or 0, 2),
             "risk_pct": round(record.risk_pct or 0.8, 4),
             "risk_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100), 2),
             "reward_per_trade": round(record.balance * ((record.risk_pct or 0.8) / 100) * 2, 2),

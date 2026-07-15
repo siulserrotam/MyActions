@@ -108,6 +108,10 @@ def test_save_daily_capital() -> None:
             "target_type": "percent",
             "monthly_contribution": 100,
             "daily_profit": 12.5,
+            "invested_accumulated": 2500,
+            "monthly_invested": 100,
+            "gains_accumulated": 220,
+            "daily_gains": 12.5,
             "risk_pct": 0.8,
         },
     )
@@ -120,6 +124,10 @@ def test_save_daily_capital() -> None:
     assert payload["max_loss"] == 26
     assert payload["monthly_contribution"] == 100
     assert payload["daily_profit"] == 12.5
+    assert payload["invested_accumulated"] == 2500
+    assert payload["monthly_invested"] == 100
+    assert payload["gains_accumulated"] == 220
+    assert payload["daily_gains"] == 12.5
     assert payload["risk_per_trade"] == 20.8
 
 
