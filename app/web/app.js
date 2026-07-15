@@ -395,6 +395,8 @@ function localCalculate(payload) {
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
   const takeProfit = payload.take_profit_price ||
     (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
+  const positionValue = Number((payload.entry_price * asset.multiplier * volume).toFixed(2));
+  const capitalUsagePct = payload.account_balance > 0 ? Number((positionValue / payload.account_balance * 100).toFixed(2)) : 0;
   return {
     asset,
     direction: payload.direction,
@@ -409,6 +411,8 @@ function localCalculate(payload) {
     multiplier: asset.multiplier,
     raw_volume: rawVolume,
     volume,
+    position_value: positionValue,
+    capital_usage_pct: capitalUsagePct,
     expected_loss: Number((distance * asset.multiplier * volume).toFixed(2)),
     expected_profit: Number((Math.abs(takeProfit - payload.entry_price) * asset.multiplier * volume).toFixed(2)),
     risk_reward: "1:2",
@@ -462,21 +466,28 @@ function notifyIfNeeded() {
 }
 
 function renderTicket() {
+  if (!lastResult) return;
+  const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
+  const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const rows = [
-    ["Activo", lastResult.asset.symbol],
-    ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`],
-    ["Precio de Entrada", numberText(lastResult.entry_price)],
-    ["Stop Loss (Escudo)", numberText(lastResult.stop_loss)],
-    ["Take Profit (Meta)", numberText(lastResult.take_profit)],
-    ["Volumen a colocar", numberText(lastResult.volume)],
+    ["Activo", lastResult.asset.symbol, true],
+    ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
+    ["Precio de Entrada", numberText(lastResult.entry_price), true],
+    ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
+    ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
+    ["Volumen a colocar", numberText(lastResult.volume), true],
+    ["Valor aprox. de posicion", money(positionValue), false],
+    ["Uso aprox. de tu capital", `${numberText(capitalUsagePct)}%`, false],
+    ["Perdida maxima estimada", money(lastResult.expected_loss), false],
+    ["Ganancia objetivo estimada", money(lastResult.expected_profit), false],
   ];
-  document.getElementById("ticket").innerHTML = rows.map(([label, value]) => `
+  document.getElementById("ticket").innerHTML = rows.map(([label, value, canCopy]) => `
     <div class="copy-row">
       <div>
         <p class="text-xs font-bold uppercase text-zinc-500">${label}</p>
         <p class="mt-1 text-lg font-black text-white">${value}</p>
       </div>
-      <button type="button" class="copy-btn" data-copy="${String(value).replace(/"/g, "&quot;")}">Copiar</button>
+      ${canCopy ? `<button type="button" class="copy-btn" data-copy="${String(value).replace(/"/g, "&quot;")}">Copiar</button>` : ""}
     </div>
   `).join("");
   document.querySelectorAll(".copy-btn").forEach((button) => {

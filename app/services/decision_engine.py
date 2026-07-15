@@ -75,6 +75,8 @@ class DecisionEngineService:
             take_profit = entry_price + reward_distance if direction == "LONG" else entry_price - reward_distance
         expected_loss = round(distance * asset.multiplier * volume, 2)
         expected_profit = round(abs(take_profit - entry_price) * asset.multiplier * volume, 2)
+        position_value = round(entry_price * asset.multiplier * volume, 2)
+        capital_usage_pct = round((position_value / account_balance) * 100, 2) if account_balance > 0 else 0
 
         return {
             "asset": self._asset_payload(asset),
@@ -92,6 +94,8 @@ class DecisionEngineService:
             "multiplier": asset.multiplier,
             "raw_volume": round(raw_volume, 8),
             "volume": volume,
+            "position_value": position_value,
+            "capital_usage_pct": capital_usage_pct,
             "expected_loss": expected_loss,
             "expected_profit": expected_profit,
             "risk_reward": self._risk_reward(expected_loss, expected_profit),
