@@ -63,7 +63,7 @@ class DecisionEngineService:
         take_profit_price: float | None = None,
     ) -> dict[str, object]:
         asset = self.resolve(symbol)
-        normalized_risk_pct = min(max(risk_pct, 0.5), 1)
+        normalized_risk_pct = 0.25
         risk_amount = round(account_balance * (normalized_risk_pct / 100), 2)
         distance = abs(entry_price - stop_price)
         if distance <= 0:
