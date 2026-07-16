@@ -407,6 +407,7 @@ function marketPhaseLabel() {
 function buildTopOpportunities() {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
   const riskPct = Number(document.getElementById("risk-pct").value || defaultRiskPct);
+  const selectedDirection = document.getElementById("direction").value;
   return uniqueAssets().map((asset) => {
     const changePct = Number(asset.liveChangePct ?? 0);
     const direction = directionFromMove(changePct);
@@ -432,27 +433,32 @@ function buildTopOpportunities() {
         ? `${numberText(changePct)}% intradia. ${direction === "WAIT" ? "Sin direccion clara." : `Preparar ${labelFromDirection(direction)}.`} Volumen ${numberText(volume)}.`
         : "No operable con regla actual: volumen entero quedaria menor a 1.",
     };
-  }).filter((item) => item.direction !== "WAIT" || item.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+  })
+    .filter((item) => item.direction === selectedDirection)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
 }
 
 function renderTopOpportunities() {
   const target = document.getElementById("top-opportunities");
   if (!target) return;
   const opportunities = buildTopOpportunities();
+  const selectedDirection = document.getElementById("direction").value;
+  const directionLabel = labelFromDirection(selectedDirection);
   target.innerHTML = `
     <div class="rounded-xl border border-white/10 bg-ink p-3">
-      <p class="text-xs font-black uppercase text-zinc-500">Top 3 activos operables</p>
+      <p class="text-xs font-black uppercase text-zinc-500">Top 3 ${directionLabel}</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
       <p class="mt-1 text-xs text-bear">Ranking por movimiento 5m/intradia y regla volumen/riesgo. Verifica en XTB antes de enviar.</p>
       <div class="mt-3 grid gap-2">
-        ${opportunities.map((item, index) => `
+        ${opportunities.length ? opportunities.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
             <span class="text-xs text-gold">#${index + 1}</span>
             <span class="block text-base font-black">${item.asset.symbol}</span>
             <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
             <span class="mt-1 block text-xs text-zinc-500">${item.reason}</span>
           </button>
-        `).join("")}
+        `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay 3 activos claros para ${directionLabel}. Cambia direccion o espera el proximo refresh.</div>`}
       </div>
     </div>
   `;
@@ -804,6 +810,7 @@ function bindInputs() {
   });
   document.getElementById("direction").addEventListener("change", () => {
     resetOrderFieldsForAsset(selectedAsset);
+    renderTopOpportunities();
     calculate();
   });
   document.getElementById("symbol").addEventListener("change", () => {
