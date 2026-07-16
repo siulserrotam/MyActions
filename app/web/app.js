@@ -295,32 +295,26 @@ function renderBestDecisionNote() {
   const suggestion = buildDailySuggestion();
   document.getElementById("best-decision-note").innerHTML = `
     <div class="grid gap-1">
-      <span class="text-xs uppercase tracking-wide text-gold/80">Sugerencia principal del dia</span>
-      <strong>${suggestion.symbol} ${suggestion.directionLabel}</strong>
+      <span class="text-xs uppercase tracking-wide text-gold/80">Modo ORB manual</span>
+      <strong>${suggestion.title}</strong>
       <span class="text-sm text-zinc-200">${suggestion.reason}</span>
-      <span class="text-xs text-zinc-400">Sin feed de noticias real conectado: esta sugerencia usa precios manuales, ventana ORB y categorias CFD.</span>
+      <span class="text-xs text-zinc-400">Sin feed de precio/noticias en vivo: actualiza el precio de mercado y decide despues de la primera vela 9:30-9:35 NY.</span>
     </div>
   `;
   renderTopOpportunities();
 }
 
 function buildDailySuggestion() {
-  const candidates = uniqueAssets().map((asset) => {
-    const step = priceStepPct(asset);
-    const momentumScore = step * 1000;
-    const capitalFit = asset.marketPrice * asset.multiplier <= defaultAccountBalance ? 2 : 0;
-    const categoryScore = ({ indices: 5, commodities: 4, stocks: 3, crypto: 2, forex: 1 }[asset.category] || 0);
-    return {
-      asset,
-      score: categoryScore + momentumScore + capitalFit,
-    };
-  }).sort((a, b) => b.score - a.score);
-  const pick = candidates[0]?.asset || selectedAsset;
-  const directionLabel = pick.category === "commodities" || pick.category === "indices" ? "LONG/SHORT segun ruptura" : "LONG si rompe, SHORT si pierde soporte";
+  const symbol = document.getElementById("symbol")?.value?.trim().toUpperCase() || selectedAsset.symbol;
+  const market = Number(document.getElementById("market-price")?.value || selectedAsset.marketPrice || 0);
+  const base = findAsset(symbol).marketPrice || market;
+  const driftPct = base > 0 ? ((market - base) / base) * 100 : 0;
+  const bias = driftPct < -0.7 ? "bajista" : driftPct > 0.7 ? "alcista" : "neutral";
   return {
-    symbol: pick.symbol,
-    directionLabel,
-    reason: `Prioriza ${pick.name}: buena liquidez relativa, multiplicador x${numberText(pick.multiplier)} y lectura rapida para operar un solo CFD del dia.`,
+    title: `${symbol}: sesgo ${bias}`,
+    reason: bias === "bajista"
+      ? "Si el activo viene cayendo, no uses BUY STOP por defecto. Cambia direccion a SHORT y espera ruptura del minimo de la primera vela."
+      : "La app no esta leyendo noticias/precio real. Usa el ticket solo despues de actualizar precio mercado, maximo/minimo de primera vela y direccion.",
   };
 }
 
@@ -374,8 +368,9 @@ function renderTopOpportunities() {
   const opportunities = buildTopOpportunities();
   target.innerHTML = `
     <div class="rounded-xl border border-white/10 bg-ink p-3">
-      <p class="text-xs font-black uppercase text-zinc-500">Top 3 alternativas del dia</p>
+      <p class="text-xs font-black uppercase text-zinc-500">Top 3 activos operables</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
+      <p class="mt-1 text-xs text-bear">No son recomendaciones con noticias en vivo; son candidatos por regla de volumen/riesgo.</p>
       <div class="mt-3 grid gap-2">
         ${opportunities.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
