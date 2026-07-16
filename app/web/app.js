@@ -54,6 +54,7 @@ let notificationsEnabled = false;
 let postbackTimer = null;
 let autoRefreshTimer = null;
 let lastResetSymbol = selectedAsset.symbol;
+let liveQuotes = {};
 
 function favoriteSymbols() {
   try {
@@ -97,6 +98,52 @@ function uniqueAssets() {
     seen.add(asset.symbol);
     return true;
   });
+}
+
+function updateLiveStatus(text, tone = "muted") {
+  const box = document.getElementById("live-status");
+  if (!box) return;
+  box.textContent = text;
+  box.className = "mt-3 rounded-xl border bg-ink p-3 text-xs font-bold";
+  if (tone === "ok") box.classList.add("border-bull/40", "text-bull");
+  else if (tone === "error") box.classList.add("border-bear/40", "text-bear");
+  else box.classList.add("border-white/10", "text-zinc-500");
+}
+
+function applyLiveQuote(quote) {
+  const price = Number(quote.price || 0);
+  if (!price) return;
+  liveQuotes[quote.symbol] = quote;
+  Object.values(assetGroups).flat().forEach((asset) => {
+    if (asset.symbol === quote.symbol) {
+      asset.marketPrice = price;
+      asset.liveChangePct = quote.change_pct;
+      asset.liveSource = quote.source;
+      asset.liveUpdatedAt = quote.updated_at;
+    }
+  });
+}
+
+async function refreshLivePrices({ resetSelected = false } = {}) {
+  const symbols = uniqueAssets().map((asset) => asset.symbol).join(",");
+  try {
+    updateLiveStatus("Live prices: actualizando...");
+    const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    (payload.items || []).forEach(applyLiveQuote);
+    if (liveQuotes[selectedAsset.symbol] && resetSelected) {
+      selectedAsset = findAsset(selectedAsset.symbol);
+      resetOrderFieldsForAsset(selectedAsset);
+    }
+    updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
+    renderAssets();
+    renderTopOpportunities();
+    calculate();
+  } catch (error) {
+    updateLiveStatus("Live prices: no disponibles, usando ultimo valor manual/estatico.", "error");
+    calculate();
+  }
 }
 
 function findAsset(symbol) {
@@ -228,7 +275,7 @@ function scheduleAutoRefresh() {
   const label = marketOpen ? "mercado abierto, cada 5 min" : "mercado cerrado, cada 1 hora";
   document.getElementById("refresh-status").textContent = `Auto refresh: ${label}.`;
   autoRefreshTimer = window.setTimeout(() => {
-    calculate();
+    refreshLivePrices({ resetSelected: true });
     scheduleAutoRefresh();
   }, refreshMs);
 }
@@ -259,6 +306,7 @@ function renderAssets() {
       <span class="text-base font-black">${asset.symbol}</span>
       <span class="text-xs text-zinc-400">${asset.name}</span>
       <span class="mt-2 text-xs font-bold text-zinc-500">Multiplicador x${numberText(asset.multiplier)}</span>
+      <span class="mt-1 text-xs font-bold ${asset.liveChangePct < 0 ? "text-bear" : "text-bull"}">${asset.marketPrice ? numberText(asset.marketPrice) : "-"} ${asset.liveChangePct !== undefined ? `(${numberText(asset.liveChangePct)}%)` : ""}</span>
     </button>
   `).join("");
   document.querySelectorAll(".asset-card").forEach((button) => {
@@ -771,4 +819,5 @@ setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();
 resetOrderFieldsForAsset(selectedAsset);
 calculate();
+refreshLivePrices({ resetSelected: true });
 scheduleAutoRefresh();

@@ -36,6 +36,7 @@ from app.services.orb_dashboard import OrbDashboardService
 from app.services.capital import CapitalService
 from app.services.market_clock import MarketClockService
 from app.services.decision_engine import DecisionEngineService
+from app.services.live_market import LiveMarketService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -309,6 +310,23 @@ def orb_calculate(
 @router.get("/market/clock")
 def market_clock() -> dict[str, object]:
     return MarketClockService().snapshot()
+
+
+@router.get("/market/live")
+def market_live(symbols: str = Query("TSM.US,NVDA.US,US100,GOLD,BTCUSD")) -> dict[str, object]:
+    parsed_symbols = [item.strip().upper() for item in symbols.split(",") if item.strip()]
+    return LiveMarketService().quotes(parsed_symbols[:20])
+
+
+@router.get("/market/live/{symbol}")
+def market_live_symbol(symbol: str) -> dict[str, object]:
+    try:
+        return LiveMarketService().quote(symbol)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo cargar precio live para {symbol}: {exc}",
+        ) from exc
 
 
 @router.get("/engine/universe")

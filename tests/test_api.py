@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.routes import get_session
 from app.db.session import Base
 from app.main import app
+from app.services.live_market import LiveMarketService
 from app.services.orb import OrbService
 from app.services.orb_dashboard import OrbDashboardService
 
@@ -95,6 +96,30 @@ def test_market_clock() -> None:
 
     assert response.status_code == 200
     assert response.json()["timezone"] == "America/New_York"
+
+
+def test_market_live_batch(monkeypatch) -> None:
+    def fake_quote(self, symbol: str) -> dict[str, object]:
+        return {
+            "symbol": symbol.upper(),
+            "provider_symbol": symbol.upper(),
+            "price": 407.74,
+            "open": 419.67,
+            "high": 420.0,
+            "low": 407.0,
+            "change_pct": -2.84,
+            "source": "test",
+            "updated_at": "2026-07-16T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(LiveMarketService, "quote", fake_quote)
+    client = TestClient(app)
+    response = client.get("/market/live?symbols=TSM.US,NVDA.US")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["items"][0]["price"] == 407.74
 
 
 def test_save_daily_capital() -> None:
