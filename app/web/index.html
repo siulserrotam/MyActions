@@ -95,6 +95,11 @@
             <p class="mt-2 text-sm text-zinc-300">Volumen = menor entre volumen por riesgo y volumen por saldo.</p>
             <p class="mt-2 text-xs text-zinc-500">El 1% se calcula sobre tu saldo total. Luego la app ajusta el volumen para que el stop no pierda mas que ese monto.</p>
           </div>
+          <div class="mt-3 rounded-xl border border-gold/30 bg-gold/10 p-3">
+            <p class="text-xs font-bold uppercase text-gold">Apalancamiento explicado</p>
+            <p class="mt-2 text-sm text-zinc-200">Capital real = tu dinero. Valor nominal = tamano de la operacion. Margen = garantia que XTB bloquea.</p>
+            <p class="mt-2 text-xs text-zinc-400">La perdida no se calcula sobre el margen bloqueado: se calcula por movimiento del precio x volumen. Por eso el riesgo debe salir de tu capital real.</p>
+          </div>
           <div id="refresh-status" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Auto refresh: calculando...</div>
           <div id="live-status" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Live prices: esperando actualizacion...</div>
           <div id="postback-status" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Postback: esperando cambios.</div>
@@ -185,6 +190,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=db-top3-v1"></script>
+    <script src="/dashboard/app.js?v=margin-explain-v1"></script>
   </body>
 </html>

@@ -738,6 +738,8 @@ function renderTicket() {
   if (!lastResult) return;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
+  const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
+  const estimatedMargin = positionValue * estimatedMarginPct / 100;
   const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
   const marketPrice = Number(document.getElementById("market-price").value || 0);
@@ -756,6 +758,7 @@ function renderTicket() {
     ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
     ["Regla que manda", volumeBasis, false],
     ["Valor aprox. de posicion", money(positionValue), false],
+    ["Margen estimado bloqueado", `${money(estimatedMargin)} (${estimatedMarginPct}%)`, false],
     ["Uso aprox. de tu capital", `${numberText(capitalUsagePct)}%`, false],
     ["Perdida maxima estimada", money(lastResult.expected_loss), false],
     ["Ganancia objetivo estimada", money(lastResult.expected_profit), false],
@@ -784,6 +787,10 @@ function renderMath() {
   const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
   const dailyGains = Number(document.getElementById("daily-gains").value || 0);
   const estimatedEquity = investedAccumulated + gainsAccumulated + dailyGains;
+  const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
+  const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
+  const estimatedMargin = positionValue * estimatedMarginPct / 100;
+  const leveragedRiskPct = positionValue > 0 ? (lastResult.expected_loss / positionValue) * 100 : 0;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Saldo</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Invertido acumulado</span><strong>${money(investedAccumulated)}</strong></div>
@@ -793,6 +800,9 @@ function renderMath() {
     <div class="summary-row"><span>Patrimonio manual estimado</span><strong>${money(estimatedEquity)}</strong></div>
     <div class="summary-row"><span>Riesgo sobre saldo total</span><strong>${lastResult.risk_pct}% de ${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Perdida maxima permitida</span><strong>${money(lastResult.risk_amount)}</strong></div>
+    <div class="summary-row"><span>Valor nominal operacion</span><strong>${money(positionValue)}</strong></div>
+    <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
+    <div class="summary-row"><span>Riesgo vs nominal</span><strong>${numberText(leveragedRiskPct)}%</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
     <div class="summary-row"><span>Volumen por saldo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
@@ -800,6 +810,7 @@ function renderMath() {
     <div class="summary-row"><span>Perdida esperada</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Relacion R/B</span><strong>${lastResult.risk_reward}</strong></div>
+    <div class="rounded-xl border border-gold/30 bg-gold/10 p-3 text-xs text-zinc-300">Ejemplo: si XTB bloquea solo margen, eso no limita tu perdida. Tu perdida real sigue siendo distancia entrada-stop x volumen x multiplicador.</div>
   `;
 }
 
