@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.auth import create_dashboard_session, verify_dashboard_credentials
 from app.core.security import require_api_key
-from app.db.session import get_session
+from app.db.session import get_session, normalized_database_url
 from app.schemas.responses import (
     BacktestResponse,
     ForecastResponse,
@@ -352,7 +352,7 @@ def daily_capital(
 
 @router.get("/capital/health")
 def capital_health(session: Session = Depends(get_session)) -> dict[str, object]:
-    database_url = settings.database_url
+    database_url = normalized_database_url
     masked_database = database_url
     if "@" in masked_database:
         masked_database = f"{masked_database.split('://', 1)[0]}://***@{masked_database.rsplit('@', 1)[-1]}"
@@ -363,6 +363,7 @@ def capital_health(session: Session = Depends(get_session)) -> dict[str, object]
             "status": "ok",
             "database": masked_database,
             "is_sqlite": database_url.startswith("sqlite"),
+            "looks_like_placeholder": "example.com" in database_url,
             "latest_trade_date": latest["trade_date"] if latest else None,
             "latest_balance": latest["balance"] if latest else None,
         }
