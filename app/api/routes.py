@@ -68,6 +68,7 @@ class EngineCalculateRequest(BaseModel):
     entry_price: float = Field(gt=0)
     stop_price: float = Field(gt=0)
     take_profit_price: float | None = Field(default=None, gt=0)
+    requested_volume: float | None = Field(default=None, gt=0)
 
 
 def validate_ticker(ticker: str) -> str:
@@ -348,6 +349,7 @@ def engine_calculate(payload: EngineCalculateRequest) -> dict[str, object]:
             entry_price=payload.entry_price,
             stop_price=payload.stop_price,
             take_profit_price=payload.take_profit_price,
+            requested_volume=payload.requested_volume,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

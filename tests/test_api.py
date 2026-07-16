@@ -228,3 +228,28 @@ def test_engine_short_warning() -> None:
     payload = response.json()
     assert payload["order_type"] == "SELL STOP"
     assert payload["warnings"][0]["level"] == "danger"
+
+
+def test_engine_accepts_manual_volume_and_validates_risk() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/engine/calculate",
+        json={
+            "symbol": "AAPL.US",
+            "direction": "LONG",
+            "account_balance": 2019.26,
+            "risk_pct": 0.5,
+            "entry_price": 334.72,
+            "stop_price": 326.44,
+            "take_profit_price": 351.29,
+            "requested_volume": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["volume"] == 1
+    assert payload["volume_basis"] == "manual"
+    assert payload["expected_loss"] == 8.28
+    assert payload["expected_profit"] == 16.57
+    assert payload["risk_ok"] is True

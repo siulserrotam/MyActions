@@ -507,6 +507,7 @@ async function calculate() {
     entry_price: Number(document.getElementById("entry-price").value || 0),
     stop_price: Number(document.getElementById("stop-price").value || 0),
     take_profit_price: Number(document.getElementById("take-profit-price").value || 0) || null,
+    requested_volume: Number(document.getElementById("requested-volume").value || 0) || null,
   };
   saveConfigLocal();
   document.getElementById("risk-usd-pill").textContent = money(payload.account_balance * payload.risk_pct / 100);
@@ -548,6 +549,7 @@ function currentConfigPayload() {
     entry_price: Number(document.getElementById("entry-price").value || 0),
     stop_price: Number(document.getElementById("stop-price").value || 0),
     take_profit_price: Number(document.getElementById("take-profit-price").value || 0),
+    requested_volume: Number(document.getElementById("requested-volume").value || 0) || null,
     direction: document.getElementById("direction").value,
     expiry_mode: document.getElementById("expiry-mode").value,
     target_value: Number((accountBalance * riskPct / 100 * 2).toFixed(2)),
@@ -612,6 +614,7 @@ function loadConfigLocal() {
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
     if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
     if (config.take_profit_price) document.getElementById("take-profit-price").value = config.take_profit_price;
+    if (config.requested_volume) document.getElementById("requested-volume").value = config.requested_volume;
     if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
       document.getElementById("account-balance").value = defaultAccountBalance;
@@ -696,8 +699,9 @@ function localCalculate(payload) {
   const rawVolume = riskAmount / (distance * asset.multiplier);
   const capitalVolume = payload.account_balance / (payload.entry_price * asset.multiplier);
   const selectedRawVolume = Math.min(rawVolume, capitalVolume);
-  const volume = roundVolumeForXtb(selectedRawVolume, asset);
-  const volumeBasis = rawVolume <= capitalVolume ? "riesgo" : "saldo";
+  const autoVolume = roundVolumeForXtb(selectedRawVolume, asset);
+  const volume = payload.requested_volume ? roundVolumeForXtb(payload.requested_volume, asset) : autoVolume;
+  const volumeBasis = payload.requested_volume ? "manual" : (rawVolume <= capitalVolume ? "riesgo" : "saldo");
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
   const takeProfit = payload.take_profit_price ||
     (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
@@ -717,12 +721,16 @@ function localCalculate(payload) {
     multiplier: asset.multiplier,
     raw_volume: rawVolume,
     capital_volume: capitalVolume,
+    auto_volume: autoVolume,
+    requested_volume: payload.requested_volume ? volume : null,
     volume_basis: volumeBasis,
     volume,
     position_value: positionValue,
     capital_usage_pct: capitalUsagePct,
     expected_loss: Number((distance * asset.multiplier * volume).toFixed(2)),
     expected_profit: Number((Math.abs(takeProfit - payload.entry_price) * asset.multiplier * volume).toFixed(2)),
+    risk_ok: Number((distance * asset.multiplier * volume).toFixed(2)) <= Number(riskAmount.toFixed(2)),
+    risk_excess: Number(Math.max((distance * asset.multiplier * volume) - riskAmount, 0).toFixed(2)),
     risk_reward: "1:2",
     warnings: buildWarnings(asset, payload.direction),
   };
@@ -742,6 +750,9 @@ function buildWarnings(asset, direction) {
 function renderWarnings() {
   const box = document.getElementById("warnings");
   const warnings = [...(lastResult?.warnings || [])];
+  if (lastResult?.requested_volume && !lastResult.risk_ok) {
+    warnings.push({ level: "danger", message: `NO OPERAR ASI: con volumen ${numberText(lastResult.volume)} pierdes aprox. ${money(lastResult.expected_loss)}, que supera tu riesgo permitido de ${money(lastResult.risk_amount)} por ${money(lastResult.risk_excess)}.` });
+  }
   if (lastResult?.asset?.category === "stocks" && lastResult.volume < 1) {
     warnings.push({ level: "danger", message: "NO OPERAR: XTB exige volumen entero en este CFD y el volumen seguro queda por debajo de 1. Con 1 unidad podrias superar tu riesgo permitido." });
   }
@@ -782,7 +793,7 @@ function renderTicket() {
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
-  const volumeBasis = lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo";
+  const volumeBasis = lastResult.volume_basis === "manual" ? "volumen escrito por ti" : (lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo");
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
   const marketPrice = Number(document.getElementById("market-price").value || 0);
   const expiryMode = document.getElementById("expiry-mode").value;
@@ -796,6 +807,8 @@ function renderTicket() {
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
     ["Vencimiento", expiryLabel, true],
     [volumeLabel, numberText(lastResult.volume), true],
+    ["Volumen automatico seguro", numberText(lastResult.auto_volume ?? lastResult.volume), false],
+    ["Volumen manual usado", lastResult.requested_volume ? numberText(lastResult.requested_volume) : "No escrito", false],
     ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
     ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
     ["Regla que manda", volumeBasis, false],
@@ -804,6 +817,7 @@ function renderTicket() {
     ["Uso aprox. de tu capital", `${numberText(capitalUsagePct)}%`, false],
     ["Perdida maxima estimada", money(lastResult.expected_loss), false],
     ["Ganancia objetivo estimada", money(lastResult.expected_profit), false],
+    ["Cumple riesgo 0.5%", lastResult.risk_ok ? "SI" : "NO", false],
   ];
   document.getElementById("ticket").innerHTML = rows.map(([label, value, canCopy]) => `
     <div class="copy-row">
@@ -846,10 +860,12 @@ function renderMath() {
     <div class="summary-row"><span>Riesgo vs nominal</span><strong>${numberText(leveragedRiskPct)}%</strong></div>
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
+    <div class="summary-row"><span>Volumen automatico seguro</span><strong>${numberText(lastResult.auto_volume ?? lastResult.volume)}</strong></div>
     <div class="summary-row"><span>Volumen por saldo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
-    <div class="summary-row"><span>Freno activo</span><strong>${lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo"}</strong></div>
+    <div class="summary-row"><span>Freno activo</span><strong>${lastResult.volume_basis === "manual" ? "volumen manual" : (lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo")}</strong></div>
     <div class="summary-row"><span>Perdida esperada</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
+    <div class="summary-row"><span>Estado del riesgo</span><strong class="${lastResult.risk_ok ? "text-bull" : "text-bear"}">${lastResult.risk_ok ? "Cumple 0.5%" : `Se pasa por ${money(lastResult.risk_excess || 0)}`}</strong></div>
     <div class="summary-row"><span>Relacion R/B</span><strong>${lastResult.risk_reward}</strong></div>
     <div class="rounded-xl border border-gold/30 bg-gold/10 p-3 text-xs text-zinc-300">Ejemplo: si XTB bloquea solo margen, eso no limita tu perdida. Tu perdida real sigue siendo distancia entrada-stop x volumen x multiplicador.</div>
     <div class="rounded-xl border border-white/10 bg-ink p-3 text-xs text-zinc-400">Como usarlo: Patrimonio total calcula el riesgo. Capital disponible y nivel de margen son frenos. Si el margen baja o ya vas perdiendo, no fuerces una nueva entrada.</div>
@@ -857,7 +873,7 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "expiry-mode", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
+  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "requested-volume", "expiry-mode", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });

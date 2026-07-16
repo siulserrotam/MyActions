@@ -61,6 +61,7 @@ class DecisionEngineService:
         entry_price: float,
         stop_price: float,
         take_profit_price: float | None = None,
+        requested_volume: float | None = None,
     ) -> dict[str, object]:
         asset = self.resolve(symbol)
         normalized_risk_pct = 0.5
@@ -71,8 +72,9 @@ class DecisionEngineService:
         raw_volume = risk_amount / (distance * asset.multiplier)
         capital_volume = account_balance / (entry_price * asset.multiplier)
         selected_raw_volume = min(raw_volume, capital_volume)
-        volume = self._round_volume(selected_raw_volume, asset.category)
-        volume_basis = "riesgo" if raw_volume <= capital_volume else "saldo"
+        auto_volume = self._round_volume(selected_raw_volume, asset.category)
+        volume = self._round_requested_volume(requested_volume, asset.category) if requested_volume else auto_volume
+        volume_basis = "manual" if requested_volume else ("riesgo" if raw_volume <= capital_volume else "saldo")
         order_type = "BUY STOP" if direction == "LONG" else "SELL STOP"
         take_profit = take_profit_price
         if take_profit is None:
@@ -82,6 +84,7 @@ class DecisionEngineService:
         expected_profit = round(abs(take_profit - entry_price) * asset.multiplier * volume, 2)
         position_value = round(entry_price * asset.multiplier * volume, 2)
         capital_usage_pct = round((position_value / account_balance) * 100, 2) if account_balance > 0 else 0
+        risk_ok = expected_loss <= risk_amount
 
         return {
             "asset": self._asset_payload(asset),
@@ -99,12 +102,16 @@ class DecisionEngineService:
             "multiplier": asset.multiplier,
             "raw_volume": round(raw_volume, 8),
             "capital_volume": round(capital_volume, 8),
+            "auto_volume": auto_volume,
+            "requested_volume": volume if requested_volume else None,
             "volume_basis": volume_basis,
             "volume": volume,
             "position_value": position_value,
             "capital_usage_pct": capital_usage_pct,
             "expected_loss": expected_loss,
             "expected_profit": expected_profit,
+            "risk_ok": risk_ok,
+            "risk_excess": round(max(expected_loss - risk_amount, 0), 2),
             "risk_reward": self._risk_reward(expected_loss, expected_profit),
             "warnings": self._warnings(asset, direction),
         }
@@ -153,6 +160,11 @@ class DecisionEngineService:
             return round(volume, 3)
         if category in {"commodities", "crypto", "indices"}:
             return round(volume, 3)
+        return round(volume, 3)
+
+    def _round_requested_volume(self, volume: float, category: AssetCategory) -> float:
+        if category == "stocks":
+            return float(math.floor(volume))
         return round(volume, 3)
 
     def _risk_reward(self, loss: float, profit: float) -> str:
