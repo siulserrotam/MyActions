@@ -97,12 +97,12 @@
             <p class="mt-2 text-sm text-zinc-300">1. Copia patrimonio, disponible, beneficio y margen desde XTB.</p>
             <p class="mt-2 text-sm text-zinc-300">2. Riesgo fijo: 0.5% de tu patrimonio para buscar 1.0% de beneficio.</p>
             <p class="mt-2 text-sm text-zinc-300">3. Usa el ticket solo si el semaforo no dice NO OPERAR.</p>
-            <p class="mt-2 text-xs text-zinc-500">El riesgo se calcula sobre tu patrimonio total. Capital disponible, beneficio abierto y margen funcionan como frenos.</p>
+            <p class="mt-2 text-xs text-zinc-500">El riesgo sale de patrimonio x 0.5%. El margen solo confirma si la cuenta soporta abrir la operacion; no define cuanto puedes perder.</p>
           </div>
           <div class="mt-3 rounded-xl border border-gold/30 bg-gold/10 p-3">
             <p class="text-xs font-bold uppercase text-gold">Apalancamiento explicado</p>
             <p class="mt-2 text-sm text-zinc-200">Capital real = tu dinero. Valor nominal = tamano de la operacion. Margen = garantia que XTB bloquea.</p>
-            <p class="mt-2 text-xs text-zinc-400">La perdida no se calcula sobre el margen bloqueado: se calcula por movimiento del precio x volumen. Por eso el riesgo debe salir de tu capital real.</p>
+            <p class="mt-2 text-xs text-zinc-400">Perdida = volumen x movimiento en contra x valor por punto. Si sube el volumen, el stop debe acercarse para mantener la misma perdida maxima.</p>
           </div>
           <div id="refresh-status" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Auto refresh: calculando...</div>
           <div id="live-status" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Live prices: esperando actualizacion...</div>
@@ -199,6 +199,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=volume-first-v1"></script>
+    <script src="/dashboard/app.js?v=risk-first-volume-v1"></script>
   </body>
 </html>

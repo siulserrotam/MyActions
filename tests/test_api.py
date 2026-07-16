@@ -205,8 +205,8 @@ def test_engine_calculates_dynamic_volume() -> None:
     assert payload["risk_amount"] == 5.3
     assert payload["raw_volume"] == 0.0053
     assert payload["capital_volume"] == 0.00441496
-    assert payload["volume"] == 0.004
-    assert payload["volume_basis"] == "saldo"
+    assert payload["volume"] == 0.005
+    assert payload["volume_basis"] == "riesgo"
     assert payload["order_type"] == "BUY STOP"
 
 

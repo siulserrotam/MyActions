@@ -461,7 +461,7 @@ function buildTopOpportunities() {
     const riskAmount = accountBalance * riskPct / 100;
     const riskVolume = riskAmount / (distance * asset.multiplier);
     const capitalVolume = accountBalance / (entry * asset.multiplier);
-    const volume = roundVolumeForXtb(Math.min(riskVolume, capitalVolume), asset);
+    const volume = roundVolumeForXtb(riskVolume, asset);
     const usable = asset.category !== "stocks" || volume >= 1;
     const movementScore = Math.abs(changePct) * 20;
     const directionPenalty = direction === "WAIT" ? -30 : 0;
@@ -722,10 +722,9 @@ function localCalculate(payload) {
   const riskAmount = payload.account_balance * normalizedRiskPct / 100;
   const rawVolume = riskAmount / (distance * asset.multiplier);
   const capitalVolume = payload.account_balance / (payload.entry_price * asset.multiplier);
-  const selectedRawVolume = Math.min(rawVolume, capitalVolume);
-  const autoVolume = roundVolumeForXtb(selectedRawVolume, asset);
+  const autoVolume = roundVolumeForXtb(rawVolume, asset);
   const volume = payload.requested_volume ? roundVolumeForXtb(payload.requested_volume, asset) : autoVolume;
-  const volumeBasis = payload.requested_volume ? "manual" : (rawVolume <= capitalVolume ? "riesgo" : "saldo");
+  const volumeBasis = payload.requested_volume ? "manual" : "riesgo";
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
   const takeProfit = payload.take_profit_price ||
     (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
@@ -817,7 +816,7 @@ function renderTicket() {
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
-  const volumeBasis = lastResult.volume_basis === "manual" ? "volumen escrito por ti" : (lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo");
+  const volumeBasis = lastResult.volume_basis === "manual" ? "volumen escrito por ti" : "riesgo maximo";
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
   const marketPrice = Number(document.getElementById("market-price").value || 0);
   const expiryMode = document.getElementById("expiry-mode").value;
@@ -835,7 +834,7 @@ function renderTicket() {
     ["Volumen manual usado", lastResult.requested_volume ? numberText(lastResult.requested_volume) : "No escrito", false],
     ["Modo volumen", lastResult.requested_volume ? "Stop/meta ajustados al 0.5%" : "Automatico por riesgo/saldo", false],
     ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
-    ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
+    ["Volumen si usaras saldo completo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
     ["Regla que manda", volumeBasis, false],
     ["Valor aprox. de posicion", money(positionValue), false],
     ["Margen estimado bloqueado", `${money(estimatedMargin)} (${estimatedMarginPct}%)`, false],
@@ -886,8 +885,8 @@ function renderMath() {
     <div class="summary-row"><span>Multiplicador</span><strong>x${numberText(lastResult.multiplier)}</strong></div>
     <div class="summary-row"><span>Volumen bruto</span><strong>${numberText(lastResult.raw_volume)}</strong></div>
     <div class="summary-row"><span>Volumen automatico seguro</span><strong>${numberText(lastResult.auto_volume ?? lastResult.volume)}</strong></div>
-    <div class="summary-row"><span>Volumen por saldo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
-    <div class="summary-row"><span>Freno activo</span><strong>${lastResult.volume_basis === "manual" ? "volumen manual" : (lastResult.volume_basis === "saldo" ? "saldo disponible" : "riesgo maximo")}</strong></div>
+    <div class="summary-row"><span>Volumen si usaras saldo completo</span><strong>${numberText(lastResult.capital_volume ?? lastResult.raw_volume)}</strong></div>
+    <div class="summary-row"><span>Freno activo</span><strong>${lastResult.volume_basis === "manual" ? "volumen manual" : "riesgo maximo"}</strong></div>
     <div class="summary-row"><span>Perdida esperada</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Estado del riesgo</span><strong class="${lastResult.risk_ok ? "text-bull" : "text-bear"}">${lastResult.risk_ok ? "Cumple 0.5%" : `Se pasa por ${money(lastResult.risk_excess || 0)}`}</strong></div>

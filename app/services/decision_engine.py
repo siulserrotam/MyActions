@@ -71,10 +71,9 @@ class DecisionEngineService:
             raise ValueError("La entrada y el stop no pueden ser iguales.")
         raw_volume = risk_amount / (distance * asset.multiplier)
         capital_volume = account_balance / (entry_price * asset.multiplier)
-        selected_raw_volume = min(raw_volume, capital_volume)
-        auto_volume = self._round_volume(selected_raw_volume, asset.category)
+        auto_volume = self._round_volume(raw_volume, asset.category)
         volume = self._round_requested_volume(requested_volume, asset.category) if requested_volume else auto_volume
-        volume_basis = "manual" if requested_volume else ("riesgo" if raw_volume <= capital_volume else "saldo")
+        volume_basis = "manual" if requested_volume else "riesgo"
         order_type = "BUY STOP" if direction == "LONG" else "SELL STOP"
         take_profit = take_profit_price
         if take_profit is None:
