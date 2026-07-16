@@ -1,23 +1,34 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyCapital
 
 
 class CapitalService:
+    def ensure_schema(self, session: Session) -> None:
+        for column in ("available_capital", "margin_level_pct", "open_profit"):
+            try:
+                session.execute(text(f"ALTER TABLE daily_capital ADD COLUMN {column} FLOAT DEFAULT 0"))
+                session.commit()
+            except Exception:
+                session.rollback()
+
     def latest(self, session: Session) -> dict[str, object] | None:
+        self.ensure_schema(session)
         record = session.scalars(
             select(DailyCapital).order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc()).limit(1)
         ).first()
         return self._serialize(record) if record else None
 
     def by_date(self, session: Session, trade_date: date) -> dict[str, object] | None:
+        self.ensure_schema(session)
         record = session.scalars(select(DailyCapital).where(DailyCapital.trade_date == trade_date)).first()
         return self._serialize(record) if record else None
 
     def history(self, session: Session, limit: int = 30) -> list[dict[str, object]]:
+        self.ensure_schema(session)
         records = session.scalars(
             select(DailyCapital).order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc()).limit(limit)
         ).all()
@@ -36,9 +47,13 @@ class CapitalService:
         monthly_invested: float = 0,
         gains_accumulated: float = 0,
         daily_gains: float = 0,
+        available_capital: float = 0,
+        margin_level_pct: float = 0,
+        open_profit: float = 0,
         risk_pct: float = 1,
         notes: str = "",
     ) -> dict[str, object]:
+        self.ensure_schema(session)
         normalized_type = target_type if target_type in {"money", "percent"} else "money"
         now = datetime.now(UTC).replace(tzinfo=None)
         record = session.scalars(select(DailyCapital).where(DailyCapital.trade_date == trade_date)).first()
@@ -54,6 +69,9 @@ class CapitalService:
                 monthly_invested=monthly_invested,
                 gains_accumulated=gains_accumulated,
                 daily_gains=daily_gains,
+                available_capital=available_capital,
+                margin_level_pct=margin_level_pct,
+                open_profit=open_profit,
                 risk_pct=risk_pct,
                 broker="XTB",
                 instrument_type="CFD",
@@ -72,6 +90,9 @@ class CapitalService:
             record.monthly_invested = monthly_invested
             record.gains_accumulated = gains_accumulated
             record.daily_gains = daily_gains
+            record.available_capital = available_capital
+            record.margin_level_pct = margin_level_pct
+            record.open_profit = open_profit
             record.risk_pct = risk_pct
             record.notes = notes
             record.updated_at = now
@@ -100,6 +121,9 @@ class CapitalService:
             "monthly_invested": round(record.monthly_invested or 0, 2),
             "gains_accumulated": round(record.gains_accumulated or 0, 2),
             "daily_gains": round(record.daily_gains or 0, 2),
+            "available_capital": round(record.available_capital or 0, 2),
+            "margin_level_pct": round(record.margin_level_pct or 0, 2),
+            "open_profit": round(record.open_profit or 0, 2),
             "risk_pct": round(record.risk_pct or 1, 4),
             "risk_per_trade": round(record.balance * ((record.risk_pct or 1) / 100), 2),
             "reward_per_trade": round(record.balance * ((record.risk_pct or 1) / 100) * 2, 2),

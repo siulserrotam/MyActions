@@ -341,15 +341,35 @@ function toggleFavorite() {
 
 function renderBestDecisionNote() {
   const suggestion = buildDailySuggestion();
+  const guardrail = buildPortfolioGuardrail();
   document.getElementById("best-decision-note").innerHTML = `
     <div class="grid gap-1">
       <span class="text-xs uppercase tracking-wide text-gold/80">Modo ORB manual</span>
       <strong>${suggestion.title}</strong>
       <span class="text-sm text-zinc-200">${suggestion.reason}</span>
+      <span class="text-sm ${guardrail.toneClass}">${guardrail.message}</span>
       <span class="text-xs text-zinc-400">Sin feed de precio/noticias en vivo: actualiza el precio de mercado y decide despues de la primera vela 9:30-9:35 NY.</span>
     </div>
   `;
   renderTopOpportunities();
+}
+
+function buildPortfolioGuardrail() {
+  const balance = Number(document.getElementById("account-balance")?.value || 0);
+  const available = Number(document.getElementById("available-capital")?.value || 0);
+  const openProfit = Number(document.getElementById("open-profit")?.value || 0);
+  const marginLevel = Number(document.getElementById("margin-level-pct")?.value || 0);
+  const availablePct = balance > 0 ? (available / balance) * 100 : 0;
+  if (marginLevel > 0 && marginLevel < 200) {
+    return { toneClass: "text-bear", message: "Semaforo cartera: NO OPERAR. Nivel de margen bajo; primero libera margen o reduce exposicion." };
+  }
+  if (openProfit < 0 && Math.abs(openProfit) >= balance * 0.005) {
+    return { toneClass: "text-gold", message: "Semaforo cartera: modo defensivo. Ya hay perdida abierta; usa 0.5% o espera confirmacion fuerte." };
+  }
+  if (available > 0 && availablePct < 35) {
+    return { toneClass: "text-gold", message: "Semaforo cartera: capital disponible ajustado. Evita abrir mas volumen si XTB muestra poco disponible." };
+  }
+  return { toneClass: "text-bull", message: "Semaforo cartera: margen y disponible permiten evaluar una operacion, respetando el stop." };
 }
 
 function buildDailySuggestion() {
@@ -505,6 +525,7 @@ async function calculate() {
   renderWarnings();
   renderTicket();
   renderMath();
+  renderBestDecisionNote();
   renderTopOpportunities();
   notifyIfNeeded();
 }
@@ -520,6 +541,9 @@ function currentConfigPayload() {
   const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
   const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
   const dailyGains = Number(document.getElementById("daily-gains").value || 0);
+  const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const openProfit = Number(document.getElementById("open-profit").value || 0);
+  const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
   return {
     trade_date: todayKey(),
     balance: accountBalance,
@@ -538,6 +562,9 @@ function currentConfigPayload() {
     monthly_invested: monthlyInvested,
     gains_accumulated: gainsAccumulated,
     daily_gains: dailyGains,
+    available_capital: availableCapital,
+    margin_level_pct: marginLevelPct,
+    open_profit: openProfit,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
   };
@@ -563,6 +590,9 @@ function loadConfigLocal() {
     if (config.monthly_invested !== undefined) document.getElementById("monthly-invested").value = config.monthly_invested;
     if (config.gains_accumulated !== undefined) document.getElementById("gains-accumulated").value = config.gains_accumulated;
     if (config.daily_gains !== undefined) document.getElementById("daily-gains").value = config.daily_gains;
+    if (config.available_capital !== undefined) document.getElementById("available-capital").value = config.available_capital;
+    if (config.margin_level_pct !== undefined) document.getElementById("margin-level-pct").value = config.margin_level_pct;
+    if (config.open_profit !== undefined) document.getElementById("open-profit").value = config.open_profit;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     if (config.direction) document.getElementById("direction").value = config.direction;
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
@@ -616,6 +646,9 @@ async function verifyDatabaseAndLoadLatest() {
       if (payload.latest.monthly_invested !== undefined) document.getElementById("monthly-invested").value = payload.latest.monthly_invested;
       if (payload.latest.gains_accumulated !== undefined) document.getElementById("gains-accumulated").value = payload.latest.gains_accumulated;
       if (payload.latest.daily_gains !== undefined) document.getElementById("daily-gains").value = payload.latest.daily_gains;
+      if (payload.latest.available_capital !== undefined) document.getElementById("available-capital").value = payload.latest.available_capital;
+      if (payload.latest.margin_level_pct !== undefined) document.getElementById("margin-level-pct").value = payload.latest.margin_level_pct;
+      if (payload.latest.open_profit !== undefined) document.getElementById("open-profit").value = payload.latest.open_profit;
       calculate();
     }
   } catch (error) {
@@ -786,6 +819,9 @@ function renderMath() {
   const monthlyInvested = Number(document.getElementById("monthly-invested").value || 0);
   const gainsAccumulated = Number(document.getElementById("gains-accumulated").value || 0);
   const dailyGains = Number(document.getElementById("daily-gains").value || 0);
+  const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const openProfit = Number(document.getElementById("open-profit").value || 0);
+  const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
   const estimatedEquity = investedAccumulated + gainsAccumulated + dailyGains;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
@@ -793,6 +829,9 @@ function renderMath() {
   const leveragedRiskPct = positionValue > 0 ? (lastResult.expected_loss / positionValue) * 100 : 0;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Saldo</span><strong>${money(lastResult.account_balance)}</strong></div>
+    <div class="summary-row"><span>Capital disponible XTB</span><strong>${money(availableCapital)}</strong></div>
+    <div class="summary-row"><span>Beneficio abierto XTB</span><strong class="${openProfit < 0 ? "text-bear" : "text-bull"}">${money(openProfit)}</strong></div>
+    <div class="summary-row"><span>Nivel de margen XTB</span><strong class="${marginLevelPct && marginLevelPct < 200 ? "text-bear" : "text-bull"}">${marginLevelPct ? `${numberText(marginLevelPct)}%` : "Sin dato"}</strong></div>
     <div class="summary-row"><span>Invertido acumulado</span><strong>${money(investedAccumulated)}</strong></div>
     <div class="summary-row"><span>Invertido mensual</span><strong>${money(monthlyInvested)}</strong></div>
     <div class="summary-row"><span>Ganancias acumuladas</span><strong class="text-bull">${money(gainsAccumulated)}</strong></div>
@@ -811,11 +850,12 @@ function renderMath() {
     <div class="summary-row"><span>Ganancia esperada</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Relacion R/B</span><strong>${lastResult.risk_reward}</strong></div>
     <div class="rounded-xl border border-gold/30 bg-gold/10 p-3 text-xs text-zinc-300">Ejemplo: si XTB bloquea solo margen, eso no limita tu perdida. Tu perdida real sigue siendo distancia entrada-stop x volumen x multiplicador.</div>
+    <div class="rounded-xl border border-white/10 bg-ink p-3 text-xs text-zinc-400">Como usarlo: Patrimonio total calcula el riesgo. Capital disponible y nivel de margen son frenos. Si el margen baja o ya vas perdiendo, no fuerces una nueva entrada.</div>
   `;
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "expiry-mode", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
+  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "expiry-mode", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
@@ -844,7 +884,7 @@ function bindInputs() {
     resetOrderFieldsFromMarketInput();
     calculate();
   });
-  ["account-balance", "risk-pct", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains"].forEach((id) => {
+  ["account-balance", "risk-pct", "invested-accumulated", "monthly-invested", "gains-accumulated", "daily-gains", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });

@@ -55,8 +55,27 @@
           <h2 class="text-lg font-black">Configuracion</h2>
           <div class="mt-4 grid gap-3">
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Capital para calcular orden USD
+              Patrimonio total XTB USD
               <input id="account-balance" class="field" type="number" step="0.01" value="1000" />
+            </label>
+            <div class="rounded-xl border border-bull/30 bg-bull/10 p-3">
+              <p class="text-xs font-bold uppercase text-bull">Datos reales XTB</p>
+              <p class="mt-2 text-xs text-zinc-300">Copia estos valores desde Mi Cartera. La app los guarda y recalcula la receta con tu realidad actual.</p>
+            </div>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Capital disponible XTB USD
+              <input id="available-capital" class="field" type="number" step="0.01" value="0" />
+              <span class="text-xs font-normal text-zinc-500">Ejemplo de tu captura: 1522.59</span>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Beneficio abierto XTB USD
+              <input id="open-profit" class="field" type="number" step="0.01" value="0" />
+              <span class="text-xs font-normal text-zinc-500">Si esta en rojo, escribelo negativo. Ejemplo: -3.24</span>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Nivel de margen XTB %
+              <input id="margin-level-pct" class="field" type="number" step="0.01" value="0" />
+              <span class="text-xs font-normal text-zinc-500">Ejemplo de tu captura: 406.56</span>
             </label>
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
               Saldo invertido acumulado USD
@@ -190,6 +209,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=margin-explain-v1"></script>
+    <script src="/dashboard/app.js?v=xtb-real-portfolio-v1"></script>
   </body>
 </html>

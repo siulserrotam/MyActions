@@ -137,6 +137,9 @@ def test_save_daily_capital() -> None:
             "monthly_invested": 100,
             "gains_accumulated": 220,
             "daily_gains": 12.5,
+            "available_capital": 1522.59,
+            "margin_level_pct": 406.56,
+            "open_profit": -3.24,
             "risk_pct": 0.8,
         },
     )
@@ -153,6 +156,9 @@ def test_save_daily_capital() -> None:
     assert payload["monthly_invested"] == 100
     assert payload["gains_accumulated"] == 220
     assert payload["daily_gains"] == 12.5
+    assert payload["available_capital"] == 1522.59
+    assert payload["margin_level_pct"] == 406.56
+    assert payload["open_profit"] == -3.24
     assert payload["risk_per_trade"] == 20.8
 
 

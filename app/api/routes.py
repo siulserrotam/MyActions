@@ -53,6 +53,9 @@ class DailyCapitalRequest(BaseModel):
     monthly_invested: float = 0
     gains_accumulated: float = 0
     daily_gains: float = 0
+    available_capital: float = 0
+    margin_level_pct: float = 0
+    open_profit: float = 0
     risk_pct: float = Field(default=1, gt=0, le=10)
     notes: str = ""
 
@@ -410,6 +413,9 @@ def save_daily_capital(
             monthly_invested=payload.monthly_invested,
             gains_accumulated=payload.gains_accumulated,
             daily_gains=payload.daily_gains,
+            available_capital=payload.available_capital,
+            margin_level_pct=payload.margin_level_pct,
+            open_profit=payload.open_profit,
             risk_pct=payload.risk_pct,
             notes=payload.notes,
         )
