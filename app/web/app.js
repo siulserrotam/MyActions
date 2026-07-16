@@ -44,8 +44,8 @@ const categoryLabels = {
 };
 
 const defaultAccountBalance = 1000;
-const defaultRiskPct = 0.25;
-const defaultsVersion = "capital-1000-risk-025";
+const defaultRiskPct = 0.5;
+const defaultsVersion = "capital-1000-risk-050";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -364,7 +364,7 @@ function buildPortfolioGuardrail() {
     return { toneClass: "text-bear", message: "Semaforo cartera: NO OPERAR. Nivel de margen bajo; primero libera margen o reduce exposicion." };
   }
   if (openProfit < 0 && Math.abs(openProfit) >= balance * 0.005) {
-    return { toneClass: "text-gold", message: "Semaforo cartera: modo defensivo. Ya hay perdida abierta; conserva el 0.25% y espera confirmacion fuerte." };
+    return { toneClass: "text-gold", message: "Semaforo cartera: modo defensivo. Ya hay perdida abierta; no subas de 0.5% y espera confirmacion fuerte." };
   }
   if (available > 0 && availablePct < 35) {
     return { toneClass: "text-gold", message: "Semaforo cartera: capital disponible ajustado. Evita abrir mas volumen si XTB muestra poco disponible." };
