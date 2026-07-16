@@ -199,6 +199,29 @@ function resetOrderFieldsFromMarketInput() {
   resetOrderFieldsForAsset(selectedAsset);
 }
 
+function applyVolumeFirstTargets() {
+  const requestedVolume = Number(document.getElementById("requested-volume").value || 0);
+  if (!requestedVolume || requestedVolume <= 0) return;
+  const asset = selectedAssetFromForm();
+  const entry = Number(document.getElementById("entry-price").value || 0);
+  const balance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const direction = document.getElementById("direction").value;
+  const volume = roundVolumeForXtb(requestedVolume, asset);
+  if (!entry || !volume) return;
+  const riskAmount = balance * defaultRiskPct / 100;
+  const stopDistance = riskAmount / (volume * asset.multiplier);
+  const targetDistance = stopDistance * 2;
+  const stop = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
+  const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
+  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
+}
+
+function resetOrderForCurrentMode(asset) {
+  resetOrderFieldsForAsset(asset);
+  applyVolumeFirstTargets();
+}
+
 function selectedAssetFromForm() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
   const baseAsset = findAsset(symbol);
@@ -288,7 +311,7 @@ function renderTabs() {
       activeCategory = button.dataset.category;
       selectedAsset = assetGroups[activeCategory][0] || selectedAsset;
       document.getElementById("symbol").value = selectedAsset.symbol;
-      resetOrderFieldsForAsset(selectedAsset);
+      resetOrderForCurrentMode(selectedAsset);
       renderTabs();
       renderAssets();
       calculate();
@@ -313,7 +336,7 @@ function renderAssets() {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.symbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
-      resetOrderFieldsForAsset(selectedAsset);
+      resetOrderForCurrentMode(selectedAsset);
       renderAssets();
       calculate();
     });
@@ -488,6 +511,7 @@ function renderTopOpportunities() {
       document.getElementById("symbol").value = selectedAsset.symbol;
       const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
       resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || "WAIT");
+      applyVolumeFirstTargets();
       renderAssets();
       calculate();
     });
@@ -809,6 +833,7 @@ function renderTicket() {
     [volumeLabel, numberText(lastResult.volume), true],
     ["Volumen automatico seguro", numberText(lastResult.auto_volume ?? lastResult.volume), false],
     ["Volumen manual usado", lastResult.requested_volume ? numberText(lastResult.requested_volume) : "No escrito", false],
+    ["Modo volumen", lastResult.requested_volume ? "Stop/meta ajustados al 0.5%" : "Automatico por riesgo/saldo", false],
     ["Volumen maximo por riesgo", numberText(lastResult.raw_volume), false],
     ["Volumen maximo por saldo", numberText(lastResult.capital_volume ?? lastResult.raw_volume), false],
     ["Regla que manda", volumeBasis, false],
@@ -877,14 +902,28 @@ function bindInputs() {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
+  ["account-balance", "entry-price", "requested-volume"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", () => {
+      applyVolumeFirstTargets();
+      calculate();
+    });
+    document.getElementById(id).addEventListener("change", () => {
+      applyVolumeFirstTargets();
+      calculate();
+    });
+  });
   document.getElementById("direction").addEventListener("change", () => {
-    resetOrderFieldsForAsset(selectedAsset);
+    if (Number(document.getElementById("requested-volume").value || 0) > 0) {
+      applyVolumeFirstTargets();
+    } else {
+      resetOrderFieldsForAsset(selectedAsset);
+    }
     renderTopOpportunities();
     calculate();
   });
   document.getElementById("symbol").addEventListener("change", () => {
     selectedAsset = findAsset(document.getElementById("symbol").value.trim().toUpperCase());
-    resetOrderFieldsForAsset(selectedAsset);
+    resetOrderForCurrentMode(selectedAsset);
     renderAssets();
     calculate();
   });
@@ -893,7 +932,7 @@ function bindInputs() {
     const typedAsset = uniqueAssets().find((asset) => asset.symbol === typedSymbol);
     if (typedAsset) {
       selectedAsset = typedAsset;
-      resetOrderFieldsForAsset(selectedAsset);
+      resetOrderForCurrentMode(selectedAsset);
       renderAssets();
       calculate();
     }
@@ -919,7 +958,7 @@ verifyDatabaseAndLoadLatest();
 updateGoldenWindow();
 setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();
-resetOrderFieldsForAsset(selectedAsset);
+resetOrderForCurrentMode(selectedAsset);
 calculate();
 refreshLivePrices({ resetSelected: true });
 scheduleAutoRefresh();
