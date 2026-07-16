@@ -301,6 +301,7 @@ function renderBestDecisionNote() {
       <span class="text-xs text-zinc-400">Sin feed de noticias real conectado: esta sugerencia usa precios manuales, ventana ORB y categorias CFD.</span>
     </div>
   `;
+  renderTopOpportunities();
 }
 
 function buildDailySuggestion() {
@@ -321,6 +322,81 @@ function buildDailySuggestion() {
     directionLabel,
     reason: `Prioriza ${pick.name}: buena liquidez relativa, multiplicador x${numberText(pick.multiplier)} y lectura rapida para operar un solo CFD del dia.`,
   };
+}
+
+function marketPhaseLabel() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const total = Number(parts.hour) * 60 + Number(parts.minute);
+  if (total < 9 * 60 + 35) return "Esperando cierre de la primera vela 9:30-9:35 NY.";
+  if (total < 16 * 60) return "Estrategia activa despues de la primera vela ORB.";
+  return "Mercado cerrado: preparar lista para la proxima apertura.";
+}
+
+function buildTopOpportunities() {
+  const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const riskPct = Number(document.getElementById("risk-pct").value || defaultRiskPct);
+  return uniqueAssets().map((asset) => {
+    const step = priceStepPct(asset);
+    const entry = asset.marketPrice * (1 + step);
+    const stop = asset.marketPrice * (1 - step * 1.5);
+    const distance = Math.abs(entry - stop);
+    const riskAmount = accountBalance * riskPct / 100;
+    const riskVolume = riskAmount / (distance * asset.multiplier);
+    const capitalVolume = accountBalance / (entry * asset.multiplier);
+    const volume = roundVolumeForXtb(Math.min(riskVolume, capitalVolume), asset);
+    const usable = asset.category !== "stocks" || volume >= 1;
+    const categoryScore = ({ indices: 9, commodities: 7, stocks: 5, crypto: 3, forex: 2 }[asset.category] || 0);
+    const score = (usable ? 50 : -50) + step * 1000 + categoryScore;
+    return {
+      asset,
+      volume,
+      score,
+      direction: "LONG si rompe maximo / SHORT si pierde minimo",
+      reason: usable
+        ? `Operable con volumen ${numberText(volume)} y freno de riesgo ${riskPct}%.`
+        : "No operable con regla actual: volumen entero quedaria menor a 1.",
+    };
+  }).sort((a, b) => b.score - a.score).slice(0, 3);
+}
+
+function renderTopOpportunities() {
+  const target = document.getElementById("top-opportunities");
+  if (!target) return;
+  const opportunities = buildTopOpportunities();
+  target.innerHTML = `
+    <div class="rounded-xl border border-white/10 bg-ink p-3">
+      <p class="text-xs font-black uppercase text-zinc-500">Top 3 alternativas del dia</p>
+      <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
+      <div class="mt-3 grid gap-2">
+        ${opportunities.map((item, index) => `
+          <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
+            <span class="text-xs text-gold">#${index + 1}</span>
+            <span class="block text-base font-black">${item.asset.symbol}</span>
+            <span class="block text-xs text-zinc-400">${item.direction}</span>
+            <span class="mt-1 block text-xs text-zinc-500">${item.reason}</span>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  document.querySelectorAll("[data-top-symbol]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedAsset = findAsset(button.dataset.topSymbol);
+      document.getElementById("symbol").value = selectedAsset.symbol;
+      resetOrderFieldsForAsset(selectedAsset);
+      renderAssets();
+      calculate();
+    });
+  });
 }
 
 async function calculate() {
@@ -354,6 +430,7 @@ async function calculate() {
   renderWarnings();
   renderTicket();
   renderMath();
+  renderTopOpportunities();
   notifyIfNeeded();
 }
 
@@ -435,6 +512,40 @@ function updatePostbackStatus(text, tone = "muted") {
   if (tone === "ok") box.classList.add("border-bull/40", "text-bull");
   else if (tone === "error") box.classList.add("border-bear/40", "text-bear");
   else box.classList.add("border-white/10", "text-zinc-500");
+}
+
+function updateDbStatus(text, tone = "muted") {
+  const box = document.getElementById("db-status");
+  box.textContent = text;
+  box.className = "mt-3 rounded-xl border bg-ink p-3 text-xs font-bold";
+  if (tone === "ok") box.classList.add("border-bull/40", "text-bull");
+  else if (tone === "error") box.classList.add("border-bear/40", "text-bear");
+  else box.classList.add("border-white/10", "text-zinc-500");
+}
+
+async function verifyDatabaseAndLoadLatest() {
+  try {
+    const healthResponse = await fetch("/capital/health");
+    if (!healthResponse.ok) throw new Error(`HTTP ${healthResponse.status}`);
+    const health = await healthResponse.json();
+    const dbType = health.is_sqlite ? "SQLite local" : "Supabase/Postgres";
+    updateDbStatus(`DB: conectada (${dbType}). Ultimo saldo: ${health.latest_balance ?? "sin registro"}.`, health.is_sqlite ? "error" : "ok");
+
+    const response = await fetch("/capital/daily?limit=1");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload.latest?.balance) {
+      document.getElementById("account-balance").value = payload.latest.balance;
+      if (payload.latest.risk_pct) document.getElementById("risk-pct").value = String(payload.latest.risk_pct);
+      if (payload.latest.invested_accumulated !== undefined) document.getElementById("invested-accumulated").value = payload.latest.invested_accumulated;
+      if (payload.latest.monthly_invested !== undefined) document.getElementById("monthly-invested").value = payload.latest.monthly_invested;
+      if (payload.latest.gains_accumulated !== undefined) document.getElementById("gains-accumulated").value = payload.latest.gains_accumulated;
+      if (payload.latest.daily_gains !== undefined) document.getElementById("daily-gains").value = payload.latest.daily_gains;
+      calculate();
+    }
+  } catch (error) {
+    updateDbStatus("DB: sin conexion. Revisa DATABASE_URL en Vercel y tabla daily_capital.", "error");
+  }
 }
 
 function schedulePostback() {
@@ -659,6 +770,7 @@ loadConfigLocal();
 renderTabs();
 renderAssets();
 bindInputs();
+verifyDatabaseAndLoadLatest();
 updateGoldenWindow();
 setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();

@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -341,6 +342,29 @@ def daily_capital(
         return {
             "latest": service.latest(session),
             "history": service.history(session, limit=limit),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Base de datos no disponible: {exc}",
+        ) from exc
+
+
+@router.get("/capital/health")
+def capital_health(session: Session = Depends(get_session)) -> dict[str, object]:
+    database_url = settings.database_url
+    masked_database = database_url
+    if "@" in masked_database:
+        masked_database = f"{masked_database.split('://', 1)[0]}://***@{masked_database.rsplit('@', 1)[-1]}"
+    try:
+        session.execute(text("SELECT 1"))
+        latest = CapitalService().latest(session)
+        return {
+            "status": "ok",
+            "database": masked_database,
+            "is_sqlite": database_url.startswith("sqlite"),
+            "latest_trade_date": latest["trade_date"] if latest else None,
+            "latest_balance": latest["balance"] if latest else None,
         }
     except Exception as exc:
         raise HTTPException(

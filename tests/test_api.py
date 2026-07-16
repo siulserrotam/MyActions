@@ -131,6 +131,17 @@ def test_save_daily_capital() -> None:
     assert payload["risk_per_trade"] == 20.8
 
 
+def test_capital_health() -> None:
+    client = TestClient(app)
+    response = client.get("/capital/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert "database" in payload
+    assert "latest_balance" in payload
+
+
 def test_engine_universe() -> None:
     client = TestClient(app)
     response = client.get("/engine/universe")
