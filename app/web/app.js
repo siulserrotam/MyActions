@@ -134,7 +134,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     (payload.items || []).forEach(applyLiveQuote);
     if (liveQuotes[selectedAsset.symbol] && resetSelected) {
       selectedAsset = findAsset(selectedAsset.symbol);
-      resetOrderFieldsForAsset(selectedAsset);
+      resetOrderFieldsForAssetDirection(selectedAsset, directionFromMove(selectedAsset.liveChangePct ?? 0));
     }
     updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
     renderAssets();
@@ -354,16 +354,37 @@ function renderBestDecisionNote() {
 
 function buildDailySuggestion() {
   const symbol = document.getElementById("symbol")?.value?.trim().toUpperCase() || selectedAsset.symbol;
-  const market = Number(document.getElementById("market-price")?.value || selectedAsset.marketPrice || 0);
-  const base = findAsset(symbol).marketPrice || market;
-  const driftPct = base > 0 ? ((market - base) / base) * 100 : 0;
-  const bias = driftPct < -0.7 ? "bajista" : driftPct > 0.7 ? "alcista" : "neutral";
+  const asset = findAsset(symbol);
+  const driftPct = Number(asset.liveChangePct ?? 0);
+  const bias = driftPct < -0.35 ? "bajista" : driftPct > 0.35 ? "alcista" : "neutral";
   return {
-    title: `${symbol}: sesgo ${bias}`,
+    title: `${symbol}: sesgo ${bias} (${numberText(driftPct)}%)`,
     reason: bias === "bajista"
-      ? "Si el activo viene cayendo, no uses BUY STOP por defecto. Cambia direccion a SHORT y espera ruptura del minimo de la primera vela."
-      : "La app no esta leyendo noticias/precio real. Usa el ticket solo despues de actualizar precio mercado, maximo/minimo de primera vela y direccion.",
+      ? "Movimiento intradia negativo: favorece SHORT/SELL STOP si pierde el minimo de la primera vela."
+      : bias === "alcista"
+        ? "Movimiento intradia positivo: favorece LONG/BUY STOP si rompe el maximo de la primera vela."
+        : "Movimiento sin ventaja clara: espera ruptura real de la primera vela antes de operar.",
   };
+}
+
+function directionFromMove(changePct) {
+  if (changePct <= -0.35) return "SHORT";
+  if (changePct >= 0.35) return "LONG";
+  return "WAIT";
+}
+
+function labelFromDirection(direction) {
+  if (direction === "SHORT") return "SHORT / SELL STOP";
+  if (direction === "LONG") return "LONG / BUY STOP";
+  return "ESPERAR";
+}
+
+function resetOrderFieldsForAssetDirection(asset, direction) {
+  const directionInput = document.getElementById("direction");
+  if (direction === "LONG" || direction === "SHORT") {
+    directionInput.value = direction;
+  }
+  resetOrderFieldsForAsset(asset);
 }
 
 function marketPhaseLabel() {
@@ -387,27 +408,31 @@ function buildTopOpportunities() {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
   const riskPct = Number(document.getElementById("risk-pct").value || defaultRiskPct);
   return uniqueAssets().map((asset) => {
+    const changePct = Number(asset.liveChangePct ?? 0);
+    const direction = directionFromMove(changePct);
     const step = priceStepPct(asset);
-    const entry = asset.marketPrice * (1 + step);
-    const stop = asset.marketPrice * (1 - step * 1.5);
+    const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
+    const stop = direction === "SHORT" ? asset.marketPrice * (1 + step * 1.5) : asset.marketPrice * (1 - step * 1.5);
     const distance = Math.abs(entry - stop);
     const riskAmount = accountBalance * riskPct / 100;
     const riskVolume = riskAmount / (distance * asset.multiplier);
     const capitalVolume = accountBalance / (entry * asset.multiplier);
     const volume = roundVolumeForXtb(Math.min(riskVolume, capitalVolume), asset);
     const usable = asset.category !== "stocks" || volume >= 1;
-    const categoryScore = ({ indices: 9, commodities: 7, stocks: 5, crypto: 3, forex: 2 }[asset.category] || 0);
-    const score = (usable ? 50 : -50) + step * 1000 + categoryScore;
+    const movementScore = Math.abs(changePct) * 20;
+    const directionPenalty = direction === "WAIT" ? -30 : 0;
+    const score = (usable ? 50 : -50) + movementScore + directionPenalty;
     return {
       asset,
       volume,
       score,
-      direction: "LONG si rompe maximo / SHORT si pierde minimo",
+      direction,
+      directionLabel: labelFromDirection(direction),
       reason: usable
-        ? `Operable con volumen ${numberText(volume)} y freno de riesgo ${riskPct}%.`
+        ? `${numberText(changePct)}% intradia. ${direction === "WAIT" ? "Sin direccion clara." : `Preparar ${labelFromDirection(direction)}.`} Volumen ${numberText(volume)}.`
         : "No operable con regla actual: volumen entero quedaria menor a 1.",
     };
-  }).sort((a, b) => b.score - a.score).slice(0, 3);
+  }).filter((item) => item.direction !== "WAIT" || item.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
 }
 
 function renderTopOpportunities() {
@@ -418,13 +443,13 @@ function renderTopOpportunities() {
     <div class="rounded-xl border border-white/10 bg-ink p-3">
       <p class="text-xs font-black uppercase text-zinc-500">Top 3 activos operables</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
-      <p class="mt-1 text-xs text-bear">No son recomendaciones con noticias en vivo; son candidatos por regla de volumen/riesgo.</p>
+      <p class="mt-1 text-xs text-bear">Ranking por movimiento 5m/intradia y regla volumen/riesgo. Verifica en XTB antes de enviar.</p>
       <div class="mt-3 grid gap-2">
         ${opportunities.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
             <span class="text-xs text-gold">#${index + 1}</span>
             <span class="block text-base font-black">${item.asset.symbol}</span>
-            <span class="block text-xs text-zinc-400">${item.direction}</span>
+            <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
             <span class="mt-1 block text-xs text-zinc-500">${item.reason}</span>
           </button>
         `).join("")}
@@ -435,7 +460,8 @@ function renderTopOpportunities() {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.topSymbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
-      resetOrderFieldsForAsset(selectedAsset);
+      const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
+      resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || "WAIT");
       renderAssets();
       calculate();
     });
