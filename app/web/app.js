@@ -428,6 +428,7 @@ function resetOrderFieldsForAssetDirection(asset, direction) {
     directionInput.value = direction;
   }
   resetOrderFieldsForAsset(asset);
+  applyVolumeFirstTargets();
 }
 
 function marketPhaseLabel() {
@@ -523,6 +524,7 @@ async function calculate() {
   selectedAsset = selectedAssetFromForm();
   const riskPct = defaultRiskPct;
   document.getElementById("risk-pct").value = String(riskPct);
+  applyVolumeFirstTargets();
   const payload = {
     symbol,
     direction: document.getElementById("direction").value,
