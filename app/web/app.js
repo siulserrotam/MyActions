@@ -80,6 +80,17 @@ function numberText(value) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function cfdMarginPct() {
+  return 20;
+}
+
+function minStopPct(asset) {
+  if (asset.category === "forex") return 0.05;
+  if (asset.category === "crypto") return 0.5;
+  if (asset.category === "indices" || asset.category === "commodities") return 0.2;
+  return 0.35;
+}
+
 function roundVolumeForXtb(volume, asset) {
   if (asset.category === "stocks") return Math.floor(volume);
   return Number(volume.toFixed(3));
@@ -775,8 +786,22 @@ function buildWarnings(asset, direction) {
 function renderWarnings() {
   const box = document.getElementById("warnings");
   const warnings = [...(lastResult?.warnings || [])];
+  const positionValue = lastResult?.position_value ?? 0;
+  const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const marginRequired = positionValue * cfdMarginPct() / 100;
+  if (availableCapital > 0 && marginRequired > availableCapital) {
+    warnings.push({ level: "danger", message: `NO OPERAR: margen estimado ${money(marginRequired)} supera tu capital disponible ${money(availableCapital)}. El apalancamiento no evita este bloqueo.` });
+  }
   if (lastResult?.requested_volume && !lastResult.risk_ok) {
     warnings.push({ level: "danger", message: `NO OPERAR ASI: con volumen ${numberText(lastResult.volume)} pierdes aprox. ${money(lastResult.expected_loss)}, que supera tu riesgo permitido de ${money(lastResult.risk_amount)} por ${money(lastResult.risk_excess)}.` });
+  }
+  if (lastResult?.requested_volume && lastResult.entry_price) {
+    const stopDistance = Math.abs(lastResult.entry_price - lastResult.stop_loss);
+    const stopPct = stopDistance / lastResult.entry_price * 100;
+    const minimum = minStopPct(lastResult.asset);
+    if (stopPct < minimum) {
+      warnings.push({ level: "danger", message: `STOP MUY CERCANO: con volumen ${numberText(lastResult.volume)} el stop queda a ${numberText(stopPct)}% del precio. Minimo sugerido para este activo: ${numberText(minimum)}%. Baja volumen o espera mejor entrada.` });
+    }
   }
   if (lastResult?.asset?.category === "stocks" && lastResult.volume < 1) {
     warnings.push({ level: "danger", message: "NO OPERAR: XTB exige volumen entero en este CFD y el volumen seguro queda por debajo de 1. Con 1 unidad podrias superar tu riesgo permitido." });
@@ -816,8 +841,10 @@ function renderTicket() {
   if (!lastResult) return;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
-  const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
+  const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
+  const movementAgainst = Math.abs(lastResult.entry_price - lastResult.stop_loss);
+  const movementTarget = Math.abs(lastResult.take_profit - lastResult.entry_price);
   const volumeBasis = lastResult.volume_basis === "manual" ? "volumen escrito por ti" : "riesgo maximo";
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen entero XTB" : "Volumen a colocar";
   const marketPrice = Number(document.getElementById("market-price").value || 0);
@@ -830,6 +857,8 @@ function renderTicket() {
     ["Precio de Entrada", numberText(lastResult.entry_price), true],
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
+    ["Movimiento max. en contra", numberText(movementAgainst), false],
+    ["Movimiento objetivo", numberText(movementTarget), false],
     ["Vencimiento", expiryLabel, true],
     [volumeLabel, numberText(lastResult.volume), true],
     ["Volumen automatico seguro", numberText(lastResult.auto_volume ?? lastResult.volume), false],
@@ -868,10 +897,13 @@ function renderMath() {
   const openProfit = Number(document.getElementById("open-profit").value || 0);
   const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
-  const estimatedMarginPct = lastResult.asset.category === "stocks" ? 20 : 10;
+  const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   const leveragedRiskPct = positionValue > 0 ? (lastResult.expected_loss / positionValue) * 100 : 0;
   const availableAfterMargin = availableCapital ? availableCapital - estimatedMargin : 0;
+  const movementAgainst = Math.abs(lastResult.entry_price - lastResult.stop_loss);
+  const movementTarget = Math.abs(lastResult.take_profit - lastResult.entry_price);
+  const stopPct = lastResult.entry_price > 0 ? movementAgainst / lastResult.entry_price * 100 : 0;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Patrimonio total XTB</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Capital disponible XTB</span><strong>${money(availableCapital)}</strong></div>
@@ -880,6 +912,9 @@ function renderMath() {
     <div class="summary-row"><span>Riesgo sobre saldo total</span><strong>${lastResult.risk_pct}% de ${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Perdida maxima permitida</span><strong>${money(lastResult.risk_amount)}</strong></div>
     <div class="summary-row"><span>Ganancia objetivo</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
+    <div class="summary-row"><span>Movimiento contra permitido</span><strong>${numberText(movementAgainst)}</strong></div>
+    <div class="summary-row"><span>Movimiento objetivo permitido</span><strong>${numberText(movementTarget)}</strong></div>
+    <div class="summary-row"><span>Distancia stop %</span><strong class="${stopPct < minStopPct(lastResult.asset) ? "text-bear" : "text-bull"}">${numberText(stopPct)}%</strong></div>
     <div class="summary-row"><span>Valor nominal operacion</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Disponible despues margen</span><strong class="${availableAfterMargin < 0 ? "text-bear" : "text-bull"}">${availableCapital ? money(availableAfterMargin) : "Sin dato"}</strong></div>
