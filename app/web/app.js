@@ -84,6 +84,10 @@ function cfdMarginPct() {
   return 20;
 }
 
+function cfdLeverageRatio() {
+  return 100 / cfdMarginPct();
+}
+
 function minStopPct(asset) {
   if (asset.category === "forex") return 0.05;
   if (asset.category === "crypto") return 0.5;
@@ -548,6 +552,7 @@ async function calculate() {
   };
   saveConfigLocal();
   document.getElementById("risk-usd-pill").textContent = money(payload.account_balance * payload.risk_pct / 100);
+  renderLeverageCapacity();
   try {
     const response = await fetch("/engine/calculate", {
       method: "POST",
@@ -679,6 +684,29 @@ function updateDbStatus(text, tone = "muted") {
   if (tone === "ok") box.classList.add("border-bull/40", "text-bull");
   else if (tone === "error") box.classList.add("border-bear/40", "text-bear");
   else box.classList.add("border-white/10", "text-zinc-500");
+}
+
+function renderLeverageCapacity() {
+  const balance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const available = Number(document.getElementById("available-capital")?.value || 0);
+  const leverage = cfdLeverageRatio();
+  const riskUsd = balance * defaultRiskPct / 100;
+  const targetUsd = riskUsd * 2;
+  const nominalByBalance = balance * leverage;
+  const nominalByAvailable = (available || balance) * leverage;
+  const box = document.getElementById("leverage-capacity");
+  if (!box) return;
+  box.innerHTML = `
+    <p class="text-xs font-bold uppercase text-gold">Capacidad CFD 1:${numberText(leverage)}</p>
+    <div class="mt-2 grid gap-2">
+      <div class="summary-row"><span>Capital real</span><strong>${money(balance)}</strong></div>
+      <div class="summary-row"><span>Garantia estimada</span><strong>${cfdMarginPct()}%</strong></div>
+      <div class="summary-row"><span>Nominal por capital</span><strong>${money(nominalByBalance)}</strong></div>
+      <div class="summary-row"><span>Nominal por disponible</span><strong>${money(nominalByAvailable)}</strong></div>
+      <div class="summary-row"><span>Riesgo / meta</span><strong>${money(riskUsd)} / ${money(targetUsd)}</strong></div>
+    </div>
+    <p class="mt-2 text-xs text-zinc-500">El nominal ayuda a saber si cabe por margen. El riesgo maximo sigue siendo ${money(riskUsd)}.</p>
+  `;
 }
 
 async function verifyDatabaseAndLoadLatest() {
@@ -901,6 +929,7 @@ function renderMath() {
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   const leveragedRiskPct = positionValue > 0 ? (lastResult.expected_loss / positionValue) * 100 : 0;
   const availableAfterMargin = availableCapital ? availableCapital - estimatedMargin : 0;
+  const nominalCapacityByAvailable = (availableCapital || lastResult.account_balance) * cfdLeverageRatio();
   const movementAgainst = Math.abs(lastResult.entry_price - lastResult.stop_loss);
   const movementTarget = Math.abs(lastResult.take_profit - lastResult.entry_price);
   const stopPct = lastResult.entry_price > 0 ? movementAgainst / lastResult.entry_price * 100 : 0;
@@ -916,6 +945,7 @@ function renderMath() {
     <div class="summary-row"><span>Movimiento objetivo permitido</span><strong>${numberText(movementTarget)}</strong></div>
     <div class="summary-row"><span>Distancia stop %</span><strong class="${stopPct < minStopPct(lastResult.asset) ? "text-bear" : "text-bull"}">${numberText(stopPct)}%</strong></div>
     <div class="summary-row"><span>Valor nominal operacion</span><strong>${money(positionValue)}</strong></div>
+    <div class="summary-row"><span>Capacidad nominal 1:${numberText(cfdLeverageRatio())}</span><strong>${money(nominalCapacityByAvailable)}</strong></div>
     <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Disponible despues margen</span><strong class="${availableAfterMargin < 0 ? "text-bear" : "text-bull"}">${availableCapital ? money(availableAfterMargin) : "Sin dato"}</strong></div>
     <div class="summary-row"><span>Riesgo vs nominal</span><strong>${numberText(leveragedRiskPct)}%</strong></div>
