@@ -387,9 +387,10 @@ function renderBestDecisionNote() {
       <strong>${suggestion.title}</strong>
       <span class="text-sm text-zinc-200">${suggestion.reason}</span>
       <span class="text-sm ${guardrail.toneClass}">${guardrail.message}</span>
-      <span class="text-xs text-zinc-400">Sin feed de precio/noticias en vivo: actualiza el precio de mercado y decide despues de la primera vela 9:30-9:35 NY.</span>
+      <span class="text-xs text-zinc-400">IA local sin noticias externas: usa movimiento intradia, direccion elegida, margen, stop y riesgo 0.5%.</span>
     </div>
   `;
+  renderAiConfirmation();
   renderTopOpportunities();
 }
 
@@ -424,6 +425,112 @@ function buildDailySuggestion() {
         ? "Movimiento intradia positivo: favorece LONG/BUY STOP si rompe el maximo de la primera vela."
         : "Movimiento sin ventaja clara: espera ruptura real de la primera vela antes de operar.",
   };
+}
+
+function buildAiConfirmation() {
+  if (!lastResult) {
+    return {
+      title: "Confirmacion IA: esperando calculo",
+      status: "ESPERAR",
+      bias: "ESPERAR",
+      confidence: 0,
+      toneClass: "border-sky-400/30 bg-sky-500/10 text-sky-100",
+      reasons: ["Calcula el ticket XTB para validar riesgo, margen y direccion."],
+    };
+  }
+  const asset = lastResult.asset;
+  const driftPct = Number(asset.liveChangePct ?? 0);
+  const driftDirection = directionFromMove(driftPct);
+  const selectedDirection = document.getElementById("direction").value;
+  const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
+  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const stopDistance = Math.abs(lastResult.entry_price - lastResult.stop_loss);
+  const stopPct = lastResult.entry_price > 0 ? stopDistance / lastResult.entry_price * 100 : 0;
+  const minimumStopPct = minStopPct(asset);
+  const marketOpen = isMarketOpenNow();
+  const reasons = [];
+  let score = 50;
+
+  if (driftDirection === "WAIT") {
+    score -= 10;
+    reasons.push("Movimiento intradia sin ventaja clara: no persigas precio.");
+  } else if (driftDirection === selectedDirection) {
+    score += 20;
+    reasons.push(`Movimiento ${numberText(driftPct)}% coincide con ${labelFromDirection(selectedDirection)}.`);
+  } else {
+    score -= 25;
+    reasons.push(`Movimiento ${numberText(driftPct)}% va contra la direccion seleccionada.`);
+  }
+
+  if (lastResult.risk_ok) {
+    score += 10;
+    reasons.push(`Riesgo fijo respetado: perdida estimada ${money(lastResult.expected_loss)} de maximo ${money(lastResult.risk_amount)}.`);
+  } else {
+    score -= 40;
+    reasons.push(`Riesgo excedido: perderias ${money(lastResult.expected_loss)} y el maximo es ${money(lastResult.risk_amount)}.`);
+  }
+
+  if (availableCapital > 0 && marginRequired > availableCapital) {
+    score -= 45;
+    reasons.push(`Margen insuficiente: XTB podria bloquear ${money(marginRequired)} y tienes ${money(availableCapital)} disponible.`);
+  } else if (availableCapital > 0) {
+    score += 10;
+    reasons.push(`Margen estimado dentro del disponible: ${money(marginRequired)}.`);
+  } else {
+    reasons.push("Capital disponible no informado: valida margen manualmente en XTB.");
+  }
+
+  if (stopPct < minimumStopPct) {
+    score -= 20;
+    reasons.push(`Stop muy cercano: ${numberText(stopPct)}% vs minimo sugerido ${numberText(minimumStopPct)}%.`);
+  } else {
+    score += 10;
+    reasons.push(`Stop con distancia aceptable: ${numberText(stopPct)}%.`);
+  }
+
+  if (!marketOpen) {
+    score -= 5;
+    reasons.push("Mercado cerrado o fuera de ventana: prepara, no ejecutes.");
+  }
+
+  const confidence = Math.max(0, Math.min(95, Math.round(score)));
+  const hardBlock = !lastResult.risk_ok || (availableCapital > 0 && marginRequired > availableCapital) || stopPct < minimumStopPct;
+  const status = hardBlock ? "NO OPERAR" : confidence >= 70 && marketOpen ? "OPERABLE" : "ESPERAR";
+  const bias = driftDirection === "WAIT" ? selectedDirection : driftDirection;
+  const toneClass = status === "NO OPERAR"
+    ? "border-bear/60 bg-bear/15 text-bear"
+    : status === "OPERABLE"
+      ? "border-bull/60 bg-bull/15 text-bull"
+      : "border-gold/50 bg-gold/10 text-gold";
+
+  return {
+    title: "Confirmacion IA local",
+    status,
+    bias,
+    confidence,
+    toneClass,
+    reasons: reasons.slice(0, 4),
+  };
+}
+
+function renderAiConfirmation() {
+  const target = document.getElementById("ai-confirmation");
+  if (!target) return;
+  const ai = buildAiConfirmation();
+  target.className = `mt-4 rounded-xl border p-3 text-sm ${ai.toneClass}`;
+  target.innerHTML = `
+    <div class="grid gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs font-black uppercase tracking-wide opacity-80">${ai.title}</span>
+        <strong>${ai.status} - ${labelFromDirection(ai.bias)} - ${ai.confidence}%</strong>
+      </div>
+      <ul class="grid gap-1 text-xs text-zinc-200">
+        ${ai.reasons.map((reason) => `<li>- ${reason}</li>`).join("")}
+      </ul>
+      <span class="text-xs text-zinc-500">Modelo usado: scoring heuristico local, no machine learning externo. El riesgo sigue dependiendo de saldo real, volumen, stop y multiplicador.</span>
+    </div>
+  `;
 }
 
 function directionFromMove(changePct) {
