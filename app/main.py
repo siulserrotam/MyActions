@@ -15,10 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    expose_api_docs = settings.app_env != "production"
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
         description="Explainable trading intelligence API for TSM.",
+        docs_url="/docs" if expose_api_docs else None,
+        redoc_url="/redoc" if expose_api_docs else None,
+        openapi_url="/openapi.json" if expose_api_docs else None,
     )
 
     @app.on_event("startup")
