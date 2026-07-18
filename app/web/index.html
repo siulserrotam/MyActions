@@ -77,24 +77,20 @@
               <input id="margin-level-pct" class="field" type="number" step="0.01" value="0" />
               <span class="text-xs font-normal text-zinc-500">Ejemplo de tu captura: 406.56</span>
             </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Riesgo por operacion %
-              <select id="risk-pct" class="field">
-                <option value="dynamic">IA dinamico 0.25%-1.0%</option>
-                <option value="0.25">0.25% defensivo / objetivo 0.5%</option>
-                <option value="0.5">0.5% normal / objetivo 1.0%</option>
-                <option value="0.75">0.75% agresivo / objetivo 1.5%</option>
-                <option value="1">1.0% maximo / objetivo 2.0%</option>
-              </select>
-              <span id="risk-mode-note" class="text-xs font-normal text-zinc-500">La IA ajusta el riesgo segun confianza, con techo maximo de 1%.</span>
-            </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Direccion
-              <select id="direction" class="field">
-                <option value="LONG">LONG / Compra</option>
-                <option value="SHORT">SHORT / Venta en corto</option>
-              </select>
-            </label>
+            <div id="ai-decision-summary" class="rounded-xl border border-sky-400/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+              Calculando decision IA...
+            </div>
+            <select id="risk-pct" hidden>
+              <option value="dynamic">IA dinamico 0.25%-1.0%</option>
+              <option value="0.25">0.25% defensivo / objetivo 0.5%</option>
+              <option value="0.5">0.5% normal / objetivo 1.0%</option>
+              <option value="0.75">0.75% agresivo / objetivo 1.5%</option>
+              <option value="1">1.0% maximo / objetivo 2.0%</option>
+            </select>
+            <select id="direction" hidden>
+              <option value="LONG">LONG / Compra</option>
+              <option value="SHORT">SHORT / Venta en corto</option>
+            </select>
           </div>
 
           <div class="mt-5 rounded-xl border border-white/10 bg-ink p-3">
@@ -147,8 +143,8 @@
             </article>
 
             <article class="rounded-2xl border border-white/10 bg-panel p-4">
-              <h2 class="text-xl font-black">Parametros manuales de orden</h2>
-              <p class="mt-1 text-sm text-zinc-400">Estos campos son los precios que tu decides copiar desde tu analisis ORB o desde XTB.</p>
+              <h2 class="text-xl font-black">Parametros IA de orden</h2>
+              <p class="mt-1 text-sm text-zinc-400">La IA calcula direccion, riesgo y volumen. Ajusta precios solo si XTB muestra un valor diferente.</p>
               <div class="mt-4 grid gap-3">
                 <label class="grid gap-1 text-sm font-bold text-zinc-300">
                   Activo seleccionado
@@ -170,11 +166,7 @@
                   Take Profit / Meta
                   <input id="take-profit-price" class="field" type="number" step="0.00001" value="507.50" />
                 </label>
-                <label class="grid gap-1 text-sm font-bold text-zinc-300">
-                  Volumen que voy a poner en XTB
-                  <input id="requested-volume" class="field" type="number" step="0.001" placeholder="Vacio = volumen seguro automatico" />
-                  <span class="text-xs font-normal text-zinc-500">Modo volumen: escribe 1, 2, 3... y la app ajusta stop/meta para no pasar el riesgo permitido.</span>
-                </label>
+                <input id="requested-volume" type="hidden" value="" />
                 <label class="grid gap-1 text-sm font-bold text-zinc-300">
                   Vencimiento de orden
                   <select id="expiry-mode" class="field">
@@ -198,14 +190,14 @@
             <article class="rounded-2xl border border-white/10 bg-panel p-4">
               <h2 class="text-xl font-black">Resumen Matematico</h2>
               <div id="math-summary" class="mt-4 grid gap-3 text-sm text-zinc-300"></div>
-              <div class="mt-4 rounded-xl border border-bear/40 bg-bear/10 p-3 text-sm text-bear">
-                No es asesoria financiera. Verifica spread, margen, swap y simbolo CFD en XTB antes de enviar.
+              <div class="mt-4 rounded-xl border border-gold/40 bg-gold/10 p-3 text-sm text-gold">
+                Antes de copiar: confirma en XTB que sea CFD, revisa spread y que el margen estimado coincida.
               </div>
             </article>
           </section>
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=dynamic-ai-risk-v1"></script>
+    <script src="/dashboard/app.js?v=ai-auto-decision-v1"></script>
   </body>
 </html>

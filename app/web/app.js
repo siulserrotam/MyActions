@@ -30,7 +30,13 @@ const assetGroups = {
     { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1, marketPrice: 172.2 },
     { symbol: "AMD.US", name: "AMD CFD", category: "stocks", multiplier: 1, marketPrice: 155 },
     { symbol: "AAPL.US", name: "Apple CFD", category: "stocks", multiplier: 1, marketPrice: 230 },
+    { symbol: "MSFT.US", name: "Microsoft CFD", category: "stocks", multiplier: 1, marketPrice: 510 },
+    { symbol: "GOOGL.US", name: "Alphabet CFD", category: "stocks", multiplier: 1, marketPrice: 185 },
+    { symbol: "AMZN.US", name: "Amazon CFD", category: "stocks", multiplier: 1, marketPrice: 225 },
+    { symbol: "META.US", name: "Meta Platforms CFD", category: "stocks", multiplier: 1, marketPrice: 720 },
+    { symbol: "TSLA.US", name: "Tesla CFD", category: "stocks", multiplier: 1, marketPrice: 320 },
     { symbol: "SPY.US", name: "SPY ETF CFD", category: "stocks", multiplier: 1, marketPrice: 625 },
+    { symbol: "QQQ.US", name: "QQQ ETF CFD", category: "stocks", multiplier: 1, marketPrice: 570 },
   ],
 };
 
@@ -98,7 +104,14 @@ function minStopPct(asset) {
 }
 
 function riskModeValue() {
-  return document.getElementById("risk-pct")?.value || "dynamic";
+  return "dynamic";
+}
+
+function aiDirectionForAsset(asset) {
+  const driftPct = Number(asset.liveChangePct ?? 0);
+  if (driftPct <= -0.35) return "SHORT";
+  if (driftPct >= 0.35) return "LONG";
+  return driftPct < 0 ? "SHORT" : "LONG";
 }
 
 function riskPctFromConfidence(confidence) {
@@ -111,7 +124,7 @@ function riskPctFromConfidence(confidence) {
 
 function buildRiskConfidenceProfile() {
   const asset = selectedAssetFromForm();
-  const selectedDirection = document.getElementById("direction")?.value || "LONG";
+  const selectedDirection = aiDirectionForAsset(asset);
   const driftPct = Number(asset.liveChangePct ?? 0);
   const driftDirection = directionFromMove(driftPct);
   const balance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
@@ -188,16 +201,32 @@ function getEffectiveRiskPct() {
 }
 
 function renderRiskModeNote() {
-  const note = document.getElementById("risk-mode-note");
-  if (!note) return;
-  const mode = riskModeValue();
-  const riskPct = getEffectiveRiskPct();
-  if (mode === "dynamic") {
-    const profile = buildRiskConfidenceProfile();
-    note.textContent = `IA sugiere ${riskPct}% por confianza ${profile.confidence}%. Hora: ${profile.timing.quality}. Techo duro: ${maxAiRiskPct}%.`;
-  } else {
-    note.textContent = `Riesgo fijo elegido: ${riskPct}%. La IA no lo sube ni lo baja.`;
-  }
+  renderAiDecisionSummary();
+}
+
+function renderAiDecisionSummary() {
+  const target = document.getElementById("ai-decision-summary");
+  if (!target) return;
+  const asset = selectedAssetFromForm();
+  const profile = buildRiskConfidenceProfile();
+  const direction = aiDirectionForAsset(asset);
+  const driftDirection = directionFromMove(Number(asset.liveChangePct ?? 0));
+  const action = driftDirection === "WAIT" ? "ESPERAR CONFIRMACION" : labelFromDirection(direction);
+  const volumeText = lastResult ? numberText(lastResult.volume) : "Calculando";
+  const lossText = lastResult ? money(lastResult.expected_loss) : "Calculando";
+  const profitText = lastResult ? money(lastResult.expected_profit) : "Calculando";
+  target.innerHTML = `
+    <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
+    <div class="mt-2 grid gap-2">
+      <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
+      <div class="summary-row"><span>Riesgo sugerido</span><strong>${profile.riskPct}%</strong></div>
+      <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
+      <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
+      <div class="summary-row"><span>Confianza</span><strong>${profile.confidence}%</strong></div>
+      <div class="summary-row"><span>Horario</span><strong>${profile.timing.quality}</strong></div>
+    </div>
+    <p class="mt-2 text-xs text-zinc-400">La app decide direccion, riesgo y volumen. Tu tarea es copiar el ticket solo si la confirmacion dice OPERABLE.</p>
+  `;
 }
 
 function nyTimeParts() {
@@ -327,7 +356,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     (payload.items || []).forEach(applyLiveQuote);
     if (liveQuotes[selectedAsset.symbol] && resetSelected) {
       selectedAsset = findAsset(selectedAsset.symbol);
-      resetOrderFieldsForAssetDirection(selectedAsset, directionFromMove(selectedAsset.liveChangePct ?? 0));
+      resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
     }
     updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
     renderAssets();
@@ -515,17 +544,18 @@ function renderTabs() {
 
 function renderAssets() {
   assetGroups.favorites = getFavoriteAssets();
-  const activeAssets = assetGroups[activeCategory] || [];
+  const riskPct = getEffectiveRiskPct();
+  const activeAssets = (assetGroups[activeCategory] || []).filter((asset) => buildAssetOpportunity(asset, riskPct).usable);
   document.getElementById("category-copy").textContent =
-    `${categoryLabels[activeCategory]}: multiplicadores aplicados automaticamente.`;
-  document.getElementById("asset-grid").innerHTML = activeAssets.map((asset) => `
+    `${categoryLabels[activeCategory]}: mostrando solo activos que caben con tu capital/riesgo.`;
+  document.getElementById("asset-grid").innerHTML = activeAssets.length ? activeAssets.map((asset) => `
     <button type="button" class="asset-card ${asset.symbol === selectedAsset.symbol ? "selected" : ""}" data-symbol="${asset.symbol}">
       <span class="text-base font-black">${asset.symbol}</span>
       <span class="text-xs text-zinc-400">${asset.name}</span>
       <span class="mt-2 text-xs font-bold text-zinc-500">Multiplicador x${numberText(asset.multiplier)}</span>
       <span class="mt-1 text-xs font-bold ${asset.liveChangePct < 0 ? "text-bear" : "text-bull"}">${asset.marketPrice ? numberText(asset.marketPrice) : "-"} ${asset.liveChangePct !== undefined ? `(${numberText(asset.liveChangePct)}%)` : ""}</span>
     </button>
-  `).join("");
+  `).join("") : `<div class="rounded-xl border border-white/10 bg-ink p-3 text-sm text-zinc-400">No hay activos operables en esta categoria con tu capital/riesgo actual.</div>`;
   document.querySelectorAll(".asset-card").forEach((button) => {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.symbol);
@@ -733,9 +763,7 @@ function labelFromDirection(direction) {
 
 function resetOrderFieldsForAssetDirection(asset, direction) {
   const directionInput = document.getElementById("direction");
-  if (direction === "LONG" || direction === "SHORT") {
-    directionInput.value = direction;
-  }
+  directionInput.value = direction === "SHORT" ? "SHORT" : "LONG";
   resetOrderFieldsForAsset(asset);
   applyVolumeFirstTargets();
 }
@@ -757,37 +785,48 @@ function marketPhaseLabel() {
   return "Mercado cerrado: preparar lista para la proxima apertura.";
 }
 
-function buildTopOpportunities() {
+function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const changePct = Number(asset.liveChangePct ?? 0);
+  const direction = aiDirectionForAsset(asset);
+  const driftDirection = directionFromMove(changePct);
+  const step = priceStepPct(asset);
+  const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
+  const stop = direction === "SHORT" ? asset.marketPrice * (1 + step * 1.5) : asset.marketPrice * (1 - step * 1.5);
+  const distance = Math.abs(entry - stop);
+  const riskAmount = accountBalance * riskPct / 100;
+  const riskVolume = riskAmount / (distance * asset.multiplier);
+  const volume = roundVolumeForXtb(riskVolume, asset);
+  const positionValue = entry * asset.multiplier * volume;
+  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
+  const hasMargin = !availableCapital || marginRequired <= availableCapital;
+  const usable = hasVolume && hasMargin;
+  const movementScore = Math.abs(changePct) * 20;
+  const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
+  const marginPenalty = hasMargin ? 0 : -80;
+  const volumePenalty = hasVolume ? 0 : -80;
+  const score = (usable ? 50 : -50) + movementScore + directionPenalty + marginPenalty + volumePenalty;
+  return {
+    asset,
+    volume,
+    score,
+    direction,
+    directionLabel: labelFromDirection(direction),
+    usable,
+    marginRequired,
+    reason: usable
+      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Volumen IA ${numberText(volume)}.`
+      : "Oculto: no cabe por margen o volumen seguro.",
+  };
+}
+
+function buildTopOpportunities() {
   const riskPct = getEffectiveRiskPct();
-  const selectedDirection = document.getElementById("direction").value;
-  return uniqueAssets().map((asset) => {
-    const changePct = Number(asset.liveChangePct ?? 0);
-    const direction = directionFromMove(changePct);
-    const step = priceStepPct(asset);
-    const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
-    const stop = direction === "SHORT" ? asset.marketPrice * (1 + step * 1.5) : asset.marketPrice * (1 - step * 1.5);
-    const distance = Math.abs(entry - stop);
-    const riskAmount = accountBalance * riskPct / 100;
-    const riskVolume = riskAmount / (distance * asset.multiplier);
-    const capitalVolume = accountBalance / (entry * asset.multiplier);
-    const volume = roundVolumeForXtb(riskVolume, asset);
-    const usable = asset.category !== "stocks" || volume >= 1;
-    const movementScore = Math.abs(changePct) * 20;
-    const directionPenalty = direction === "WAIT" ? -30 : 0;
-    const score = (usable ? 50 : -50) + movementScore + directionPenalty;
-    return {
-      asset,
-      volume,
-      score,
-      direction,
-      directionLabel: labelFromDirection(direction),
-      reason: usable
-        ? `${numberText(changePct)}% intradia. ${direction === "WAIT" ? "Sin direccion clara." : `Preparar ${labelFromDirection(direction)}.`} Volumen sugerido ${numberText(volume)} por riesgo.`
-        : "No operable con regla actual: volumen entero quedaria menor a 1.",
-    };
-  })
-    .filter((item) => item.direction === selectedDirection)
+  return uniqueAssets()
+    .map((asset) => buildAssetOpportunity(asset, riskPct))
+    .filter((item) => item.usable)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 }
@@ -796,11 +835,9 @@ function renderTopOpportunities() {
   const target = document.getElementById("top-opportunities");
   if (!target) return;
   const opportunities = buildTopOpportunities();
-  const selectedDirection = document.getElementById("direction").value;
-  const directionLabel = labelFromDirection(selectedDirection);
   target.innerHTML = `
     <div class="rounded-xl border border-white/10 bg-ink p-3">
-      <p class="text-xs font-black uppercase text-zinc-500">Top 3 ${directionLabel}</p>
+      <p class="text-xs font-black uppercase text-zinc-500">Top 3 sugerencias IA</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
       <p class="mt-1 text-xs text-bear">Ranking por movimiento 5m/intradia y regla volumen/riesgo. Verifica en XTB antes de enviar.</p>
       <div class="mt-3 grid gap-2">
@@ -811,7 +848,7 @@ function renderTopOpportunities() {
             <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
             <span class="mt-1 block text-xs text-zinc-500">${item.reason}</span>
           </button>
-        `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay 3 activos claros para ${directionLabel}. Cambia direccion o espera el proximo refresh.</div>`}
+        `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay activos claros. Espera el proximo refresh.</div>`}
       </div>
     </div>
   `;
@@ -820,7 +857,7 @@ function renderTopOpportunities() {
       selectedAsset = findAsset(button.dataset.topSymbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
       const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
-      resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || "WAIT");
+      resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || aiDirectionForAsset(selectedAsset));
       applyVolumeFirstTargets();
       renderAssets();
       calculate();
@@ -831,6 +868,9 @@ function renderTopOpportunities() {
 async function calculate() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
   selectedAsset = selectedAssetFromForm();
+  document.getElementById("risk-pct").value = "dynamic";
+  document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
+  document.getElementById("requested-volume").value = "";
   applyVolumeFirstTargets();
   const riskPct = getEffectiveRiskPct();
   const payload = {
@@ -941,18 +981,17 @@ function loadConfigLocal() {
       return;
     }
     if (config.balance) document.getElementById("account-balance").value = config.balance;
-    if (config.risk_mode) document.getElementById("risk-pct").value = config.risk_mode;
-    else if (config.risk_pct) document.getElementById("risk-pct").value = String(config.risk_pct);
+    document.getElementById("risk-pct").value = "dynamic";
     if (config.available_capital !== undefined) document.getElementById("available-capital").value = config.available_capital;
     if (config.margin_level_pct !== undefined) document.getElementById("margin-level-pct").value = config.margin_level_pct;
     if (config.open_profit !== undefined) document.getElementById("open-profit").value = config.open_profit;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
-    if (config.direction) document.getElementById("direction").value = config.direction;
+    document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
     if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
     if (config.take_profit_price) document.getElementById("take-profit-price").value = config.take_profit_price;
-    if (config.requested_volume) document.getElementById("requested-volume").value = config.requested_volume;
+    document.getElementById("requested-volume").value = "";
     if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
       document.getElementById("account-balance").value = defaultAccountBalance;
@@ -1230,16 +1269,15 @@ function renderMath() {
     <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Disponible despues margen</span><strong class="${availableAfterMargin < 0 ? "text-bear" : "text-bull"}">${availableCapital ? money(availableAfterMargin) : "Sin dato"}</strong></div>
     <div class="summary-row"><span>Estado del riesgo</span><strong class="${lastResult.risk_ok ? "text-bull" : "text-bear"}">${lastResult.risk_ok ? `Cumple ${lastResult.risk_pct}%` : `Se pasa por ${money(lastResult.risk_excess || 0)}`}</strong></div>
-    <div class="rounded-xl border border-gold/30 bg-gold/10 p-3 text-xs text-zinc-300">Recuerda: el margen permite abrir; el stop define cuanto puedes perder.</div>
   `;
 }
 
 function bindInputs() {
-  ["account-balance", "risk-pct", "entry-price", "stop-price", "take-profit-price", "requested-volume", "expiry-mode", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
+  ["account-balance", "entry-price", "stop-price", "take-profit-price", "expiry-mode", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
-  ["account-balance", "entry-price", "requested-volume"].forEach((id) => {
+  ["account-balance", "entry-price"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => {
       applyVolumeFirstTargets();
       calculate();
@@ -1248,15 +1286,6 @@ function bindInputs() {
       applyVolumeFirstTargets();
       calculate();
     });
-  });
-  document.getElementById("direction").addEventListener("change", () => {
-    if (Number(document.getElementById("requested-volume").value || 0) > 0) {
-      applyVolumeFirstTargets();
-    } else {
-      resetOrderFieldsForAsset(selectedAsset);
-    }
-    renderTopOpportunities();
-    calculate();
   });
   document.getElementById("symbol").addEventListener("change", () => {
     selectedAsset = findAsset(document.getElementById("symbol").value.trim().toUpperCase());
@@ -1278,7 +1307,7 @@ function bindInputs() {
     resetOrderFieldsFromMarketInput();
     calculate();
   });
-  ["account-balance", "risk-pct", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
+  ["account-balance", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });
