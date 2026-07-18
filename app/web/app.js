@@ -173,6 +173,7 @@ function findAsset(symbol) {
 
 function priceDecimals(asset) {
   if (asset.category === "forex") return asset.symbol.includes("JPY") ? 3 : 5;
+  if (asset.symbol === "OIL" || asset.symbol === "NATGAS") return 3;
   if (asset.category === "crypto" || asset.category === "indices") return 1;
   return 2;
 }
@@ -489,7 +490,7 @@ function buildTopOpportunities() {
       direction,
       directionLabel: labelFromDirection(direction),
       reason: usable
-        ? `${numberText(changePct)}% intradia. ${direction === "WAIT" ? "Sin direccion clara." : `Preparar ${labelFromDirection(direction)}.`} Volumen ${numberText(volume)}.`
+        ? `${numberText(changePct)}% intradia. ${direction === "WAIT" ? "Sin direccion clara." : `Preparar ${labelFromDirection(direction)}.`} Volumen sugerido ${numberText(volume)} por riesgo.`
         : "No operable con regla actual: volumen entero quedaria menor a 1.",
     };
   })
@@ -871,6 +872,8 @@ function renderTicket() {
   const capitalUsagePct = lastResult.capital_usage_pct ?? Number((positionValue / lastResult.account_balance * 100).toFixed(2));
   const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
+  const valuePerVolume = lastResult.entry_price * lastResult.multiplier;
+  const marginPerVolume = valuePerVolume * estimatedMarginPct / 100;
   const movementAgainst = Math.abs(lastResult.entry_price - lastResult.stop_loss);
   const movementTarget = Math.abs(lastResult.take_profit - lastResult.entry_price);
   const volumeBasis = lastResult.volume_basis === "manual" ? "volumen escrito por ti" : "riesgo maximo";
@@ -889,6 +892,9 @@ function renderTicket() {
     ["Movimiento objetivo", numberText(movementTarget), false],
     ["Vencimiento", expiryLabel, true],
     [volumeLabel, numberText(lastResult.volume), true],
+    ["1 volumen equivale a", `${numberText(lastResult.multiplier)} unidades`, false],
+    ["Valor nominal por 1 volumen", money(valuePerVolume), false],
+    ["Margen por 1 volumen", money(marginPerVolume), false],
     ["Volumen automatico seguro", numberText(lastResult.auto_volume ?? lastResult.volume), false],
     ["Volumen manual usado", lastResult.requested_volume ? numberText(lastResult.requested_volume) : "No escrito", false],
     ["Modo volumen", lastResult.requested_volume ? "Stop/meta ajustados al 0.5%" : "Automatico por riesgo/saldo", false],
@@ -927,6 +933,8 @@ function renderMath() {
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
+  const valuePerVolume = lastResult.entry_price * lastResult.multiplier;
+  const marginPerVolume = valuePerVolume * estimatedMarginPct / 100;
   const leveragedRiskPct = positionValue > 0 ? (lastResult.expected_loss / positionValue) * 100 : 0;
   const availableAfterMargin = availableCapital ? availableCapital - estimatedMargin : 0;
   const nominalCapacityByAvailable = (availableCapital || lastResult.account_balance) * cfdLeverageRatio();
@@ -946,6 +954,8 @@ function renderMath() {
     <div class="summary-row"><span>Distancia stop %</span><strong class="${stopPct < minStopPct(lastResult.asset) ? "text-bear" : "text-bull"}">${numberText(stopPct)}%</strong></div>
     <div class="summary-row"><span>Valor nominal operacion</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Capacidad nominal 1:${numberText(cfdLeverageRatio())}</span><strong>${money(nominalCapacityByAvailable)}</strong></div>
+    <div class="summary-row"><span>Valor por 1 volumen</span><strong>${money(valuePerVolume)}</strong></div>
+    <div class="summary-row"><span>Margen por 1 volumen</span><strong>${money(marginPerVolume)}</strong></div>
     <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Disponible despues margen</span><strong class="${availableAfterMargin < 0 ? "text-bear" : "text-bull"}">${availableCapital ? money(availableAfterMargin) : "Sin dato"}</strong></div>
     <div class="summary-row"><span>Riesgo vs nominal</span><strong>${numberText(leveragedRiskPct)}%</strong></div>
