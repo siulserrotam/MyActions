@@ -64,7 +64,7 @@ class DecisionEngineService:
         requested_volume: float | None = None,
     ) -> dict[str, object]:
         asset = self.resolve(symbol)
-        normalized_risk_pct = 0.5
+        normalized_risk_pct = min(max(float(risk_pct), 0.25), 1.0)
         risk_amount = round(account_balance * (normalized_risk_pct / 100), 2)
         distance = abs(entry_price - stop_price)
         if distance <= 0:
