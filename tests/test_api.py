@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes import get_session
+from app.core.auth import sanitize_next_path, verify_dashboard_credentials
 from app.db.session import Base
 from app.main import app
 from app.services.live_market import LiveMarketService
@@ -37,6 +38,19 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_dashboard_credentials_are_sanitized() -> None:
+    assert verify_dashboard_credentials(" ADMIN ", "Admin123*") is True
+    assert verify_dashboard_credentials("admin\x00", "Admin123*") is True
+    assert verify_dashboard_credentials("admin", "admin123*") is False
+
+
+def test_login_next_path_rejects_external_redirects() -> None:
+    assert sanitize_next_path("/dashboard/") == "/dashboard/"
+    assert sanitize_next_path("https://evil.example") == "/dashboard/"
+    assert sanitize_next_path("//evil.example") == "/dashboard/"
+    assert sanitize_next_path("\\\\evil.example") == "/dashboard/"
 
 
 def test_rejects_unsupported_ticker() -> None:

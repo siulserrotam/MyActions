@@ -1150,22 +1150,24 @@ function updateNotificationStatus(text) {
 
 async function enableNotifications() {
   if (!("Notification" in window)) {
-    updateNotificationStatus("Notificaciones web: tu navegador no las soporta.");
+    updateNotificationStatus("Alertas IA: tu navegador no las soporta.");
     return;
   }
   const permission = await Notification.requestPermission();
   notificationsEnabled = permission === "granted";
-  updateNotificationStatus(notificationsEnabled ? "Notificaciones web: activas." : "Notificaciones web: permiso no concedido.");
+  updateNotificationStatus(notificationsEnabled ? "Alertas IA: activas cuando una receta sea OPERABLE." : "Alertas IA: permiso no concedido.");
 }
 
 function notifyIfNeeded() {
   if (!notificationsEnabled || !lastResult || !("Notification" in window)) return;
-  const importantWarning = (lastResult.warnings || [])[0]?.message;
-  const body = importantWarning || `${lastResult.asset.symbol}: ${lastResult.order_type}, entrada ${lastResult.entry_price}, volumen ${lastResult.volume}.`;
-  const key = `decision:${body}`;
+  const ai = buildAiConfirmation();
+  if (ai.status !== "OPERABLE") return;
+  const timing = marketTimingProfile();
+  const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${numberText(lastResult.entry_price)}, stop ${numberText(lastResult.stop_loss)}, meta ${numberText(lastResult.take_profit)}, volumen ${numberText(lastResult.volume)}. Riesgo ${lastResult.risk_pct}%. ${timing.quality}.`;
+  const key = `ai-operable:${lastResult.asset.symbol}:${lastResult.order_type}:${lastResult.entry_price}:${lastResult.stop_loss}:${lastResult.take_profit}:${lastResult.volume}:${lastResult.risk_pct}`;
   if (sessionStorage.getItem("lastDecisionNotification") === key) return;
   sessionStorage.setItem("lastDecisionNotification", key);
-  new Notification("Decision Engine XTB", { body });
+  new Notification("MyActions IA: momento operable", { body });
 }
 
 function renderTicket() {

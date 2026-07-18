@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.auth import create_dashboard_session, verify_dashboard_credentials
+from app.core.auth import create_dashboard_session, sanitize_next_path, verify_dashboard_credentials
 from app.core.security import require_api_key
 from app.db.session import get_session, normalized_database_url
 from app.schemas.responses import (
@@ -104,7 +104,7 @@ def login(
 ) -> RedirectResponse:
     if not verify_dashboard_credentials(username, password):
         return RedirectResponse(url="/login?error=1", status_code=303)
-    response = RedirectResponse(url=next if next.startswith("/") else "/dashboard/", status_code=303)
+    response = RedirectResponse(url=sanitize_next_path(next), status_code=303)
     response.set_cookie(
         settings.dashboard_session_cookie,
         create_dashboard_session(),
