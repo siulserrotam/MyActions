@@ -53,6 +53,7 @@ const defaultAccountBalance = 1000;
 const defaultRiskPct = 0.5;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
+const maxPlannedTrades = 2;
 const defaultsVersion = "capital-1000-risk-ai-v1";
 
 let activeCategory = "favorites";
@@ -193,11 +194,20 @@ function buildRiskConfidenceProfile() {
 }
 
 function getEffectiveRiskPct() {
-  const mode = riskModeValue();
-  if (mode === "dynamic") {
-    return buildRiskConfidenceProfile().riskPct;
-  }
-  return Number(mode || defaultRiskPct);
+  return buildDailyTradePlan().perTradeRiskPct;
+}
+
+function buildDailyTradePlan() {
+  const baseRiskPct = buildRiskConfidenceProfile().riskPct;
+  const viableCount = uniqueAssets()
+    .map((asset) => buildAssetOpportunity(asset, baseRiskPct))
+    .filter((item) => item.usable).length;
+  const plannedTrades = Math.min(maxPlannedTrades, Math.max(1, viableCount));
+  return {
+    baseRiskPct,
+    plannedTrades,
+    perTradeRiskPct: Number((baseRiskPct / plannedTrades).toFixed(4)),
+  };
 }
 
 function renderRiskModeNote() {
@@ -209,6 +219,7 @@ function renderAiDecisionSummary() {
   if (!target) return;
   const asset = selectedAssetFromForm();
   const profile = buildRiskConfidenceProfile();
+  const plan = buildDailyTradePlan();
   const direction = aiDirectionForAsset(asset);
   const driftDirection = directionFromMove(Number(asset.liveChangePct ?? 0));
   const action = driftDirection === "WAIT" ? "ESPERAR CONFIRMACION" : labelFromDirection(direction);
@@ -219,7 +230,9 @@ function renderAiDecisionSummary() {
     <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
     <div class="mt-2 grid gap-2">
       <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
-      <div class="summary-row"><span>Riesgo sugerido</span><strong>${profile.riskPct}%</strong></div>
+      <div class="summary-row"><span>Riesgo diario IA</span><strong>${plan.baseRiskPct}%</strong></div>
+      <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
+      <div class="summary-row"><span>Riesgo por operacion</span><strong>${plan.perTradeRiskPct}%</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
       <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
       <div class="summary-row"><span>Confianza</span><strong>${profile.confidence}%</strong></div>
@@ -800,6 +813,8 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const volume = roundVolumeForXtb(riskVolume, asset);
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
+  const targetAmount = riskAmount * 2;
+  const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
   const usable = hasVolume && hasMargin;
@@ -816,8 +831,10 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     directionLabel: labelFromDirection(direction),
     usable,
     marginRequired,
+    targetMovePct,
+    targetAmount,
     reason: usable
-      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Volumen IA ${numberText(volume)}.`
+      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Meta aprox. ${numberText(targetMovePct)}% con volumen ${numberText(volume)}.`
       : "Oculto: no cabe por margen o volumen seguro.",
   };
 }
@@ -1251,6 +1268,7 @@ function renderTicket() {
 
 function renderMath() {
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const plan = buildDailyTradePlan();
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
@@ -1263,8 +1281,10 @@ function renderMath() {
     <div class="summary-row"><span>Base de riesgo: patrimonio XTB</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Capital disponible XTB</span><strong>${money(availableCapital)}</strong></div>
     <div class="summary-row"><span>Exposicion nominal de esta orden</span><strong>${money(positionValue)}</strong></div>
-    <div class="summary-row"><span>Riesgo max. sobre patrimonio</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
-    <div class="summary-row"><span>Objetivo sobre patrimonio</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
+    <div class="summary-row"><span>Plan IA del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
+    <div class="summary-row"><span>Riesgo diario total</span><strong>${plan.baseRiskPct}% = ${money(lastResult.account_balance * plan.baseRiskPct / 100)}</strong></div>
+    <div class="summary-row"><span>Riesgo de esta operacion</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
+    <div class="summary-row"><span>Objetivo de esta operacion</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
     <div class="summary-row"><span>Resultado si toca stop</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Resultado si toca meta</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Riesgo/meta vs exposicion</span><strong>${numberText(riskVsPositionPct)}% / ${numberText(targetVsPositionPct)}%</strong></div>
