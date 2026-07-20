@@ -1257,15 +1257,18 @@ function renderMath() {
   const availableAfterMargin = availableCapital ? availableCapital - estimatedMargin : 0;
   const movementAgainst = Math.abs(lastResult.entry_price - lastResult.stop_loss);
   const stopPct = lastResult.entry_price > 0 ? movementAgainst / lastResult.entry_price * 100 : 0;
+  const riskVsPositionPct = positionValue > 0 ? lastResult.expected_loss / positionValue * 100 : 0;
+  const targetVsPositionPct = positionValue > 0 ? lastResult.expected_profit / positionValue * 100 : 0;
   document.getElementById("math-summary").innerHTML = `
-    <div class="summary-row"><span>Patrimonio total XTB</span><strong>${money(lastResult.account_balance)}</strong></div>
+    <div class="summary-row"><span>Base de riesgo: patrimonio XTB</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Capital disponible XTB</span><strong>${money(availableCapital)}</strong></div>
-    <div class="summary-row"><span>Riesgo elegido</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
-    <div class="summary-row"><span>Objetivo</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
+    <div class="summary-row"><span>Exposicion nominal de esta orden</span><strong>${money(positionValue)}</strong></div>
+    <div class="summary-row"><span>Riesgo max. sobre patrimonio</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
+    <div class="summary-row"><span>Objetivo sobre patrimonio</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
     <div class="summary-row"><span>Resultado si toca stop</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Resultado si toca meta</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
+    <div class="summary-row"><span>Riesgo/meta vs exposicion</span><strong>${numberText(riskVsPositionPct)}% / ${numberText(targetVsPositionPct)}%</strong></div>
     <div class="summary-row"><span>Distancia stop</span><strong class="${stopPct < minStopPct(lastResult.asset) ? "text-bear" : "text-bull"}">${numberText(movementAgainst)} (${numberText(stopPct)}%)</strong></div>
-    <div class="summary-row"><span>Valor nominal operacion</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Margen estimado XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Disponible despues margen</span><strong class="${availableAfterMargin < 0 ? "text-bear" : "text-bull"}">${availableCapital ? money(availableAfterMargin) : "Sin dato"}</strong></div>
     <div class="summary-row"><span>Estado del riesgo</span><strong class="${lastResult.risk_ok ? "text-bull" : "text-bear"}">${lastResult.risk_ok ? `Cumple ${lastResult.risk_pct}%` : `Se pasa por ${money(lastResult.risk_excess || 0)}`}</strong></div>
