@@ -226,6 +226,7 @@ function renderAiDecisionSummary() {
   const volumeText = lastResult ? numberText(lastResult.volume) : "Calculando";
   const lossText = lastResult ? money(lastResult.expected_loss) : "Calculando";
   const profitText = lastResult ? money(lastResult.expected_profit) : "Calculando";
+  const management = tradeManagementProfile(lastResult);
   target.innerHTML = `
     <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
     <div class="mt-2 grid gap-2">
@@ -237,7 +238,10 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
       <div class="summary-row"><span>Confianza</span><strong>${profile.confidence}%</strong></div>
       <div class="summary-row"><span>Horario</span><strong>${profile.timing.quality}</strong></div>
+      <div class="summary-row"><span>Gestion ahora</span><strong>${management.action}</strong></div>
+      <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
+    <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
     <p class="mt-2 text-xs text-zinc-400">La app decide direccion, riesgo y volumen. Tu tarea es copiar el ticket solo si la confirmacion dice OPERABLE.</p>
   `;
 }
@@ -312,6 +316,99 @@ function marketTimingProfile() {
     score: -10,
     riskCap: 0.5,
     message: "14:00-16:00 NY: puede haber reversas fuertes. Reduce riesgo o espera confirmacion.",
+  };
+}
+
+function formatMinutesUntil(targetTotal, currentTotal) {
+  const minutes = Math.max(0, targetTotal - currentTotal);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours <= 0) return `${rest} min`;
+  return `${hours}h ${rest}min`;
+}
+
+function tradeManagementProfile(result = lastResult) {
+  const { weekday, total } = nyMarketMinutes();
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  const openProfit = Number(document.getElementById("open-profit")?.value || 0);
+  const target = result?.risk_amount ? result.risk_amount * 2 : 0;
+  const risk = result?.risk_amount || 0;
+  const profitProgress = target > 0 ? openProfit / target : 0;
+  const lossProgress = risk > 0 ? Math.abs(Math.min(openProfit, 0)) / risk : 0;
+
+  if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
+    return {
+      phase: "CERRADO",
+      action: "Preparar lista",
+      tone: "muted",
+      deadline: "Proxima apertura",
+      message: "Mercado cerrado: no abrir operaciones nuevas.",
+      shouldNotify: false,
+    };
+  }
+  if (total < 9 * 60 + 35) {
+    return {
+      phase: "ESPERAR ORB",
+      action: "No operar",
+      tone: "danger",
+      deadline: "9:35 NY",
+      message: `Faltan ${formatMinutesUntil(9 * 60 + 35, total)} para cerrar la primera vela. No abras antes.`,
+      shouldNotify: false,
+    };
+  }
+  if (total < 10 * 60 + 30) {
+    return {
+      phase: "ENTRADA PRINCIPAL",
+      action: "Abrir solo si IA dice OPERABLE",
+      tone: "ok",
+      deadline: "10:30 NY",
+      message: `Ventana principal. Si no activa antes de 10:30 NY, cancela la idea.`,
+      shouldNotify: false,
+    };
+  }
+  if (total < 11 * 60 + 30) {
+    const protect = profitProgress >= 0.5;
+    const defend = lossProgress >= 0.5;
+    return {
+      phase: "GESTION TEMPRANA",
+      action: protect ? "Proteger ganancia" : defend ? "Reducir o salir" : "No abrir tarde",
+      tone: protect ? "ok" : defend ? "danger" : "warning",
+      deadline: "11:30 NY",
+      message: protect
+        ? "Ya hay avance relevante: acerca stop o toma parcial, no dejes que vuelva a perdida."
+        : defend
+          ? "La operacion ya consumio media perdida diaria: considera salir y cerrar el dia."
+          : "Si no entro en ritmo, no persigas. Espera nueva senal fuerte o cancela.",
+      shouldNotify: protect || defend,
+    };
+  }
+  if (total < 14 * 60) {
+    return {
+      phase: "MEDIODIA LENTO",
+      action: openProfit > 0 ? "Proteger o tomar parcial" : "Evitar nuevas entradas",
+      tone: openProfit > 0 ? "ok" : "warning",
+      deadline: "14:00 NY",
+      message: "Horario de menor calidad. Gestiona lo abierto; evita abrir una operacion nueva por ansiedad.",
+      shouldNotify: openProfit !== 0,
+    };
+  }
+  if (total < 15 * 60 + 15) {
+    return {
+      phase: "CIERRE VOLATIL",
+      action: openProfit > 0 ? "Asegurar beneficio" : "Cerrar si no mejora",
+      tone: openProfit > 0 ? "ok" : "danger",
+      deadline: "15:15 NY",
+      message: "La tarde puede revertir fuerte. Si no estas cerca de meta, reduce exposicion.",
+      shouldNotify: true,
+    };
+  }
+  return {
+    phase: "CIERRE DEL DIA",
+    action: "Cerrar intradia",
+    tone: "danger",
+    deadline: "15:45 NY",
+    message: "No dejes una operacion intradia abierta por esperanza. Cierra o protege estrictamente.",
+    shouldNotify: true,
   };
 }
 
@@ -1176,6 +1273,12 @@ function renderWarnings() {
   } else if (["ALTA VOLATILIDAD", "BAJA CALIDAD", "CIERRE VOLATIL"].includes(timing.quality)) {
     warnings.push({ level: "info", message: `FILTRO HORARIO: ${timing.message}` });
   }
+  const management = tradeManagementProfile(lastResult);
+  if (management.tone === "danger") {
+    warnings.push({ level: "danger", message: `GESTION IA: ${management.action}. ${management.message}` });
+  } else if (management.tone === "warning") {
+    warnings.push({ level: "info", message: `GESTION IA: ${management.action}. ${management.message}` });
+  }
   if (availableCapital > 0 && marginRequired > availableCapital) {
     warnings.push({ level: "danger", message: `NO OPERAR: margen estimado ${money(marginRequired)} supera tu capital disponible ${money(availableCapital)}. El apalancamiento no evita este bloqueo.` });
   }
@@ -1204,26 +1307,81 @@ function updateNotificationStatus(text) {
   document.getElementById("notification-status").textContent = text;
 }
 
+function notificationSupportMessage() {
+  if (!("Notification" in window)) {
+    return "Alertas IA: este navegador no soporta notificaciones web.";
+  }
+  if (!window.isSecureContext) {
+    return "Alertas IA: requieren HTTPS. Abre api.manantiallodge.com, no una URL local.";
+  }
+  if (Notification.permission === "denied") {
+    return "Alertas IA: bloqueadas por el navegador. En Chrome/Brave: candado > Permisos > Notificaciones > Permitir.";
+  }
+  if (Notification.permission === "granted") {
+    return "Alertas IA: activas. En movil manten Chrome/Brave abierto y sin ahorro de bateria para esta pagina.";
+  }
+  return "Alertas IA: pendientes. Toca Activar alertas IA y acepta el permiso del navegador.";
+}
+
+function refreshNotificationStatus() {
+  notificationsEnabled = "Notification" in window && Notification.permission === "granted";
+  updateNotificationStatus(notificationSupportMessage());
+}
+
+function sendBrowserNotification(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") {
+    refreshNotificationStatus();
+    return false;
+  }
+  new Notification(title, { body });
+  return true;
+}
+
 async function enableNotifications() {
   if (!("Notification" in window)) {
-    updateNotificationStatus("Alertas IA: tu navegador no las soporta.");
+    refreshNotificationStatus();
     return;
   }
   const permission = await Notification.requestPermission();
   notificationsEnabled = permission === "granted";
-  updateNotificationStatus(notificationsEnabled ? "Alertas IA: activas cuando una receta sea OPERABLE." : "Alertas IA: permiso no concedido.");
+  refreshNotificationStatus();
+  if (notificationsEnabled) {
+    sendBrowserNotification("MyActions IA: alertas activas", "Prueba OK. Recibiras avisos de entrada, proteger ganancia o cerrar intradia.");
+  }
+}
+
+function testNotifications() {
+  if (!notificationsEnabled) {
+    updateNotificationStatus("Alertas IA: primero toca Activar alertas IA y acepta el permiso.");
+    return;
+  }
+  const sent = sendBrowserNotification(
+    "MyActions IA: prueba de alerta",
+    "Si ves este mensaje, Chrome/Brave permite las alertas web de MyActions."
+  );
+  updateNotificationStatus(sent ? notificationSupportMessage() : "Alertas IA: no se pudo enviar la prueba.");
 }
 
 function notifyIfNeeded() {
   if (!notificationsEnabled || !lastResult || !("Notification" in window)) return;
   const ai = buildAiConfirmation();
-  if (ai.status !== "OPERABLE") return;
   const timing = marketTimingProfile();
+  const management = tradeManagementProfile(lastResult);
+  if (management.shouldNotify) {
+    const body = `${lastResult.asset.symbol}: ${management.action}. ${management.message} Beneficio abierto: ${money(Number(document.getElementById("open-profit")?.value || 0))}.`;
+    const key = `ai-manage:${lastResult.asset.symbol}:${management.phase}:${management.action}:${Math.round(Number(document.getElementById("open-profit")?.value || 0) * 100)}`;
+    if (sessionStorage.getItem("lastDecisionNotification") !== key) {
+      sessionStorage.setItem("lastDecisionNotification", key);
+      sendBrowserNotification("MyActions IA: gestionar operacion", body);
+    }
+    return;
+  }
+  if (ai.status !== "OPERABLE") return;
   const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${numberText(lastResult.entry_price)}, stop ${numberText(lastResult.stop_loss)}, meta ${numberText(lastResult.take_profit)}, volumen ${numberText(lastResult.volume)}. Riesgo ${lastResult.risk_pct}%. ${timing.quality}.`;
   const key = `ai-operable:${lastResult.asset.symbol}:${lastResult.order_type}:${lastResult.entry_price}:${lastResult.stop_loss}:${lastResult.take_profit}:${lastResult.volume}:${lastResult.risk_pct}`;
   if (sessionStorage.getItem("lastDecisionNotification") === key) return;
   sessionStorage.setItem("lastDecisionNotification", key);
-  new Notification("MyActions IA: momento operable", { body });
+  sendBrowserNotification("MyActions IA: momento operable", body);
 }
 
 function renderTicket() {
@@ -1337,6 +1495,7 @@ function bindInputs() {
   document.getElementById("calculate-btn").addEventListener("click", calculate);
   document.getElementById("toggle-favorite-btn").addEventListener("click", toggleFavorite);
   document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
+  document.getElementById("test-notifications").addEventListener("click", testNotifications);
 }
 
 loadConfigLocal();
@@ -1348,6 +1507,7 @@ updateGoldenWindow();
 setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();
 resetOrderForCurrentMode(selectedAsset);
+refreshNotificationStatus();
 calculate();
 refreshLivePrices({ resetSelected: true });
 scheduleAutoRefresh();
