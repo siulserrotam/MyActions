@@ -225,7 +225,6 @@ function renderAiDecisionSummary() {
   const target = document.getElementById("ai-decision-summary");
   if (!target) return;
   const asset = selectedAssetFromForm();
-  const profile = buildRiskConfidenceProfile();
   const plan = buildDailyTradePlan();
   const direction = aiDirectionForAsset(asset);
   const driftDirection = directionFromMove(Number(asset.liveChangePct ?? 0));
@@ -243,8 +242,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Riesgo/meta por CFD</span><strong>${money(plan.perTradeRiskAmount)} / ${money(plan.perTradeRiskAmount * 2)}</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
       <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
-      <div class="summary-row"><span>Confianza</span><strong>${profile.confidence}%</strong></div>
-      <div class="summary-row"><span>Horario</span><strong>${profile.timing.quality}</strong></div>
+      <div class="summary-row"><span>Horario</span><strong>${marketTimingProfile().quality}</strong></div>
       <div class="summary-row"><span>Gestion ahora</span><strong>${management.action}</strong></div>
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
@@ -868,7 +866,7 @@ function buildAiConfirmation() {
       : "border-gold/50 bg-gold/10 text-gold";
 
   return {
-    title: "Confirmacion IA local",
+    title: "Semaforo operativo IA",
     status,
     bias,
     confidence,
@@ -886,8 +884,9 @@ function renderAiConfirmation() {
     <div class="grid gap-2">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="text-xs font-black uppercase tracking-wide opacity-80">${ai.title}</span>
-        <strong>${ai.status} - ${labelFromDirection(ai.bias)} - ${ai.confidence}%</strong>
+        <strong>${ai.status} - ${ai.confidence}%</strong>
       </div>
+      <p class="text-xs font-bold">${labelFromDirection(ai.bias)} sugerido solo si el semaforo sube a OPERABLE.</p>
       <ul class="grid gap-1 text-xs text-zinc-200">
         ${ai.reasons.map((reason) => `<li>- ${reason}</li>`).join("")}
       </ul>
