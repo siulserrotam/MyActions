@@ -607,6 +607,35 @@ function applyLiveQuote(quote) {
   });
 }
 
+function providerPriceFor(symbol) {
+  return Number(liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
+}
+
+function xtbPriceValue() {
+  return Number(document.getElementById("xtb-price")?.value || 0);
+}
+
+function activeMarketPriceFor(asset) {
+  return xtbPriceValue() || Number(document.getElementById("market-price")?.value || 0) || Number(asset.marketPrice || 0);
+}
+
+function renderPriceGapStatus() {
+  const box = document.getElementById("price-gap-status");
+  if (!box) return;
+  const symbol = document.getElementById("symbol").value.trim().toUpperCase();
+  const xtbPrice = xtbPriceValue();
+  const providerPrice = providerPriceFor(symbol);
+  if (!xtbPrice || !providerPrice) {
+    box.textContent = "Brecha XTB: copia el precio real de xStation antes de operar.";
+    box.className = "rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500";
+    return;
+  }
+  const gapPct = Math.abs(xtbPrice - providerPrice) / xtbPrice * 100;
+  const ok = gapPct <= 0.15;
+  box.textContent = `Brecha XTB vs proveedor: ${numberText(gapPct)}%. ${ok ? "Aceptable" : "Alta: opera solo con precio XTB."}`;
+  box.className = `rounded-xl border p-3 text-xs font-bold ${ok ? "border-bull/40 bg-bull/10 text-bull" : "border-gold/50 bg-gold/10 text-gold"}`;
+}
+
 async function refreshLivePrices({ resetSelected = false } = {}) {
   const symbols = uniqueAssets().map((asset) => asset.symbol).join(",");
   try {
@@ -660,7 +689,7 @@ function priceStepPct(asset) {
 
 function resetOrderFieldsForAsset(asset) {
   const direction = document.getElementById("direction").value;
-  const market = Number(asset.marketPrice || 100);
+  const market = activeMarketPriceFor(asset) || Number(asset.marketPrice || 100);
   const step = priceStepPct(asset);
   const entry = direction === "LONG" ? market * (1 + step) : market * (1 - step);
   const stop = direction === "LONG" ? market * (1 - step * 1.5) : market * (1 + step * 1.5);
@@ -681,6 +710,21 @@ function resetOrderFieldsFromMarketInput() {
     marketPrice: marketInput > 0 ? marketInput : selectedAsset.marketPrice,
   };
   resetOrderFieldsForAsset(selectedAsset);
+}
+
+function applyXtbPriceOverride() {
+  const asset = selectedAssetFromForm();
+  const xtbPrice = xtbPriceValue();
+  if (!xtbPrice) {
+    renderPriceGapStatus();
+    calculate();
+    return;
+  }
+  document.getElementById("market-price").value = formatPriceForAsset(xtbPrice, asset);
+  selectedAsset = { ...findAsset(asset.symbol), marketPrice: xtbPrice };
+  resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
+  renderPriceGapStatus();
+  calculate();
 }
 
 function applyVolumeFirstTargets() {
@@ -726,12 +770,13 @@ function selectedAssetFromForm() {
   const symbol = document.getElementById("symbol").value.trim().toUpperCase();
   const baseAsset = findAsset(symbol);
   const marketInput = Number(document.getElementById("market-price").value || 0);
+  const xtbInput = xtbPriceValue();
   if (symbol !== lastResetSymbol) {
-    return baseAsset;
+    return xtbInput > 0 ? { ...baseAsset, marketPrice: xtbInput } : baseAsset;
   }
   return {
     ...baseAsset,
-    marketPrice: marketInput > 0 ? marketInput : baseAsset.marketPrice,
+    marketPrice: xtbInput > 0 ? xtbInput : marketInput > 0 ? marketInput : baseAsset.marketPrice,
   };
 }
 
@@ -838,6 +883,7 @@ function renderAssets() {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.symbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
+      document.getElementById("xtb-price").value = "";
       resetOrderForCurrentMode(selectedAsset);
       renderAssets();
       calculate();
@@ -1152,6 +1198,7 @@ function renderTopOpportunities() {
     button.addEventListener("click", () => {
       selectedAsset = findAsset(button.dataset.topSymbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
+      document.getElementById("xtb-price").value = "";
       const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
       resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || aiDirectionForAsset(selectedAsset));
       applyAiAggressiveTargets(selectedAsset);
@@ -1185,6 +1232,7 @@ async function calculate() {
   renderRiskModeNote();
   renderLeverageCapacity();
   renderDailyResultCard();
+  renderPriceGapStatus();
   try {
     const response = await fetch("/engine/calculate", {
       method: "POST",
@@ -1230,6 +1278,7 @@ function currentConfigPayload() {
     trade_date: todayKey(),
     balance: accountBalance,
     symbol: document.getElementById("symbol").value.trim().toUpperCase(),
+    xtb_price: xtbPriceValue(),
     market_price: Number(document.getElementById("market-price").value || 0),
     entry_price: Number(document.getElementById("entry-price").value || 0),
     stop_price: Number(document.getElementById("stop-price").value || 0),
@@ -1303,6 +1352,7 @@ function loadConfigLocal() {
     if (config.operation1_result !== undefined) document.getElementById("operation1-result").value = config.operation1_result;
     if (config.operation2_result !== undefined) document.getElementById("operation2-result").value = config.operation2_result;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
+    if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
     document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
@@ -1738,6 +1788,7 @@ function bindInputs() {
   });
   document.getElementById("symbol").addEventListener("change", () => {
     selectedAsset = findAsset(document.getElementById("symbol").value.trim().toUpperCase());
+    document.getElementById("xtb-price").value = "";
     resetOrderForCurrentMode(selectedAsset);
     renderAssets();
     calculate();
@@ -1747,6 +1798,7 @@ function bindInputs() {
     const typedAsset = uniqueAssets().find((asset) => asset.symbol === typedSymbol);
     if (typedAsset) {
       selectedAsset = typedAsset;
+      document.getElementById("xtb-price").value = "";
       resetOrderForCurrentMode(selectedAsset);
       renderAssets();
       calculate();
@@ -1756,6 +1808,8 @@ function bindInputs() {
     resetOrderFieldsFromMarketInput();
     calculate();
   });
+  document.getElementById("xtb-price").addEventListener("input", applyXtbPriceOverride);
+  document.getElementById("xtb-price").addEventListener("change", applyXtbPriceOverride);
   ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);

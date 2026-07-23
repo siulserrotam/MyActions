@@ -167,6 +167,12 @@
                   <input id="market-price" class="field" type="number" step="0.00001" value="420.50" />
                 </label>
                 <label class="grid gap-1 text-sm font-bold text-zinc-300">
+                  Precio real visto en XTB
+                  <input id="xtb-price" class="field" type="number" step="0.00001" placeholder="Copialo desde xStation antes de operar" />
+                  <span class="text-xs font-normal text-zinc-500">Si lo llenas, la receta usa XTB como fuente principal.</span>
+                </label>
+                <div id="price-gap-status" class="rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Brecha XTB: esperando precio real.</div>
+                <label class="grid gap-1 text-sm font-bold text-zinc-300">
                   Precio entrada
                   <input id="entry-price" class="field" type="number" step="0.00001" value="442.50" />
                 </label>
