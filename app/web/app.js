@@ -49,12 +49,13 @@ const categoryLabels = {
   stocks: "Acciones / ETFs CFD",
 };
 
-const defaultAccountBalance = 1000;
+const defaultAccountBalance = 2016;
 const defaultRiskPct = 0.5;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
 const maxPlannedTrades = 2;
-const defaultsVersion = "capital-1000-risk-ai-v1";
+const aggressiveDailyRiskUsd = 20;
+const defaultsVersion = "capital-2016-aggressive-risk-v1";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -198,14 +199,20 @@ function getEffectiveRiskPct() {
 }
 
 function buildDailyTradePlan() {
-  const baseRiskPct = buildRiskConfidenceProfile().riskPct;
+  const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const fixedRiskPct = accountBalance > 0 ? aggressiveDailyRiskUsd / accountBalance * 100 : defaultRiskPct;
+  const baseRiskPct = Number(Math.min(maxAiRiskPct, Math.max(minAiRiskPct, fixedRiskPct)).toFixed(4));
   const viableCount = uniqueAssets()
     .map((asset) => buildAssetOpportunity(asset, baseRiskPct))
     .filter((item) => item.usable).length;
   const plannedTrades = Math.min(maxPlannedTrades, Math.max(1, viableCount));
+  const dailyRiskAmount = accountBalance * baseRiskPct / 100;
+  const perTradeRiskAmount = dailyRiskAmount / plannedTrades;
   return {
     baseRiskPct,
+    dailyRiskAmount,
     plannedTrades,
+    perTradeRiskAmount,
     perTradeRiskPct: Number((baseRiskPct / plannedTrades).toFixed(4)),
   };
 }
@@ -231,9 +238,9 @@ function renderAiDecisionSummary() {
     <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
     <div class="mt-2 grid gap-2">
       <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
-      <div class="summary-row"><span>Riesgo diario IA</span><strong>${plan.baseRiskPct}%</strong></div>
+      <div class="summary-row"><span>Riesgo/meta diario</span><strong>${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
       <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
-      <div class="summary-row"><span>Riesgo por operacion</span><strong>${plan.perTradeRiskPct}%</strong></div>
+      <div class="summary-row"><span>Riesgo/meta por CFD</span><strong>${money(plan.perTradeRiskAmount)} / ${money(plan.perTradeRiskAmount * 2)}</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
       <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
       <div class="summary-row"><span>Confianza</span><strong>${profile.confidence}%</strong></div>
@@ -242,7 +249,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">La app decide direccion, riesgo y volumen. Tu tarea es copiar el ticket solo si la confirmacion dice OPERABLE.</p>
+    <p class="mt-2 text-xs text-zinc-400">Modo agresivo controlado: intenta usar el mayor volumen viable, pero no permite que el stop pase el riesgo diario.</p>
   `;
 }
 
@@ -552,7 +559,23 @@ function applyVolumeFirstTargets() {
 
 function resetOrderForCurrentMode(asset) {
   resetOrderFieldsForAsset(asset);
-  applyVolumeFirstTargets();
+  applyAiAggressiveTargets(asset);
+}
+
+function applyAiAggressiveTargets(asset) {
+  const plan = buildDailyTradePlan();
+  const opportunity = buildAssetOpportunity(asset, plan.perTradeRiskPct);
+  const entry = Number(document.getElementById("entry-price").value || opportunity.entry || 0);
+  const volume = opportunity.volume;
+  const direction = aiDirectionForAsset(asset);
+  if (!entry || !volume) return;
+  const stopDistance = plan.perTradeRiskAmount / (volume * asset.multiplier);
+  const targetDistance = stopDistance * 2;
+  const stop = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
+  const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
+  document.getElementById("requested-volume").value = numberText(volume).replace(/,/g, "");
+  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
 }
 
 function selectedAssetFromForm() {
@@ -875,7 +898,7 @@ function resetOrderFieldsForAssetDirection(asset, direction) {
   const directionInput = document.getElementById("direction");
   directionInput.value = direction === "SHORT" ? "SHORT" : "LONG";
   resetOrderFieldsForAsset(asset);
-  applyVolumeFirstTargets();
+  applyAiAggressiveTargets(asset);
 }
 
 function marketPhaseLabel() {
@@ -898,28 +921,37 @@ function marketPhaseLabel() {
 function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
+  const marginPool = availableCapital || accountBalance;
+  const marginBudget = marginPool / maxPlannedTrades;
   const changePct = Number(asset.liveChangePct ?? 0);
   const direction = aiDirectionForAsset(asset);
   const driftDirection = directionFromMove(changePct);
   const step = priceStepPct(asset);
   const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
-  const stop = direction === "SHORT" ? asset.marketPrice * (1 + step * 1.5) : asset.marketPrice * (1 - step * 1.5);
-  const distance = Math.abs(entry - stop);
   const riskAmount = accountBalance * riskPct / 100;
-  const riskVolume = riskAmount / (distance * asset.multiplier);
-  const volume = roundVolumeForXtb(riskVolume, asset);
+  const nominalBudget = marginBudget / (cfdMarginPct() / 100);
+  const marginVolume = nominalBudget / (entry * asset.multiplier);
+  const minimumStopDistance = entry * minStopPct(asset) / 100;
+  const stopSafeVolume = riskAmount / (minimumStopDistance * asset.multiplier);
+  const volume = roundVolumeForXtb(Math.min(marginVolume, stopSafeVolume), asset);
+  const distance = volume > 0 ? riskAmount / (volume * asset.multiplier) : 0;
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const targetAmount = riskAmount * 2;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
+  const stopPct = entry > 0 ? distance / entry * 100 : 0;
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
-  const usable = hasVolume && hasMargin;
+  const hasSafeStop = stopPct >= minStopPct(asset);
+  const usable = hasVolume && hasMargin && hasSafeStop;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
   const volumePenalty = hasVolume ? 0 : -80;
-  const score = (usable ? 50 : -50) + movementScore + directionPenalty + marginPenalty + volumePenalty;
+  const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
+  const marginUseScore = usable ? marginUsePct / 5 : 0;
+  const limitReason = marginVolume < stopSafeVolume ? "limitado por margen" : "limitado por stop/riesgo";
+  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty;
   return {
     asset,
     volume,
@@ -927,12 +959,15 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     direction,
     directionLabel: labelFromDirection(direction),
     usable,
+    entry,
+    stopDistance: distance,
     marginRequired,
     targetMovePct,
     targetAmount,
+    stopPct,
     reason: usable
-      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Meta aprox. ${numberText(targetMovePct)}% con volumen ${numberText(volume)}.`
-      : "Oculto: no cabe por margen o volumen seguro.",
+      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${numberText(volume)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
+      : "Oculto: no cabe por margen, volumen o stop seguro.",
   };
 }
 
@@ -972,7 +1007,7 @@ function renderTopOpportunities() {
       document.getElementById("symbol").value = selectedAsset.symbol;
       const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
       resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || aiDirectionForAsset(selectedAsset));
-      applyVolumeFirstTargets();
+      applyAiAggressiveTargets(selectedAsset);
       renderAssets();
       calculate();
     });
@@ -985,7 +1020,7 @@ async function calculate() {
   document.getElementById("risk-pct").value = "dynamic";
   document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
   document.getElementById("requested-volume").value = "";
-  applyVolumeFirstTargets();
+  applyAiAggressiveTargets(selectedAsset);
   const riskPct = getEffectiveRiskPct();
   const payload = {
     symbol,
@@ -1440,9 +1475,8 @@ function renderMath() {
     <div class="summary-row"><span>Capital disponible XTB</span><strong>${money(availableCapital)}</strong></div>
     <div class="summary-row"><span>Exposicion nominal de esta orden</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Plan IA del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
-    <div class="summary-row"><span>Riesgo diario total</span><strong>${plan.baseRiskPct}% = ${money(lastResult.account_balance * plan.baseRiskPct / 100)}</strong></div>
-    <div class="summary-row"><span>Riesgo de esta operacion</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)}</strong></div>
-    <div class="summary-row"><span>Objetivo de esta operacion</span><strong class="text-bull">${money(lastResult.risk_amount * 2)}</strong></div>
+    <div class="summary-row"><span>Riesgo/meta diario</span><strong>${plan.baseRiskPct}% = ${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
+    <div class="summary-row"><span>Riesgo/meta esta orden</span><strong>${lastResult.risk_pct}% = ${money(lastResult.risk_amount)} / ${money(lastResult.risk_amount * 2)}</strong></div>
     <div class="summary-row"><span>Resultado si toca stop</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
     <div class="summary-row"><span>Resultado si toca meta</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Riesgo/meta vs exposicion</span><strong>${numberText(riskVsPositionPct)}% / ${numberText(targetVsPositionPct)}%</strong></div>
@@ -1460,11 +1494,11 @@ function bindInputs() {
   });
   ["account-balance", "entry-price"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => {
-      applyVolumeFirstTargets();
+      applyAiAggressiveTargets(selectedAssetFromForm());
       calculate();
     });
     document.getElementById(id).addEventListener("change", () => {
-      applyVolumeFirstTargets();
+      applyAiAggressiveTargets(selectedAssetFromForm());
       calculate();
     });
   });

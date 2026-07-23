@@ -59,7 +59,7 @@
           <div class="mt-4 grid gap-3">
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
               Patrimonio total XTB USD (base de riesgo)
-              <input id="account-balance" class="field" type="number" step="0.01" value="1000" />
+              <input id="account-balance" class="field" type="number" step="0.01" value="2016" />
               <span class="text-xs font-normal text-zinc-500">Es tu saldo total. La perdida maxima se calcula sobre este valor, no sobre el nominal invertido.</span>
             </label>
             <div class="rounded-xl border border-bull/30 bg-bull/10 p-3">
@@ -69,18 +69,10 @@
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
               Capital disponible XTB USD
               <input id="available-capital" class="field" type="number" step="0.01" value="0" />
-              <span class="text-xs font-normal text-zinc-500">Ejemplo de tu captura: 1522.59</span>
+              <span class="text-xs font-normal text-zinc-500">Es el dinero libre para nuevas garantias. Con CFD 1:5 la app estima cuanto nominal cabe.</span>
             </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Beneficio abierto XTB USD
-              <input id="open-profit" class="field" type="number" step="0.01" value="0" />
-              <span class="text-xs font-normal text-zinc-500">Si esta en rojo, escribelo negativo. Ejemplo: -3.24</span>
-            </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Nivel de margen XTB %
-              <input id="margin-level-pct" class="field" type="number" step="0.01" value="0" />
-              <span class="text-xs font-normal text-zinc-500">Ejemplo de tu captura: 406.56</span>
-            </label>
+            <input id="open-profit" type="hidden" value="0" />
+            <input id="margin-level-pct" type="hidden" value="0" />
             <div id="ai-decision-summary" class="rounded-xl border border-sky-400/30 bg-sky-500/10 p-3 text-sm text-sky-100">
               Calculando decision IA...
             </div>
@@ -202,6 +194,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=ai-auto-decision-v1"></script>
+    <script src="/dashboard/app.js?v=aggressive-ai-sizing-v1"></script>
   </body>
 </html>
