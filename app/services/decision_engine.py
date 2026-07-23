@@ -159,18 +159,19 @@ class DecisionEngineService:
         }
 
     def _round_volume(self, volume: float, category: AssetCategory) -> float:
-        if category == "stocks":
-            return float(math.floor(volume))
-        if category == "forex":
-            return round(volume, 3)
-        if category in {"commodities", "crypto", "indices"}:
-            return round(volume, 3)
-        return round(volume, 3)
+        step = self._volume_step(category)
+        if volume <= 0:
+            return 0.0
+        decimals = 0 if step >= 1 else 2
+        return round(math.floor(volume / step) * step, decimals)
 
     def _round_requested_volume(self, volume: float, category: AssetCategory) -> float:
+        return self._round_volume(volume, category)
+
+    def _volume_step(self, category: AssetCategory) -> float:
         if category == "stocks":
-            return float(math.floor(volume))
-        return round(volume, 3)
+            return 1.0
+        return 0.01
 
     def _risk_reward(self, loss: float, profit: float) -> str:
         if loss <= 0:

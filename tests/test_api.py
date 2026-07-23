@@ -219,9 +219,31 @@ def test_engine_calculates_dynamic_volume() -> None:
     assert payload["risk_amount"] == 8.48
     assert payload["raw_volume"] == 0.00848
     assert payload["capital_volume"] == 0.00441496
-    assert payload["volume"] == 0.008
+    assert payload["volume"] == 0
     assert payload["volume_basis"] == "riesgo"
     assert payload["order_type"] == "BUY STOP"
+
+
+def test_engine_rounds_non_stock_cfd_volume_to_xtb_step() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/engine/calculate",
+        json={
+            "symbol": "NATGAS",
+            "direction": "LONG",
+            "account_balance": 2016,
+            "risk_pct": 0.5,
+            "entry_price": 2.9,
+            "stop_price": 2.84,
+            "take_profit_price": 3.02,
+            "requested_volume": 0.017,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["volume"] == 0.01
+    assert payload["requested_volume"] == 0.01
 
 
 def test_engine_short_warning() -> None:
