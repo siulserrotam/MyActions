@@ -219,6 +219,7 @@ function buildDailyTradePlan() {
 
 function renderRiskModeNote() {
   renderAiDecisionSummary();
+  renderTradeSchedule();
 }
 
 function renderAiDecisionSummary() {
@@ -248,6 +249,120 @@ function renderAiDecisionSummary() {
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
     <p class="mt-2 text-xs text-zinc-400">Modo agresivo controlado: intenta usar el mayor volumen viable, pero no permite que el stop pase el riesgo diario.</p>
+  `;
+}
+
+function tradeSchedulePlan() {
+  const { weekday, total } = nyMarketMinutes();
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  const firstStart = 9 * 60 + 35;
+  const firstIdeal = 9 * 60 + 45;
+  const firstEnd = 10 * 60 + 30;
+  const secondStart = 10 * 60 + 30;
+  const secondEnd = 11 * 60 + 30;
+  const noNewAfter = 11 * 60 + 30;
+  const manageOnlyAfter = 14 * 60;
+  const hardClose = 15 * 60 + 45;
+
+  if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
+    return {
+      title: "Mercado cerrado",
+      now: "Prepara lista, no abras operaciones.",
+      first: "Operacion 1: 9:35-10:30 NY. Mejor desde 9:45 si hay direccion clara.",
+      second: "Operacion 2: solo 10:30-11:30 NY si la primera no consumio riesgo y hay nueva senal.",
+      stop: "No abrir nuevas despues de 11:30 NY.",
+      close: "Cierre maximo intradia: 15:45 NY si no toco stop ni meta.",
+      tone: "muted",
+    };
+  }
+  if (total < firstStart) {
+    return {
+      title: "Esperar primera vela",
+      now: `No abrir. Faltan ${formatMinutesUntil(firstStart, total)} para evaluar ORB.`,
+      first: "Operacion 1: programa solo despues de 9:35 NY.",
+      second: "Operacion 2: todavia no aplica.",
+      stop: "Nada antes de cierre de vela 9:30-9:35 NY.",
+      close: "Si entras hoy, cierre maximo 15:45 NY.",
+      tone: "danger",
+    };
+  }
+  if (total < firstEnd) {
+    return {
+      title: "Ventana de Operacion 1",
+      now: total < firstIdeal ? "Puedes preparar, pero 9:35-9:45 aun tiene ruido. Opera solo con semaforo OPERABLE." : "Mejor ventana para la primera entrada si el semaforo esta OPERABLE.",
+      first: `Operacion 1: ahora hasta 10:30 NY. Quedan ${formatMinutesUntil(firstEnd, total)}.`,
+      second: "Operacion 2: espera a 10:30 NY y solo si la primera no salio perdedora.",
+      stop: "Si no activa antes de 10:30 NY, cancela esa idea.",
+      close: "Cierre maximo si queda abierta: 15:45 NY.",
+      tone: total < firstIdeal ? "warning" : "ok",
+    };
+  }
+  if (total < secondEnd) {
+    return {
+      title: "Ventana de Operacion 2",
+      now: "Solo segunda oportunidad. No repitas por ansiedad: exige nueva senal clara.",
+      first: "Operacion 1: ya paso la ventana ideal.",
+      second: `Operacion 2: ahora hasta 11:30 NY. Quedan ${formatMinutesUntil(secondEnd, total)}.`,
+      stop: "Si la primera fue perdida, se cierra el dia.",
+      close: "Cierre maximo si queda abierta: 15:45 NY.",
+      tone: "warning",
+    };
+  }
+  if (total < manageOnlyAfter) {
+    return {
+      title: "No abrir nuevas",
+      now: "Gestiona lo abierto. No busques entradas nuevas en mediodia lento.",
+      first: "Operacion 1: cerrada o protegida.",
+      second: "Operacion 2: ventana cerrada.",
+      stop: "Desde 11:30 NY no abrir nuevas salvo caso excepcional muy fuerte.",
+      close: "Si no toco stop/meta, empieza a reducir antes de 14:00 NY.",
+      tone: "warning",
+    };
+  }
+  if (total < hardClose) {
+    return {
+      title: "Gestion de cierre",
+      now: "No abrir. Solo proteger, cerrar parcial o cerrar total.",
+      first: "Entradas nuevas bloqueadas.",
+      second: "Entradas nuevas bloqueadas.",
+      stop: "Evita quedarte esperando una recuperacion tarde.",
+      close: `Cierre maximo: 15:45 NY. Quedan ${formatMinutesUntil(hardClose, total)}.`,
+      tone: "danger",
+    };
+  }
+  return {
+    title: "Cerrar intradia",
+    now: "Cierra lo abierto. No dejes la operacion viva por esperanza.",
+    first: "Operacion 1: finalizada.",
+    second: "Operacion 2: finalizada.",
+    stop: "No abrir nuevas.",
+    close: "Regla: fuera antes de cierre del mercado.",
+    tone: "danger",
+  };
+}
+
+function renderTradeSchedule() {
+  const target = document.getElementById("trade-schedule");
+  if (!target) return;
+  const plan = tradeSchedulePlan();
+  const toneClass = plan.tone === "ok"
+    ? "border-bull/50 bg-bull/10 text-bull"
+    : plan.tone === "danger"
+      ? "border-bear/50 bg-bear/10 text-bear"
+      : plan.tone === "warning"
+        ? "border-gold/40 bg-gold/10 text-gold"
+        : "border-white/10 bg-ink text-zinc-300";
+  target.className = `rounded-xl border p-3 text-sm ${toneClass}`;
+  target.innerHTML = `
+    <p class="text-xs font-black uppercase tracking-wide opacity-80">Plan horario del dia</p>
+    <p class="mt-2 font-black">${plan.title}</p>
+    <div class="mt-2 grid gap-1 text-xs text-zinc-200">
+      <p><strong>Ahora:</strong> ${plan.now}</p>
+      <p><strong>1:</strong> ${plan.first}</p>
+      <p><strong>2:</strong> ${plan.second}</p>
+      <p><strong>No abrir:</strong> ${plan.stop}</p>
+      <p><strong>Salida:</strong> ${plan.close}</p>
+    </div>
   `;
 }
 
@@ -637,6 +752,7 @@ function updateGoldenWindow() {
     widget.classList.add("border-white/10", "bg-panel2", "text-zinc-400");
     widget.textContent = "Fuera de la ventana operativa principal.";
   }
+  renderTradeSchedule();
 }
 
 function isMarketOpenNow() {
@@ -1066,6 +1182,7 @@ async function calculate() {
   renderTicket();
   renderMath();
   renderBestDecisionNote();
+  renderTradeSchedule();
   renderTopOpportunities();
   notifyIfNeeded();
 }
