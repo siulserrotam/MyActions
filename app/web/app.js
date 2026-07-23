@@ -55,7 +55,8 @@ const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
 const maxPlannedTrades = 2;
 const aggressiveDailyRiskUsd = 20;
-const defaultsVersion = "capital-2016-aggressive-risk-v1";
+const tradeRiskWeights = { 1: 0.6, 2: 0.4 };
+const defaultsVersion = "capital-2016-split-risk-v1";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -195,7 +196,7 @@ function buildRiskConfidenceProfile() {
 }
 
 function getEffectiveRiskPct() {
-  return buildDailyTradePlan().perTradeRiskPct;
+  return buildDailyTradePlan().currentTradeRiskPct;
 }
 
 function buildDailyTradePlan() {
@@ -207,13 +208,21 @@ function buildDailyTradePlan() {
     .filter((item) => item.usable).length;
   const plannedTrades = Math.min(maxPlannedTrades, Math.max(1, viableCount));
   const dailyRiskAmount = accountBalance * baseRiskPct / 100;
-  const perTradeRiskAmount = dailyRiskAmount / plannedTrades;
+  const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
+  const useSplitPlan = plannedTrades > 1;
+  const currentWeight = useSplitPlan ? tradeRiskWeights[currentSlot] || tradeRiskWeights[1] : 1;
+  const firstRiskAmount = useSplitPlan ? dailyRiskAmount * tradeRiskWeights[1] : dailyRiskAmount;
+  const secondRiskAmount = useSplitPlan ? dailyRiskAmount * tradeRiskWeights[2] : 0;
+  const currentTradeRiskAmount = dailyRiskAmount * currentWeight;
   return {
     baseRiskPct,
     dailyRiskAmount,
     plannedTrades,
-    perTradeRiskAmount,
-    perTradeRiskPct: Number((baseRiskPct / plannedTrades).toFixed(4)),
+    currentSlot,
+    firstRiskAmount,
+    secondRiskAmount,
+    currentTradeRiskAmount,
+    currentTradeRiskPct: Number((baseRiskPct * currentWeight).toFixed(4)),
   };
 }
 
@@ -240,7 +249,9 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
       <div class="summary-row"><span>Riesgo/meta diario</span><strong>${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
       <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
-      <div class="summary-row"><span>Riesgo/meta por CFD</span><strong>${money(plan.perTradeRiskAmount)} / ${money(plan.perTradeRiskAmount * 2)}</strong></div>
+      <div class="summary-row"><span>Operacion 1</span><strong>${money(plan.firstRiskAmount)} / ${money(plan.firstRiskAmount * 2)}</strong></div>
+      <div class="summary-row"><span>Operacion 2</span><strong>${plan.secondRiskAmount ? `${money(plan.secondRiskAmount)} / ${money(plan.secondRiskAmount * 2)}` : "Solo si aplica"}</strong></div>
+      <div class="summary-row"><span>Receta actual</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)} / ${money(plan.currentTradeRiskAmount * 2)}</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
       <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
       <div class="summary-row"><span>Horario</span><strong>${marketTimingProfile().quality}</strong></div>
@@ -248,7 +259,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Modo agresivo controlado: intenta usar el mayor volumen viable, pero no permite que el stop pase el riesgo diario.</p>
+    <p class="mt-2 text-xs text-zinc-400">Regla 60/40: primera operacion con escudo mas amplio; segunda mas estricta. Si la primera pierde, no se abre segunda.</p>
   `;
 }
 
@@ -269,7 +280,7 @@ function tradeSchedulePlan() {
       title: "Mercado cerrado",
       now: "Prepara lista, no abras operaciones.",
       first: "Operacion 1: 9:35-10:30 NY. Mejor desde 9:45 si hay direccion clara.",
-      second: "Operacion 2: solo 10:30-11:30 NY si la primera no consumio riesgo y hay nueva senal.",
+      second: "Operacion 2: solo 10:30-11:30 NY si la primera cerro en ganancia o esta protegida sin riesgo.",
       stop: "No abrir nuevas despues de 11:30 NY.",
       close: "Cierre maximo intradia: 15:45 NY si no toco stop ni meta.",
       tone: "muted",
@@ -291,7 +302,7 @@ function tradeSchedulePlan() {
       title: "Ventana de Operacion 1",
       now: total < firstIdeal ? "Puedes preparar, pero 9:35-9:45 aun tiene ruido. Opera solo con semaforo OPERABLE." : "Mejor ventana para la primera entrada si el semaforo esta OPERABLE.",
       first: `Operacion 1: ahora hasta 10:30 NY. Quedan ${formatMinutesUntil(firstEnd, total)}.`,
-      second: "Operacion 2: espera a 10:30 NY y solo si la primera no salio perdedora.",
+      second: "Operacion 2: no abrir mientras la primera siga viva con riesgo.",
       stop: "Si no activa antes de 10:30 NY, cancela esa idea.",
       close: "Cierre maximo si queda abierta: 15:45 NY.",
       tone: total < firstIdeal ? "warning" : "ok",
@@ -302,8 +313,8 @@ function tradeSchedulePlan() {
       title: "Ventana de Operacion 2",
       now: "Solo segunda oportunidad. No repitas por ansiedad: exige nueva senal clara.",
       first: "Operacion 1: ya paso la ventana ideal.",
-      second: `Operacion 2: ahora hasta 11:30 NY. Quedan ${formatMinutesUntil(secondEnd, total)}.`,
-      stop: "Si la primera fue perdida, se cierra el dia.",
+      second: `Operacion 2: ahora hasta 11:30 NY. Quedan ${formatMinutesUntil(secondEnd, total)}. Solo si la primera cerro en ganancia o esta protegida sin riesgo.`,
+      stop: "Si la primera fue perdida o sigue abierta con riesgo, no abrir segunda.",
       close: "Cierre maximo si queda abierta: 15:45 NY.",
       tone: "warning",
     };
@@ -691,12 +702,12 @@ function resetOrderForCurrentMode(asset) {
 
 function applyAiAggressiveTargets(asset) {
   const plan = buildDailyTradePlan();
-  const opportunity = buildAssetOpportunity(asset, plan.perTradeRiskPct);
+  const opportunity = buildAssetOpportunity(asset, plan.currentTradeRiskPct);
   const entry = Number(document.getElementById("entry-price").value || opportunity.entry || 0);
   const volume = opportunity.volume;
   const direction = aiDirectionForAsset(asset);
   if (!entry || !volume) return;
-  const stopDistance = plan.perTradeRiskAmount / (volume * asset.multiplier);
+  const stopDistance = plan.currentTradeRiskAmount / (volume * asset.multiplier);
   const targetDistance = stopDistance * 2;
   const stop = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
   const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
@@ -1166,6 +1177,7 @@ async function calculate() {
   document.getElementById("risk-usd-pill").textContent = money(payload.account_balance * payload.risk_pct / 100);
   renderRiskModeNote();
   renderLeverageCapacity();
+  renderDailyResultCard();
   try {
     const response = await fetch("/engine/calculate", {
       method: "POST",
@@ -1197,6 +1209,16 @@ function currentConfigPayload() {
   const availableCapital = accountBalance;
   const openProfit = Number(document.getElementById("open-profit").value || 0);
   const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
+  const operation1Result = Number(document.getElementById("operation1-result")?.value || 0);
+  const operation2Result = Number(document.getElementById("operation2-result")?.value || 0);
+  const realized = operation1Result + operation2Result;
+  const dailyStatus = realized >= aggressiveDailyRiskUsd * 2
+    ? "target_hit"
+    : realized <= -aggressiveDailyRiskUsd
+      ? "risk_hit"
+      : realized === 0
+        ? "pending"
+        : "partial";
   return {
     trade_date: todayKey(),
     balance: accountBalance,
@@ -1220,6 +1242,9 @@ function currentConfigPayload() {
     available_capital: availableCapital,
     margin_level_pct: marginLevelPct,
     open_profit: openProfit,
+    operation1_result: operation1Result,
+    operation2_result: operation2Result,
+    daily_result_status: dailyStatus,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
   };
@@ -1245,8 +1270,11 @@ function dailyCapitalPayload() {
     available_capital: config.available_capital,
     margin_level_pct: config.margin_level_pct,
     open_profit: config.open_profit,
+    operation1_result: config.operation1_result,
+    operation2_result: config.operation2_result,
+    daily_result_status: config.daily_result_status,
     risk_pct: config.risk_pct,
-    notes: "Intradia XTB: patrimonio, disponible, beneficio abierto, margen y riesgo.",
+    notes: "Intradia XTB: capital, receta IA, resultados reales op1/op2 y estado diario.",
   };
 }
 
@@ -1265,6 +1293,8 @@ function loadConfigLocal() {
     if (config.available_capital !== undefined) document.getElementById("available-capital").value = config.available_capital;
     if (config.margin_level_pct !== undefined) document.getElementById("margin-level-pct").value = config.margin_level_pct;
     if (config.open_profit !== undefined) document.getElementById("open-profit").value = config.open_profit;
+    if (config.operation1_result !== undefined) document.getElementById("operation1-result").value = config.operation1_result;
+    if (config.operation2_result !== undefined) document.getElementById("operation2-result").value = config.operation2_result;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
@@ -1325,6 +1355,23 @@ function renderLeverageCapacity() {
   `;
 }
 
+function renderDailyResultCard() {
+  const target = document.getElementById("daily-result-card");
+  if (!target) return;
+  const op1 = Number(document.getElementById("operation1-result")?.value || 0);
+  const op2 = Number(document.getElementById("operation2-result")?.value || 0);
+  const total = op1 + op2;
+  const status = total >= aggressiveDailyRiskUsd * 2
+    ? "Meta diaria cumplida: cerrar el dia."
+    : total <= -aggressiveDailyRiskUsd
+      ? "Perdida diaria tocada: cerrar el dia."
+      : total === 0
+        ? "Sin resultado cerrado aun."
+        : "Resultado parcial: no forzar otra entrada.";
+  target.className = `mt-2 rounded-xl border p-3 text-xs font-bold ${total >= 0 ? "border-bull/30 text-bull" : "border-bear/40 text-bear"}`;
+  target.textContent = `Resultado cerrado: ${money(total)}. ${status}`;
+}
+
 async function verifyDatabaseAndLoadLatest() {
   try {
     const healthResponse = await fetch("/capital/health");
@@ -1342,6 +1389,8 @@ async function verifyDatabaseAndLoadLatest() {
       if (payload.latest.available_capital !== undefined) document.getElementById("available-capital").value = payload.latest.available_capital;
       if (payload.latest.margin_level_pct !== undefined) document.getElementById("margin-level-pct").value = payload.latest.margin_level_pct;
       if (payload.latest.open_profit !== undefined) document.getElementById("open-profit").value = payload.latest.open_profit;
+      if (payload.latest.operation1_result !== undefined) document.getElementById("operation1-result").value = payload.latest.operation1_result;
+      if (payload.latest.operation2_result !== undefined) document.getElementById("operation2-result").value = payload.latest.operation2_result;
       calculate();
     }
   } catch (error) {
@@ -1563,6 +1612,7 @@ function renderTicket() {
   const expiryLabel = expiryMode === "DAY" ? "Hoy / fin del dia" : "Sin vencimiento manual";
   const rows = [
     ["Activo", lastResult.asset.symbol, true],
+    ["Operacion", `Operacion ${buildDailyTradePlan().currentSlot}`, false],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
     ["Precio de Entrada", numberText(lastResult.entry_price), true],
     ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
@@ -1596,6 +1646,7 @@ function renderMath() {
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Capital operativo</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Riesgo/meta del dia</span><strong>${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
+    <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)} / ${money(plan.currentTradeRiskAmount * 2)}</strong></div>
     <div class="summary-row"><span>Riesgo/meta esta receta</span><strong>${money(lastResult.expected_loss)} / ${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Margen aprox. que bloquea XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Exposicion nominal</span><strong>${money(positionValue)}</strong></div>
@@ -1606,11 +1657,11 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["stop-price", "take-profit-price", "expiry-mode"].forEach((id) => {
+  ["stop-price", "take-profit-price", "expiry-mode", "operation1-result", "operation2-result"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
-  ["account-balance", "entry-price"].forEach((id) => {
+  ["account-balance", "entry-price", "trade-slot"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => {
       applyAiAggressiveTargets(selectedAssetFromForm());
       calculate();
@@ -1640,7 +1691,7 @@ function bindInputs() {
     resetOrderFieldsFromMarketInput();
     calculate();
   });
-  ["account-balance", "available-capital", "open-profit", "margin-level-pct"].forEach((id) => {
+  ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });

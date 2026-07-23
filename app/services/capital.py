@@ -8,12 +8,17 @@ from app.db.models import DailyCapital
 
 class CapitalService:
     def ensure_schema(self, session: Session) -> None:
-        for column in ("available_capital", "margin_level_pct", "open_profit"):
+        for column in ("available_capital", "margin_level_pct", "open_profit", "operation1_result", "operation2_result"):
             try:
                 session.execute(text(f"ALTER TABLE daily_capital ADD COLUMN {column} FLOAT DEFAULT 0"))
                 session.commit()
             except Exception:
                 session.rollback()
+        try:
+            session.execute(text("ALTER TABLE daily_capital ADD COLUMN daily_result_status VARCHAR(32) DEFAULT 'pending'"))
+            session.commit()
+        except Exception:
+            session.rollback()
 
     def latest(self, session: Session) -> dict[str, object] | None:
         self.ensure_schema(session)
@@ -50,6 +55,9 @@ class CapitalService:
         available_capital: float = 0,
         margin_level_pct: float = 0,
         open_profit: float = 0,
+        operation1_result: float = 0,
+        operation2_result: float = 0,
+        daily_result_status: str = "pending",
         risk_pct: float = 1,
         notes: str = "",
     ) -> dict[str, object]:
@@ -72,6 +80,9 @@ class CapitalService:
                 available_capital=available_capital,
                 margin_level_pct=margin_level_pct,
                 open_profit=open_profit,
+                operation1_result=operation1_result,
+                operation2_result=operation2_result,
+                daily_result_status=daily_result_status,
                 risk_pct=risk_pct,
                 broker="XTB",
                 instrument_type="CFD",
@@ -93,6 +104,9 @@ class CapitalService:
             record.available_capital = available_capital
             record.margin_level_pct = margin_level_pct
             record.open_profit = open_profit
+            record.operation1_result = operation1_result
+            record.operation2_result = operation2_result
+            record.daily_result_status = daily_result_status
             record.risk_pct = risk_pct
             record.notes = notes
             record.updated_at = now
@@ -124,6 +138,10 @@ class CapitalService:
             "available_capital": round(record.available_capital or 0, 2),
             "margin_level_pct": round(record.margin_level_pct or 0, 2),
             "open_profit": round(record.open_profit or 0, 2),
+            "operation1_result": round(record.operation1_result or 0, 2),
+            "operation2_result": round(record.operation2_result or 0, 2),
+            "daily_realized_result": round((record.operation1_result or 0) + (record.operation2_result or 0), 2),
+            "daily_result_status": record.daily_result_status or "pending",
             "risk_pct": round(record.risk_pct or 1, 4),
             "risk_per_trade": round(record.balance * ((record.risk_pct or 1) / 100), 2),
             "reward_per_trade": round(record.balance * ((record.risk_pct or 1) / 100) * 2, 2),

@@ -154,6 +154,9 @@ def test_save_daily_capital() -> None:
             "available_capital": 1522.59,
             "margin_level_pct": 406.56,
             "open_profit": -3.24,
+            "operation1_result": 24,
+            "operation2_result": -8,
+            "daily_result_status": "partial",
             "risk_pct": 0.8,
         },
     )
@@ -173,6 +176,10 @@ def test_save_daily_capital() -> None:
     assert payload["available_capital"] == 1522.59
     assert payload["margin_level_pct"] == 406.56
     assert payload["open_profit"] == -3.24
+    assert payload["operation1_result"] == 24
+    assert payload["operation2_result"] == -8
+    assert payload["daily_realized_result"] == 16
+    assert payload["daily_result_status"] == "partial"
     assert payload["risk_per_trade"] == 20.8
 
 

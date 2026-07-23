@@ -56,6 +56,9 @@ class DailyCapitalRequest(BaseModel):
     available_capital: float = 0
     margin_level_pct: float = 0
     open_profit: float = 0
+    operation1_result: float = 0
+    operation2_result: float = 0
+    daily_result_status: str = "pending"
     risk_pct: float = Field(default=1, gt=0, le=10)
     notes: str = ""
 
@@ -418,6 +421,9 @@ def save_daily_capital(
             available_capital=payload.available_capital,
             margin_level_pct=payload.margin_level_pct,
             open_profit=payload.open_profit,
+            operation1_result=payload.operation1_result,
+            operation2_result=payload.operation2_result,
+            daily_result_status=payload.daily_result_status,
             risk_pct=payload.risk_pct,
             notes=payload.notes,
         )
