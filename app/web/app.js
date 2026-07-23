@@ -100,10 +100,16 @@ function cfdLeverageRatio() {
 }
 
 function minStopPct(asset) {
-  if (asset.category === "forex") return 0.05;
-  if (asset.category === "crypto") return 0.5;
-  if (asset.category === "indices" || asset.category === "commodities") return 0.2;
-  return 0.35;
+  if (asset.category === "forex") return 0.08;
+  if (asset.category === "crypto") return 0.8;
+  if (asset.category === "indices") return 0.35;
+  if (asset.category === "commodities") return 0.45;
+  return 0.75;
+}
+
+function volatilityStopPct(asset) {
+  const liveMove = Math.abs(Number(asset.liveChangePct ?? 0));
+  return Math.max(minStopPct(asset), liveMove * 0.35);
 }
 
 function riskModeValue() {
@@ -137,7 +143,7 @@ function buildRiskConfidenceProfile() {
   const entry = Number(document.getElementById("entry-price")?.value || 0);
   const stop = Number(document.getElementById("stop-price")?.value || 0);
   const stopPct = entry > 0 ? Math.abs(entry - stop) / entry * 100 : 0;
-  const minimumStopPct = minStopPct(asset);
+  const minimumStopPct = volatilityStopPct(asset);
   const timing = marketTimingProfile();
   let confidence = 50;
   const reasons = [];
@@ -927,7 +933,7 @@ function buildAiConfirmation() {
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
   const stopDistance = Math.abs(lastResult.entry_price - lastResult.stop_loss);
   const stopPct = lastResult.entry_price > 0 ? stopDistance / lastResult.entry_price * 100 : 0;
-  const minimumStopPct = minStopPct(asset);
+  const minimumStopPct = volatilityStopPct(asset);
   const marketOpen = isMarketOpenNow();
   const timing = marketTimingProfile();
   const reasons = [];
@@ -1071,7 +1077,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const riskAmount = accountBalance * riskPct / 100;
   const nominalBudget = marginBudget / (cfdMarginPct() / 100);
   const marginVolume = nominalBudget / (entry * asset.multiplier);
-  const minimumStopDistance = entry * minStopPct(asset) / 100;
+  const minimumStopDistance = entry * volatilityStopPct(asset) / 100;
   const stopSafeVolume = riskAmount / (minimumStopDistance * asset.multiplier);
   const volume = roundVolumeForXtb(Math.min(marginVolume, stopSafeVolume), asset);
   const distance = volume > 0 ? riskAmount / (volume * asset.multiplier) : 0;
@@ -1082,7 +1088,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const stopPct = entry > 0 ? distance / entry * 100 : 0;
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
-  const hasSafeStop = stopPct >= minStopPct(asset);
+  const hasSafeStop = stopPct >= volatilityStopPct(asset);
   const usable = hasVolume && hasMargin && hasSafeStop;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
@@ -1105,6 +1111,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     targetMovePct,
     targetAmount,
     stopPct,
+    minimumStopPct: volatilityStopPct(asset),
     reason: usable
       ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
       : "Oculto: no cabe por margen, volumen o stop seguro.",
@@ -1372,6 +1379,64 @@ function renderDailyResultCard() {
   target.textContent = `Resultado cerrado: ${money(total)}. ${status}`;
 }
 
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+async function exportMonthlyReport() {
+  const button = document.getElementById("export-monthly-report");
+  if (button) button.textContent = "Generando CSV...";
+  try {
+    const response = await fetch("/capital/daily?limit=120");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const currentMonth = todayKey().slice(0, 7);
+    const rows = (payload.history || []).filter((item) => String(item.trade_date || "").startsWith(currentMonth));
+    const headers = [
+      "fecha",
+      "capital",
+      "resultado_op1",
+      "resultado_op2",
+      "resultado_dia",
+      "estado",
+      "meta_dia",
+      "perdida_maxima",
+      "riesgo_pct",
+      "notas",
+    ];
+    const csvRows = [
+      headers.join(","),
+      ...rows.map((item) => [
+        item.trade_date,
+        item.balance,
+        item.operation1_result,
+        item.operation2_result,
+        item.daily_realized_result,
+        item.daily_result_status,
+        item.target_profit,
+        item.max_loss,
+        item.risk_pct,
+        item.notes,
+      ].map(csvEscape).join(",")),
+    ];
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `myactions-reporte-${currentMonth}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    updatePostbackStatus(`Reporte mensual exportado: ${rows.length} registros.`, "ok");
+  } catch (error) {
+    updatePostbackStatus("No se pudo exportar: revisa conexion con base de datos.", "error");
+  } finally {
+    if (button) button.textContent = "Exportar reporte mensual CSV";
+  }
+}
+
 async function verifyDatabaseAndLoadLatest() {
   try {
     const healthResponse = await fetch("/capital/health");
@@ -1503,9 +1568,9 @@ function renderWarnings() {
   if (lastResult?.requested_volume && lastResult.entry_price) {
     const stopDistance = Math.abs(lastResult.entry_price - lastResult.stop_loss);
     const stopPct = stopDistance / lastResult.entry_price * 100;
-    const minimum = minStopPct(lastResult.asset);
+    const minimum = volatilityStopPct(lastResult.asset);
     if (stopPct < minimum) {
-      warnings.push({ level: "danger", message: `STOP MUY CERCANO: con volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)} el stop queda a ${numberText(stopPct)}% del precio. Minimo sugerido para este activo: ${numberText(minimum)}%. Baja volumen o espera mejor entrada.` });
+      warnings.push({ level: "danger", message: `STOP MUY CERCANO: con volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)} el stop queda a ${numberText(stopPct)}% del precio. Minimo con filtro de volatilidad: ${numberText(minimum)}%. La app debe bajar volumen o esperar mejor entrada.` });
     }
   }
   if (lastResult?.asset?.category === "stocks" && lastResult.volume < 1) {
@@ -1699,6 +1764,7 @@ function bindInputs() {
   document.getElementById("toggle-favorite-btn").addEventListener("click", toggleFavorite);
   document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
   document.getElementById("test-notifications").addEventListener("click", testNotifications);
+  document.getElementById("export-monthly-report").addEventListener("click", exportMonthlyReport);
 }
 
 loadConfigLocal();
