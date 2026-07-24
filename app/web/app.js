@@ -1258,6 +1258,26 @@ function todayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
 }
 
+function resetDailyResultInputs() {
+  document.getElementById("operation1-result").value = 0;
+  document.getElementById("operation2-result").value = 0;
+  localStorage.setItem("decision_engine_active_trade_date", todayKey());
+  renderDailyResultCard();
+}
+
+function resetDailyResultsIfNewDay() {
+  const today = todayKey();
+  const activeDate = localStorage.getItem("decision_engine_active_trade_date");
+  if (!activeDate) {
+    localStorage.setItem("decision_engine_active_trade_date", today);
+    return;
+  }
+  if (activeDate !== today) {
+    resetDailyResultInputs();
+    updatePostbackStatus("Nuevo dia detectado: resultados Op1/Op2 reiniciados.", "ok");
+  }
+}
+
 function currentConfigPayload() {
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
   const riskPct = getEffectiveRiskPct();
@@ -1308,6 +1328,7 @@ function currentConfigPayload() {
 
 function saveConfigLocal() {
   localStorage.setItem("decision_engine_config", JSON.stringify(currentConfigPayload()));
+  localStorage.setItem("decision_engine_active_trade_date", todayKey());
 }
 
 function dailyCapitalPayload() {
@@ -1342,6 +1363,7 @@ function loadConfigLocal() {
       document.getElementById("account-balance").value = defaultAccountBalance;
       document.getElementById("risk-pct").value = "dynamic";
       localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
+      localStorage.setItem("decision_engine_active_trade_date", todayKey());
       return;
     }
     if (config.balance) document.getElementById("account-balance").value = config.balance;
@@ -1365,6 +1387,7 @@ function loadConfigLocal() {
       document.getElementById("risk-pct").value = "dynamic";
       localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
     }
+    resetDailyResultsIfNewDay();
   } catch {
     return;
   }
@@ -1534,6 +1557,36 @@ async function postbackConfig() {
   } catch (error) {
     updatePostbackStatus("Postback: guardado local. Base de datos no disponible.", "error");
   }
+}
+
+async function saveDayClose() {
+  await postbackConfig();
+  updatePostbackStatus("Cierre del dia guardado. Ya puedes limpiar para el proximo dia.", "ok");
+}
+
+function clearDayResults() {
+  resetDailyResultInputs();
+  saveConfigLocal();
+  schedulePostback();
+  calculate();
+}
+
+function applyCapitalMovement() {
+  const movementInput = document.getElementById("capital-movement");
+  const movement = Number(movementInput.value || 0);
+  if (!movement) {
+    updatePostbackStatus("Movimiento de capital vacio. Usa negativo para retiro o positivo para deposito.", "error");
+    return;
+  }
+  const balanceInput = document.getElementById("account-balance");
+  const current = Number(balanceInput.value || defaultAccountBalance);
+  const next = Math.max(0, current + movement);
+  balanceInput.value = next.toFixed(2);
+  movementInput.value = "";
+  updatePostbackStatus(`${movement < 0 ? "Retiro" : "Deposito"} aplicado: ${money(movement)}. Capital nuevo: ${money(next)}.`, "ok");
+  saveConfigLocal();
+  schedulePostback();
+  calculate();
 }
 
 function localCalculate(payload) {
@@ -1819,6 +1872,9 @@ function bindInputs() {
   document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
   document.getElementById("test-notifications").addEventListener("click", testNotifications);
   document.getElementById("export-monthly-report").addEventListener("click", exportMonthlyReport);
+  document.getElementById("save-day-close").addEventListener("click", saveDayClose);
+  document.getElementById("clear-day-results").addEventListener("click", clearDayResults);
+  document.getElementById("apply-capital-movement").addEventListener("click", applyCapitalMovement);
 }
 
 loadConfigLocal();
