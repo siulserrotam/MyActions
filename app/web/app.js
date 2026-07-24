@@ -1457,56 +1457,99 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+function htmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 async function exportMonthlyReport() {
   const button = document.getElementById("export-monthly-report");
-  if (button) button.textContent = "Generando CSV...";
+  if (button) button.textContent = "Generando Excel...";
   try {
     const response = await fetch("/capital/daily?limit=120");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const currentMonth = todayKey().slice(0, 7);
     const rows = (payload.history || []).filter((item) => String(item.trade_date || "").startsWith(currentMonth));
-    const headers = [
-      "fecha",
-      "capital",
-      "resultado_op1",
-      "resultado_op2",
-      "resultado_dia",
-      "estado",
-      "meta_dia",
-      "perdida_maxima",
-      "riesgo_pct",
-      "notas",
-    ];
-    const csvRows = [
-      headers.join(","),
-      ...rows.map((item) => [
-        item.trade_date,
-        item.balance,
-        item.operation1_result,
-        item.operation2_result,
-        item.daily_realized_result,
-        item.daily_result_status,
-        item.target_profit,
-        item.max_loss,
-        item.risk_pct,
-        item.notes,
-      ].map(csvEscape).join(",")),
-    ];
-    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const sortedRows = [...rows].sort((a, b) => String(a.trade_date || "").localeCompare(String(b.trade_date || "")));
+    const firstBalance = Number(sortedRows[0]?.balance || 0);
+    const lastBalance = Number(sortedRows[sortedRows.length - 1]?.balance || 0);
+    const monthlyResult = sortedRows.reduce((sum, item) => sum + Number(item.daily_realized_result || 0), 0);
+    const monthlyTarget = sortedRows.reduce((sum, item) => sum + Number(item.target_profit || 0), 0);
+    const monthlyMaxLoss = sortedRows.reduce((sum, item) => sum + Number(item.max_loss || 0), 0);
+    const detailRows = sortedRows.map((item) => `
+      <tr>
+        <td>${htmlEscape(item.trade_date)}</td>
+        <td>${Number(item.balance || 0).toFixed(2)}</td>
+        <td>${Number(item.operation1_result || 0).toFixed(2)}</td>
+        <td>${Number(item.operation2_result || 0).toFixed(2)}</td>
+        <td>${Number(item.daily_realized_result || 0).toFixed(2)}</td>
+        <td>${htmlEscape(item.daily_result_status)}</td>
+        <td>${Number(item.target_profit || 0).toFixed(2)}</td>
+        <td>${Number(item.max_loss || 0).toFixed(2)}</td>
+        <td>${Number(item.risk_pct || 0).toFixed(2)}%</td>
+        <td>${htmlEscape(item.notes)}</td>
+      </tr>
+    `).join("");
+    const workbook = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; }
+            h1 { color: #111827; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 18px; }
+            th { background: #111827; color: #ffffff; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+            .profit { color: #047857; font-weight: 700; }
+            .loss { color: #b91c1c; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>Reporte mensual MyActions - ${htmlEscape(currentMonth)}</h1>
+          <table>
+            <tr><th>Resumen</th><th>Valor USD</th></tr>
+            <tr><td>Dias registrados</td><td>${sortedRows.length}</td></tr>
+            <tr><td>Capital inicial registrado</td><td>${firstBalance.toFixed(2)}</td></tr>
+            <tr><td>Capital final registrado</td><td>${lastBalance.toFixed(2)}</td></tr>
+            <tr><td>Resultado mensual cerrado</td><td class="${monthlyResult >= 0 ? "profit" : "loss"}">${monthlyResult.toFixed(2)}</td></tr>
+            <tr><td>Meta mensual acumulada</td><td>${monthlyTarget.toFixed(2)}</td></tr>
+            <tr><td>Perdida maxima mensual acumulada</td><td>${monthlyMaxLoss.toFixed(2)}</td></tr>
+          </table>
+          <table>
+            <tr>
+              <th>Fecha</th>
+              <th>Capital</th>
+              <th>Operacion 1</th>
+              <th>Operacion 2</th>
+              <th>Resultado dia</th>
+              <th>Estado</th>
+              <th>Meta dia</th>
+              <th>Perdida maxima</th>
+              <th>Riesgo %</th>
+              <th>Notas</th>
+            </tr>
+            ${detailRows || '<tr><td colspan="10">Sin registros para este mes.</td></tr>'}
+          </table>
+        </body>
+      </html>`;
+    const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `myactions-reporte-${currentMonth}.csv`;
+    link.download = `myactions-reporte-${currentMonth}.xls`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    updatePostbackStatus(`Reporte mensual exportado: ${rows.length} registros.`, "ok");
+    updatePostbackStatus(`Reporte Excel exportado: ${rows.length} registros.`, "ok");
   } catch (error) {
     updatePostbackStatus("No se pudo exportar: revisa conexion con base de datos.", "error");
   } finally {
-    if (button) button.textContent = "Exportar reporte mensual CSV";
+    if (button) button.textContent = "Exportar reporte mensual Excel";
   }
 }
 

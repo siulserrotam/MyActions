@@ -55,6 +55,10 @@ docker compose up --build
 
 El proyecto esta preparado para desplegarse en Vercel como FastAPI serverless y conectarse a Supabase PostgreSQL. Ver [docs/deployment.md](docs/deployment.md).
 
+## Automatizacion XTB
+
+Para replicar la lectura segura de xStation 5 en otro PC sin guardar credenciales, ver [docs/xtb-automation-prompt.md](docs/xtb-automation-prompt.md).
+
 ## Aviso
 
 Este software es educativo y de apoyo analitico. No constituye asesoria financiera.
