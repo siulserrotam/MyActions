@@ -16,3 +16,8 @@ models/
 
 .vercel
 .env*
+
+node_modules/
+output/
+.profile-opera/
+XTB/data/

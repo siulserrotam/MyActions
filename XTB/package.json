@@ -1,0 +1,26 @@
+{
+  "name": "myactions-xtb",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "read": "node tools/read-chrome-debug.mjs",
+    "ensure": "node tools/ensure-pages.mjs",
+    "inspect:dashboard": "node tools/inspect-dashboard.mjs",
+    "inspect:summary": "node tools/inspect-dashboard-summary.mjs",
+    "inspect:xtb": "node tools/inspect-xtb-text.mjs",
+    "inspect:clean": "node tools/inspect-clean-mode.mjs",
+    "sync": "node tools/sync-dashboard-price.mjs --once",
+    "sync:watch": "node tools/sync-dashboard-price.mjs",
+    "clean": "node tools/apply-dashboard-clean-mode.mjs",
+    "clean:watch": "node tools/apply-dashboard-clean-mode.mjs --watch",
+    "day:start": "powershell -ExecutionPolicy Bypass -File tools/start-trading-day.ps1",
+    "monitor": "powershell -ExecutionPolicy Bypass -File tools/start-xtb-monitor.ps1",
+    "chrome": "powershell -ExecutionPolicy Bypass -File tools/start-chrome-debug.ps1",
+    "opera": "powershell -ExecutionPolicy Bypass -File tools/start-opera-debug.ps1",
+    "opera:fresh": "powershell -ExecutionPolicy Bypass -File tools/start-opera-debug.ps1 -FreshProfile",
+    "start": "powershell -ExecutionPolicy Bypass -File tools/start-local.ps1"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

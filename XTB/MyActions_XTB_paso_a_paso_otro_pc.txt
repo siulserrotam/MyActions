@@ -1,0 +1,114 @@
+﻿MYACTIONS + XTB - PASO A PASO PARA OTRO PC
+===========================================
+
+IMPORTANTE
+---------
+- No guardes usuario ni clave de XTB en archivos.
+- La automatizacion solo lee datos visibles de XTB.
+- No compra, no vende y no cierra operaciones automaticamente.
+- Tu debes confirmar manualmente cualquier orden real en XTB.
+
+REQUISITOS
+----------
+1. Windows
+2. Git instalado
+3. Node.js LTS instalado
+4. Google Chrome instalado
+5. Acceso a tu cuenta de GitHub y XTB
+
+OPCION A: PRIMERA VEZ EN EL PC
+------------------------------
+Abre PowerShell y ejecuta:
+
+git clone https://github.com/siulserrotam/MyActions.git
+cd MyActions
+
+OPCION B: SI EL REPO YA EXISTE
+------------------------------
+Abre PowerShell dentro de la carpeta del repo o ejecuta:
+
+cd MyActions
+git pull origin main
+
+1. ABRIR CHROME CONTROLABLE
+---------------------------
+Ejecuta:
+
+powershell -ExecutionPolicy Bypass -File tools\start-chrome-debug.ps1
+
+Esto abre una ventana especial de Chrome para que MyActions pueda leer la pantalla.
+
+2. INICIAR SESION EN XTB
+------------------------
+En esa ventana de Chrome abre:
+
+https://xstation5.xtb.com/?branch=lat#/_/loggedIn
+
+Inicia sesion manualmente.
+No pegues tu clave en terminal ni en archivos.
+
+3. ABRIR TAMBIEN MYACTIONS
+--------------------------
+En otra pestana de esa misma ventana abre:
+
+https://api.manantiallodge.com/dashboard/
+
+4. VALIDAR QUE LEE XTB
+----------------------
+En PowerShell, dentro de la carpeta MyActions, ejecuta:
+
+node tools\read-chrome-debug.mjs
+
+Debe aparecer algo similar:
+
+"account": {
+  "account": "55048950",
+  "total_equity": 1992.33,
+  "available_capital": 1992.33,
+  "open_profit": 0
+}
+
+Si salen null:
+- Deja visible en XTB la pantalla Mi Cartera o Mis Operaciones.
+- Vuelve a ejecutar el comando.
+
+5. INICIAR MONITOR CADA MINUTO
+------------------------------
+Ejecuta:
+
+powershell -ExecutionPolicy Bypass -File tools\start-xtb-monitor.ps1
+
+Para detenerlo: Ctrl + C
+
+6. MONITOR MAS RAPIDO OPCIONAL
+------------------------------
+Cada 15 segundos:
+
+$env:XTB_MONITOR_INTERVAL_MS="15000"
+powershell -ExecutionPolicy Bypass -File tools\start-xtb-monitor.ps1
+
+7. DONDE QUEDAN LOS DATOS
+-------------------------
+Ultimo snapshot:
+
+data\xtb-snapshots\latest.json
+
+Historial del dia:
+
+data\xtb-snapshots\YYYY-MM-DD.jsonl
+
+8. FLUJO RECOMENDADO PARA OPERAR MANUALMENTE
+--------------------------------------------
+1. Abrir Chrome debug.
+2. Iniciar sesion manual en XTB.
+3. Abrir MyActions.
+4. Validar lectura con node tools\read-chrome-debug.mjs.
+5. Iniciar monitor.
+6. Revisar recomendacion de MyActions.
+7. Copiar manualmente activo, orden, entrada, stop, take profit y volumen.
+8. Confirmar todo en XTB antes de enviar.
+
+RECUERDA
+--------
+XTB ejecuta las ordenes.
+MyActions solo lee, calcula, alerta y guarda historial.
