@@ -31,6 +31,69 @@ Requisitos:
 - Chrome instalado.
 - Acceso al repo `https://github.com/siulserrotam/MyActions`.
 
+## Paso a paso rapido desde terminal
+
+Abre PowerShell y ejecuta:
+
+```powershell
+git clone https://github.com/siulserrotam/MyActions.git
+cd MyActions
+```
+
+Si el repo ya existe en ese PC:
+
+```powershell
+cd MyActions
+git pull origin main
+```
+
+Inicia una ventana de Chrome controlable por la automatizacion:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\start-chrome-debug.ps1
+```
+
+En esa ventana de Chrome inicia sesion manualmente en XTB:
+
+```text
+https://xstation5.xtb.com/?branch=lat#/_/loggedIn
+```
+
+Cuando ya veas xStation abierta, valida que la app pueda leer:
+
+```powershell
+node tools\read-chrome-debug.mjs
+```
+
+Debes ver algo como:
+
+```json
+"account": {
+  "account": "55048950",
+  "total_equity": 1992.33,
+  "available_capital": 1992.33,
+  "open_profit": 0,
+  "margin_level_pct": null
+}
+```
+
+Si los campos salen `null`, deja visible en xStation la pantalla **Mi Cartera / Mis Operaciones** y vuelve a ejecutar el comando.
+
+Inicia el monitor cada minuto:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\start-xtb-monitor.ps1
+```
+
+Para una lectura mas rapida, por ejemplo cada 15 segundos:
+
+```powershell
+$env:XTB_MONITOR_INTERVAL_MS="15000"
+powershell -ExecutionPolicy Bypass -File tools\start-xtb-monitor.ps1
+```
+
+Para detenerlo, usa `Ctrl+C`.
+
 Comandos:
 
 ```powershell
@@ -66,6 +129,14 @@ Archivos generados:
 
 - `data\xtb-snapshots\latest.json`: ultimo estado leido.
 - `data\xtb-snapshots\YYYY-MM-DD.jsonl`: historial minuto a minuto del dia.
+
+El snapshot debe incluir:
+
+- `account.total_equity`: valor total aproximado de la cuenta.
+- `account.available_capital`: capital disponible para margen.
+- `account.open_profit`: beneficio o perdida abierta.
+- `account.margin_level_pct`: nivel de margen si xStation lo muestra visible.
+- `quotes`: precios bid/ask de los activos visibles en la lista de cotizaciones.
 
 ## Criterio operativo del dashboard
 
