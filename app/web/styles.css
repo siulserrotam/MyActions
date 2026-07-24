@@ -492,6 +492,147 @@ body {
 }
 
 @media (max-width: 640px) {
+  html,
+  body {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .simple-dashboard {
+    width: 100%;
+    padding: 12px;
+    background:
+      radial-gradient(circle at 50% 0%, rgb(36 184 124 / 0.18), transparent 18rem),
+      linear-gradient(180deg, #07100e, #0b1210 42%, #07100e);
+  }
+
+  .simple-shell {
+    width: 100%;
+    max-width: none;
+    gap: 12px;
+  }
+
+  .simple-hero,
+  .simple-ops,
+  .simple-close-grid,
+  .simple-form-grid,
+  .simple-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .simple-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .simple-numbers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .simple-panel,
+  .simple-metric,
+  .simple-operation,
+  .simple-card,
+  .simple-number {
+    border-radius: 18px;
+    box-shadow: none;
+  }
+
+  .simple-panel,
+  .simple-operation,
+  .simple-card {
+    padding: 14px;
+  }
+
+  .simple-metric,
+  .simple-number {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .simple-dashboard h1 {
+    font-size: 38px;
+    line-height: 0.92;
+  }
+
+  .simple-dashboard h2 {
+    font-size: 24px;
+  }
+
+  .simple-subtitle {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .simple-status,
+  .simple-actions {
+    gap: 8px;
+  }
+
+  .simple-chip {
+    max-width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .simple-badge {
+    padding: 6px 8px;
+    font-size: 11px;
+    white-space: normal;
+    text-align: right;
+  }
+
+  .simple-label {
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    overflow-wrap: anywhere;
+  }
+
+  .simple-value {
+    margin-top: 6px;
+    font-size: 24px;
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+  }
+
+  .simple-number strong {
+    font-size: 22px;
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+  }
+
+  .simple-head {
+    align-items: center;
+  }
+
+  .simple-operation {
+    min-height: 0;
+  }
+
+  .simple-dashboard button {
+    flex: 1 1 145px;
+    min-height: 46px;
+    padding: 11px 12px;
+    font-size: 13px;
+  }
+
+  .simple-dashboard input,
+  .simple-dashboard textarea,
+  .simple-dashboard select {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .simple-guide div {
+    font-size: 12px;
+  }
+
+  .simple-wide {
+    grid-column: auto;
+  }
+
   .copy-row,
   .summary-row {
     align-items: stretch;
