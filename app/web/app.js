@@ -1252,6 +1252,7 @@ async function calculate() {
   renderTradeSchedule();
   renderTopOpportunities();
   notifyIfNeeded();
+  renderSimpleDashboard();
 }
 
 function todayKey() {
@@ -1450,6 +1451,138 @@ function renderDailyResultCard() {
         : "Resultado parcial: no forzar otra entrada.";
   target.className = `mt-2 rounded-xl border p-3 text-xs font-bold ${total >= 0 ? "border-bull/30 text-bull" : "border-bear/40 text-bear"}`;
   target.textContent = `Resultado cerrado: ${money(total)}. ${status}`;
+  renderSimpleDashboard();
+}
+
+function setControlValue(id, value) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.value = value;
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function renderSimpleDashboard() {
+  const target = document.getElementById("simple-dashboard");
+  if (!target) return;
+
+  const symbol = document.getElementById("symbol")?.value || "--";
+  const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || "--";
+  const entry = document.getElementById("entry-price")?.value || "--";
+  const stop = document.getElementById("stop-price")?.value || "--";
+  const takeProfit = document.getElementById("take-profit-price")?.value || "--";
+  const volume = document.getElementById("requested-volume")?.value || "--";
+  const capital = document.getElementById("account-balance")?.value || "--";
+  const op1 = document.getElementById("operation1-result")?.value || "0";
+  const op2 = document.getElementById("operation2-result")?.value || "0";
+  const movement = document.getElementById("capital-movement")?.value || "";
+  const lessonResult = document.getElementById("lesson-result")?.value || "0";
+  const lessonOutcome = document.getElementById("lesson-outcome")?.value || "pending";
+  const lessonNotes = document.getElementById("lesson-notes")?.value || "";
+  const tradeSlot = document.getElementById("trade-slot")?.value || "1";
+  const direction = document.getElementById("direction")?.value || "--";
+  const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
+  const resultText = dailyText.match(/Resultado cerrado:[^\.]+/)?.[0]?.replace("Resultado cerrado:", "").trim() || "$0";
+  const op1Lost = Number(op1) < 0;
+
+  target.innerHTML = `
+    <div class="simple-shell">
+      <div class="simple-hero">
+        <section class="simple-panel">
+          <h1>Plan diario XTB</h1>
+          <p class="simple-subtitle">Dos operaciones maximo. Precio XTB sincronizado, receta, resultado, aprendizaje y cierre del dia en una sola pantalla.</p>
+          <div class="simple-status">
+            <span class="simple-chip">XTB sincronizado</span>
+            <span class="simple-chip">Produccion permanente</span>
+            <span class="simple-chip warn">Si Op 1 pierde, no abrir Op 2</span>
+          </div>
+        </section>
+        <section class="simple-metrics">
+          <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${symbol}</span></div>
+          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span></div>
+          <div class="simple-metric"><span class="simple-label">Operacion activa</span><span class="simple-value">Operacion ${tradeSlot}</span></div>
+          <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
+        </section>
+      </div>
+      <section class="simple-ops">
+        <article class="simple-operation ${tradeSlot === "1" ? "active" : ""}">
+          <div class="simple-head"><h2>Operacion 1</h2><span class="simple-badge">60% riesgo/meta</span></div>
+          <div class="simple-numbers">
+            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${direction}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "1" ? volume : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "1" ? entry : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>${tradeSlot === "1" ? stop : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "1" ? takeProfit : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Resultado</span><strong>${op1}</strong></div>
+          </div>
+          <div class="simple-actions"><button type="button" data-simple-action="slot-1">Ver receta Op 1</button><button type="button" class="secondary" data-simple-focus="simple-op1-result">Registrar Op 1</button></div>
+        </article>
+        <article class="simple-operation ${tradeSlot === "2" ? "active" : ""} ${op1Lost ? "blocked" : ""}">
+          <div class="simple-head"><h2>Operacion 2</h2><span class="simple-badge">${op1Lost ? "bloqueada por perdida Op 1" : "40% si Op 1 no perdio"}</span></div>
+          <div class="simple-numbers">
+            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "2" ? direction : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "2" ? volume : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "2" ? entry : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>${tradeSlot === "2" ? stop : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "2" ? takeProfit : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Resultado</span><strong>${op2}</strong></div>
+          </div>
+          <div class="simple-actions"><button type="button" class="${op1Lost ? "danger" : ""}" data-simple-action="slot-2">${op1Lost ? "No abrir Op 2" : "Ver receta Op 2"}</button><button type="button" class="secondary" data-simple-focus="simple-op2-result">Registrar Op 2</button></div>
+        </article>
+      </section>
+      <section class="simple-close-grid">
+        <div class="simple-card"><label class="simple-field"><span class="simple-label">Resultado Operacion 1 USD</span><input id="simple-op1-result" type="number" step="0.01" value="${op1}" data-sync-target="operation1-result" /></label></div>
+        <div class="simple-card"><label class="simple-field"><span class="simple-label">Resultado Operacion 2 USD</span><input id="simple-op2-result" type="number" step="0.01" value="${op2}" data-sync-target="operation2-result" /></label></div>
+        <div class="simple-card"><span class="simple-label">Cierre del dia</span><span class="simple-value">${resultText}</span><div class="simple-actions"><button type="button" data-simple-action="save-close">Guardar cierre</button><button type="button" class="secondary" data-simple-action="clear-day">Nuevo dia</button></div></div>
+      </section>
+      <section class="simple-panel">
+        <div class="simple-head"><div><h2>Ajustes y aprendizaje</h2><p class="simple-subtitle">Capital, memoria IA, notas, alertas y exportacion sin volver a la pantalla anterior.</p></div><span class="simple-badge">completo</span></div>
+        <div class="simple-form-grid">
+          <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
+          <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
+          <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
+          <label class="simple-field"><span class="simple-label">Resultado receta USD</span><input type="number" step="0.01" value="${lessonResult}" data-sync-target="lesson-result" /></label>
+          <label class="simple-field"><span class="simple-label">Que paso</span><select data-sync-target="lesson-outcome"><option value="pending" ${lessonOutcome === "pending" ? "selected" : ""}>Pendiente</option><option value="win" ${lessonOutcome === "win" ? "selected" : ""}>Gano / toco meta</option><option value="loss" ${lessonOutcome === "loss" ? "selected" : ""}>Perdio / toco stop</option><option value="manual" ${lessonOutcome === "manual" ? "selected" : ""}>Cierre manual</option><option value="missed" ${lessonOutcome === "missed" ? "selected" : ""}>No entre</option></select></label>
+          <div class="simple-field"><span class="simple-label">Aprendizaje</span><button type="button" class="secondary" data-simple-action="save-lesson">Guardar aprendizaje</button></div>
+          <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion...">${lessonNotes}</textarea></label>
+        </div>
+        <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
+      </section>
+      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Copia</strong>Usa entrada, stop, meta y volumen de la operacion activa.</div><div><strong>3. Cierre</strong>Al cerrar, registra ganancia/perdida y guarda cierre del dia.</div><div><strong>4. Regla</strong>Si Op 1 pierde, se termina el dia. No recuperacion, no revancha.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
+    </div>
+  `;
+}
+
+function bindSimpleDashboard() {
+  const target = document.getElementById("simple-dashboard");
+  if (!target) return;
+  target.addEventListener("input", (event) => {
+    const syncTarget = event.target?.dataset?.syncTarget;
+    if (syncTarget) setControlValue(syncTarget, event.target.value);
+  });
+  target.addEventListener("change", (event) => {
+    const syncTarget = event.target?.dataset?.syncTarget;
+    if (syncTarget) setControlValue(syncTarget, event.target.value);
+  });
+  target.addEventListener("click", (event) => {
+    const focusTarget = event.target?.dataset?.simpleFocus;
+    if (focusTarget) {
+      document.getElementById(focusTarget)?.focus();
+      return;
+    }
+    const action = event.target?.dataset?.simpleAction;
+    if (!action) return;
+    if (action === "slot-1") setControlValue("trade-slot", "1");
+    if (action === "slot-2") setControlValue("trade-slot", "2");
+    if (action === "save-close") saveDayClose();
+    if (action === "clear-day") clearDayResults();
+    if (action === "apply-capital") applyCapitalMovement();
+    if (action === "save-lesson") saveTradeLesson();
+    if (action === "export-excel") exportMonthlyReport();
+    if (action === "enable-alerts") enableNotifications();
+    if (action === "test-alert") testNotifications();
+    if (action === "slot-1" || action === "slot-2") calculate();
+  });
 }
 
 function updateLessonStatus(message, tone = "neutral") {
@@ -2017,6 +2150,7 @@ loadConfigLocal();
 renderTabs();
 renderAssets();
 bindInputs();
+bindSimpleDashboard();
 verifyDatabaseAndLoadLatest();
 loadLessonSummary();
 updateGoldenWindow();
@@ -2025,5 +2159,6 @@ selectedAsset = selectedAssetFromForm();
 resetOrderForCurrentMode(selectedAsset);
 refreshNotificationStatus();
 calculate();
+renderSimpleDashboard();
 refreshLivePrices({ resetSelected: true });
 scheduleAutoRefresh();

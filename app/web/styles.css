@@ -11,6 +11,274 @@ body {
   min-width: 320px;
 }
 
+.legacy-dashboard {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.simple-dashboard {
+  min-height: 100vh;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 14% 8%, rgb(36 184 124 / 0.18), transparent 28%),
+    radial-gradient(circle at 84% 4%, rgb(89 147 255 / 0.14), transparent 28%),
+    linear-gradient(145deg, #07100e, #101615 48%, #0a1110);
+  color: #eefcf6;
+  font-family: "Segoe UI", Candara, Calibri, sans-serif;
+}
+
+.simple-shell {
+  display: grid;
+  max-width: 1180px;
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.simple-hero {
+  display: grid;
+  grid-template-columns: 1.4fr 0.9fr;
+  gap: 14px;
+}
+
+.simple-panel,
+.simple-metric,
+.simple-operation,
+.simple-card {
+  border: 1px solid rgb(190 255 229 / 0.12);
+  border-radius: 22px;
+  background: rgb(13 24 22 / 0.86);
+  box-shadow: 0 18px 70px rgb(0 0 0 / 0.28);
+}
+
+.simple-panel {
+  padding: 20px;
+}
+
+.simple-dashboard h1 {
+  margin: 0;
+  font-size: clamp(32px, 5vw, 58px);
+  line-height: 0.95;
+  letter-spacing: -0.045em;
+}
+
+.simple-dashboard h2 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.simple-subtitle {
+  margin: 10px 0 0;
+  max-width: 780px;
+  color: #9cb8af;
+  font-size: 15px;
+}
+
+.simple-status,
+.simple-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.simple-chip,
+.simple-badge {
+  border: 1px solid rgb(60 225 154 / 0.22);
+  border-radius: 999px;
+  background: rgb(60 225 154 / 0.12);
+  color: #d9ffee;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.simple-chip {
+  padding: 8px 11px;
+}
+
+.simple-chip.warn {
+  border-color: rgb(255 188 72 / 0.28);
+  background: rgb(255 188 72 / 0.13);
+  color: #ffe6b8;
+}
+
+.simple-badge {
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.simple-metrics,
+.simple-numbers,
+.simple-close-grid,
+.simple-form-grid,
+.simple-guide {
+  display: grid;
+  gap: 12px;
+}
+
+.simple-metrics,
+.simple-numbers {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.simple-close-grid,
+.simple-form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.simple-guide {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.simple-metric,
+.simple-card,
+.simple-number {
+  padding: 16px;
+}
+
+.simple-label {
+  display: block;
+  color: #84a098;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.simple-value {
+  display: block;
+  margin-top: 8px;
+  color: #fff;
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+}
+
+.simple-ops {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.simple-operation {
+  display: grid;
+  min-height: 280px;
+  gap: 14px;
+  padding: 18px;
+}
+
+.simple-operation.active {
+  border-color: rgb(55 235 157 / 0.62);
+  box-shadow: 0 0 0 1px rgb(55 235 157 / 0.18), 0 22px 70px rgb(0 0 0 / 0.3);
+}
+
+.simple-operation.blocked {
+  opacity: 0.72;
+}
+
+.simple-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.simple-number {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.055);
+}
+
+.simple-number strong {
+  display: block;
+  margin-top: 6px;
+  color: #fff;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.simple-dashboard button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: #38e39c;
+  padding: 11px 14px;
+  color: #03110c;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.simple-dashboard button.secondary {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.08);
+  color: #eefcf6;
+}
+
+.simple-dashboard button.danger {
+  background: #ff5d6c;
+  color: #23080b;
+}
+
+.simple-field {
+  display: grid;
+  gap: 7px;
+}
+
+.simple-dashboard input,
+.simple-dashboard textarea,
+.simple-dashboard select {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 14px;
+  background: rgb(2 10 8 / 0.58);
+  padding: 12px 13px;
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  outline: none;
+}
+
+.simple-dashboard textarea {
+  min-height: 82px;
+  resize: vertical;
+  font-weight: 700;
+}
+
+.simple-dashboard input:focus,
+.simple-dashboard textarea:focus,
+.simple-dashboard select:focus {
+  border-color: rgb(56 227 156 / 0.78);
+  box-shadow: 0 0 0 3px rgb(56 227 156 / 0.12);
+}
+
+.simple-wide {
+  grid-column: 1 / -1;
+}
+
+.simple-guide div {
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 12px;
+  color: #b7cec7;
+  font-size: 13px;
+}
+
+.simple-guide strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #fff;
+}
+
+.simple-tiny {
+  color: #76918a;
+  font-size: 12px;
+}
+
 .login-body {
   min-height: 100vh;
   background:
