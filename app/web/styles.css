@@ -181,6 +181,99 @@ body {
   opacity: 0.72;
 }
 
+.simple-decision {
+  border-color: rgb(255 188 72 / 0.3);
+}
+
+.simple-decision.ok {
+  border-color: rgb(55 235 157 / 0.58);
+}
+
+.simple-decision.warn {
+  border-color: rgb(255 188 72 / 0.42);
+}
+
+.simple-decision.danger {
+  border-color: rgb(255 90 102 / 0.55);
+}
+
+.simple-score {
+  min-width: 118px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: rgb(0 0 0 / 0.25);
+  text-align: right;
+}
+
+.simple-score span {
+  display: block;
+  color: #9cb8af;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.simple-score strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.simple-top-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.simple-top-item,
+.simple-top-empty {
+  border: 1px solid rgb(190 255 229 / 0.12);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.04);
+  color: #eefcf6;
+  padding: 13px;
+  text-align: left;
+}
+
+.simple-top-item {
+  cursor: pointer;
+}
+
+.simple-top-item.active {
+  border-color: rgb(55 235 157 / 0.55);
+  background: rgb(55 235 157 / 0.12);
+}
+
+.simple-top-item span,
+.simple-top-item strong,
+.simple-top-item small {
+  display: block;
+}
+
+.simple-top-item span {
+  color: #9cb8af;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.simple-top-item strong {
+  margin-top: 5px;
+  font-size: 15px;
+}
+
+.simple-top-item small {
+  margin-top: 6px;
+  color: #abc7bf;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .simple-head {
   display: flex;
   align-items: flex-start;
@@ -516,6 +609,7 @@ body {
   .simple-ops,
   .simple-close-grid,
   .simple-form-grid,
+  .simple-top-list,
   .simple-guide {
     grid-template-columns: 1fr;
   }
@@ -604,7 +698,31 @@ body {
   }
 
   .simple-head {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .simple-score {
+    width: 100%;
+    min-width: 0;
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .simple-score strong {
+    margin-top: 0;
+    font-size: 26px;
+  }
+
+  .simple-top-list {
+    gap: 8px;
+  }
+
+  .simple-top-item,
+  .simple-top-empty {
+    padding: 12px;
   }
 
   .simple-operation {

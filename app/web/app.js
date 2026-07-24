@@ -658,6 +658,60 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
   }
 }
 
+function applyXtbQuoteBatch(items = []) {
+  const validQuotes = items
+    .map((item) => {
+      const symbol = String(item.symbol || "").trim().toUpperCase();
+      const price = Number(item.price || 0);
+      if (!symbol || !price) return null;
+      return {
+        symbol,
+        price,
+        bid: Number(item.bid || 0) || null,
+        ask: Number(item.ask || 0) || null,
+        change_pct: Number(item.change_pct || 0),
+        source: "xtb",
+        updated_at: new Date().toISOString(),
+      };
+    })
+    .filter(Boolean);
+
+  validQuotes.forEach(applyLiveQuote);
+  const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
+  if (best) {
+    applySelectedOpportunity(best, "xtb");
+    updateLiveStatus(`XTB: mejor CFD visible ${best.asset.symbol} (${best.directionLabel}, score ${Math.round(best.score)}).`, "ok");
+  } else if (validQuotes.length) {
+    updateLiveStatus("XTB: precios recibidos, pero ningun CFD visible cumple volumen/margen/stop.", "error");
+  }
+}
+
+function pickBestCfdOpportunity(symbols = []) {
+  const allowed = new Set(symbols.map((symbol) => String(symbol).toUpperCase()));
+  return uniqueAssets()
+    .filter((asset) => !allowed.size || allowed.has(asset.symbol))
+    .map((asset) => buildAssetOpportunity(asset, getEffectiveRiskPct()))
+    .filter((item) => item.usable)
+    .sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function applySelectedOpportunity(opportunity, source = "auto") {
+  selectedAsset = findAsset(opportunity.asset.symbol);
+  const symbolInput = document.getElementById("symbol");
+  const marketInput = document.getElementById("market-price");
+  const xtbInput = document.getElementById("xtb-price");
+  const quotePrice = Number(liveQuotes[selectedAsset.symbol]?.price || opportunity.asset.marketPrice || 0);
+  if (symbolInput) symbolInput.value = selectedAsset.symbol;
+  if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
+  if (xtbInput && quotePrice) xtbInput.value = quotePrice.toFixed(2);
+  resetOrderFieldsForAssetDirection(selectedAsset, opportunity.direction || aiDirectionForAsset(selectedAsset));
+  applyAiAggressiveTargets(selectedAsset);
+  renderAssets();
+  renderTopOpportunities();
+  if (source === "xtb") saveConfigLocal();
+  calculate();
+}
+
 function findAsset(symbol) {
   return uniqueAssets().find((asset) => asset.symbol === symbol.toUpperCase()) || {
     symbol: symbol.toUpperCase(),
@@ -1498,6 +1552,15 @@ function renderSimpleDashboard() {
   const op1Lost = Number(op1) < 0;
   const dayTotal = Number(op1 || 0) + Number(op2 || 0);
   const inferredOutcome = dayTotal > 0 ? "Gano / toco meta" : dayTotal < 0 ? "Perdio / toco stop" : "Pendiente";
+  const ai = buildAiConfirmation();
+  const topOpportunities = buildTopOpportunities();
+  const selectedQuote = liveQuotes[String(symbol).toUpperCase()];
+  const sourceLabel = selectedQuote?.source === "xtb" ? "Lectura directa XTB" : "Proveedor/ultimo precio";
+  const primaryWarning = ai.status === "NO OPERAR"
+    ? ai.reasons[0] || "Hay bloqueo operativo: revisa margen, stop, volumen u horario."
+    : ai.status === "ESPERAR"
+      ? ai.reasons[0] || "Espera confirmacion antes de operar."
+      : "CFD operable solo si coincide con XTB, spread y pestana CFD.";
 
   target.innerHTML = `
     <div class="simple-shell">
@@ -1508,6 +1571,7 @@ function renderSimpleDashboard() {
           <div class="simple-status">
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
+            <span class="simple-chip">${sourceLabel}</span>
             <span class="simple-chip warn">Si Op 1 pierde, no abrir Op 2</span>
           </div>
         </section>
@@ -1518,6 +1582,28 @@ function renderSimpleDashboard() {
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
         </section>
       </div>
+      <section class="simple-panel simple-decision ${ai.status === "NO OPERAR" ? "danger" : ai.status === "OPERABLE" ? "ok" : "warn"}">
+        <div class="simple-head">
+          <div>
+            <span class="simple-label">Mejor alternativa CFD ahora</span>
+            <h2>${symbol} ${direction}</h2>
+            <p class="simple-subtitle">${primaryWarning}</p>
+          </div>
+          <div class="simple-score">
+            <span>${ai.status}</span>
+            <strong>${ai.confidence}%</strong>
+          </div>
+        </div>
+        <div class="simple-top-list">
+          ${topOpportunities.length ? topOpportunities.map((item, index) => `
+            <button type="button" class="simple-top-item ${item.asset.symbol === symbol ? "active" : ""}" data-simple-top-symbol="${item.asset.symbol}">
+              <span>#${index + 1} ${item.asset.symbol}</span>
+              <strong>${item.directionLabel}</strong>
+              <small>${item.reason}</small>
+            </button>
+          `).join("") : `<div class="simple-top-empty">No hay CFD suficientemente claro ahora. Espera nueva lectura de XTB.</div>`}
+        </div>
+      </section>
       <section class="simple-ops">
         <article class="simple-operation ${tradeSlot === "1" ? "active" : ""}">
           <div class="simple-head"><h2>Operacion 1</h2><span class="simple-badge">60% riesgo/meta</span></div>
@@ -1608,6 +1694,12 @@ function bindSimpleDashboard() {
     const focusTarget = event.target?.dataset?.simpleFocus;
     if (focusTarget) {
       document.getElementById(focusTarget)?.focus();
+      return;
+    }
+    const topButton = event.target?.closest?.("[data-simple-top-symbol]");
+    if (topButton) {
+      const picked = buildTopOpportunities().find((item) => item.asset.symbol === topButton.dataset.simpleTopSymbol);
+      if (picked) applySelectedOpportunity(picked, "manual");
       return;
     }
     const action = event.target?.dataset?.simpleAction;
@@ -2214,6 +2306,7 @@ function bindInputs() {
   document.getElementById("clear-day-results").addEventListener("click", clearDayResults);
   document.getElementById("apply-capital-movement").addEventListener("click", applyCapitalMovement);
   document.getElementById("save-trade-lesson").addEventListener("click", saveTradeLesson);
+  window.addEventListener("xtb-quotes", (event) => applyXtbQuoteBatch(event.detail?.items || []));
 }
 
 loadConfigLocal();

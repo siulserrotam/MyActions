@@ -9,6 +9,12 @@ function quotePrice(value) {
   return parsed === null ? null : Number(parsed.toFixed(2));
 }
 
+function quoteChangePct(text, index = 0) {
+  const fragment = text.slice(Math.max(0, index - 80), index + 180);
+  const match = fragment.match(/(-?\d+(?:[.,]\d+)?)%/);
+  return match ? Number(match[1].replace(',', '.')) : 0;
+}
+
 function extractXtbQuotes(text) {
   const cleaned = normalize(text);
   const instruments = [
@@ -31,7 +37,11 @@ function extractXtbQuotes(text) {
   return Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
     const match = cleaned.match(pattern);
     if (!match) return [];
-    return [[symbol, { bid: quotePrice(match[1] ?? match[3]), ask: quotePrice(match[2] ?? match[4]) }]];
+    return [[symbol, {
+      bid: quotePrice(match[1] ?? match[3]),
+      ask: quotePrice(match[2] ?? match[4]),
+      change_pct: quoteChangePct(cleaned, match.index || 0)
+    }]];
   }));
 }
 
@@ -93,6 +103,29 @@ async function setDashboardPrice(page, symbol, value) {
   return formatted;
 }
 
+async function sendQuoteBatchToDashboard(page, quotes) {
+  const items = Object.entries(quotes).map(([symbol, quote]) => {
+    const price = pickPrice(quote);
+    return {
+      symbol,
+      bid: quote.bid,
+      ask: quote.ask,
+      price,
+      change_pct: quote.change_pct || 0
+    };
+  }).filter((item) => item.price !== null);
+
+  if (!items.length) return { applied: false, items: [] };
+
+  const applied = await page.evaluate((quoteItems) => {
+    if (typeof window.dispatchEvent !== 'function') return false;
+    window.dispatchEvent(new CustomEvent('xtb-quotes', { detail: { items: quoteItems } }));
+    return true;
+  }, items);
+
+  return { applied, items };
+}
+
 async function syncOnce() {
   const browser = await connectChrome();
   try {
@@ -113,29 +146,41 @@ async function syncOnce() {
 
     const xtbText = await xtbPage.evaluate(() => document.body?.innerText || '');
     const quotes = extractXtbQuotes(xtbText);
+    const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
+    await dashboardPage.waitForTimeout(500);
+    const afterBatchState = await dashboardPage.evaluate(() => ({
+      symbol: document.querySelector('#symbol')?.value || '',
+      marketPrice: document.querySelector('#market-price')?.value || '',
+      xtbPrice: document.querySelector('#xtb-price')?.value || ''
+    }));
     const activeSymbol = extractActiveXtbSymbol(xtbText, quotes);
-    const syncSymbol = quotes[selectedSymbol] ? selectedSymbol : activeSymbol;
+    const syncSymbol = afterBatchState.symbol?.trim().toUpperCase() || (quotes[selectedSymbol] ? selectedSymbol : activeSymbol);
     const quote = quotes[syncSymbol];
     const price = pickPrice(quote);
 
-    if (!syncSymbol) {
+    if (!quoteBatch.items.length && !syncSymbol) {
       throw new Error('No encontre un activo sincronizable. Selecciona o deja visible el activo en XTB.');
     }
-    if (!quote || price === null) {
+    if (!quoteBatch.applied && (!quote || price === null)) {
       throw new Error(`No encontre cotizacion XTB para ${syncSymbol}. Pon ese activo visible en favoritos/lista de XTB.`);
     }
 
-    const applied = await setDashboardPrice(dashboardPage, syncSymbol, price);
+    const applied = quoteBatch.applied && afterBatchState.xtbPrice
+      ? Number(afterBatchState.xtbPrice).toFixed(2)
+      : await setDashboardPrice(dashboardPage, syncSymbol, price);
     const result = {
       timestamp: new Date().toISOString(),
-      symbol: syncSymbol,
+      symbol: afterBatchState.symbol?.trim().toUpperCase() || syncSymbol,
       dashboard_symbol_before: selectedSymbol,
       active_xtb_symbol: activeSymbol,
+      visible_xtb_symbols: quoteBatch.items.map((item) => item.symbol),
       side: SIDE,
-      xtb: quote,
+      xtb: quote || null,
       applied_xtb_price: applied,
       dashboard_market_price_before: dashboardState.marketPrice,
-      dashboard_xtb_price_before: dashboardState.xtbPrice
+      dashboard_xtb_price_before: dashboardState.xtbPrice,
+      dashboard_symbol_after: afterBatchState.symbol,
+      dashboard_xtb_price_after: afterBatchState.xtbPrice
     };
 
     console.log(JSON.stringify(result, null, 2));
