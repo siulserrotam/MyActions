@@ -644,9 +644,17 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     (payload.items || []).forEach(applyLiveQuote);
-    if (liveQuotes[selectedAsset.symbol] && resetSelected) {
-      selectedAsset = findAsset(selectedAsset.symbol);
-      resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
+    if (resetSelected) {
+      const best = pickBestCfdOpportunity();
+      if (best) {
+        applySelectedOpportunity(best, "live");
+        updateLiveStatus(`Live prices: mejor CFD ${best.asset.symbol} elegido desde ${payload.count || 0} activos.`, "ok");
+        return;
+      }
+      if (liveQuotes[selectedAsset.symbol]) {
+        selectedAsset = findAsset(selectedAsset.symbol);
+        resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
+      }
     }
     updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
     renderAssets();
