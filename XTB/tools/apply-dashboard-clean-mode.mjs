@@ -28,16 +28,15 @@ async function applyCleanMode() {
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
       };
-      const focusOriginal = (selector) => {
-        const element = document.querySelector(selector);
-        if (!element) return;
-        document.body.classList.remove('codex-focus-mode');
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.focus();
+      const clickByText = (text) => {
+        const normalized = text.toLowerCase();
+        const button = [...document.querySelectorAll('button')].find((item) => item.innerText.trim().toLowerCase().includes(normalized));
+        if (button) button.click();
       };
 
       window.__codexSetTradeSlot = (slot) => setValue('#trade-slot', slot);
-      window.__codexFocusOriginal = focusOriginal;
+      window.__codexSetOriginalValue = setValue;
+      window.__codexClickByText = clickByText;
 
       const upsertStyle = () => {
         let style = document.querySelector('#codex-clean-mode-style');
@@ -233,11 +232,49 @@ async function applyCleanMode() {
           }
           #codex-clean-mode .close-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr 1.2fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 14px;
           }
           #codex-clean-mode .close-card {
             padding: 16px;
+          }
+          #codex-clean-mode .form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+          }
+          #codex-clean-mode .field {
+            display: grid;
+            gap: 7px;
+          }
+          #codex-clean-mode input,
+          #codex-clean-mode textarea,
+          #codex-clean-mode select {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            padding: 12px 13px;
+            background: rgba(2, 10, 8, 0.58);
+            color: #ffffff;
+            font: inherit;
+            font-weight: 800;
+            outline: none;
+          }
+          #codex-clean-mode textarea {
+            min-height: 82px;
+            resize: vertical;
+            font-weight: 700;
+          }
+          #codex-clean-mode input:focus,
+          #codex-clean-mode textarea:focus,
+          #codex-clean-mode select:focus {
+            border-color: rgba(56, 227, 156, 0.78);
+            box-shadow: 0 0 0 3px rgba(56, 227, 156, 0.12);
+          }
+          #codex-clean-mode .wide {
+            grid-column: 1 / -1;
           }
           #codex-clean-mode .guide {
             display: grid;
@@ -260,6 +297,13 @@ async function applyCleanMode() {
             color: #76918a;
             font-size: 12px;
           }
+          #codex-clean-mode .save-zone {
+            border-color: rgba(56, 227, 156, 0.28);
+            background: rgba(9, 31, 24, 0.88);
+          }
+          #codex-clean-mode .danger-zone {
+            border-color: rgba(255, 93, 108, 0.24);
+          }
           @media (max-width: 900px) {
             #codex-clean-mode {
               padding: 12px;
@@ -271,7 +315,8 @@ async function applyCleanMode() {
               grid-template-columns: 1fr;
             }
             #codex-clean-mode .metrics,
-            #codex-clean-mode .numbers {
+            #codex-clean-mode .numbers,
+            #codex-clean-mode .form-grid {
               grid-template-columns: 1fr;
             }
           }
@@ -298,6 +343,10 @@ async function applyCleanMode() {
         const capital = valueOf('#account-balance') || '--';
         const op1 = valueOf('#operation1-result') || '0';
         const op2 = valueOf('#operation2-result') || '0';
+        const movement = valueOf('#capital-movement') || '';
+        const lessonResult = valueOf('#lesson-result') || '0';
+        const lessonOutcome = valueOf('#lesson-outcome') || 'pending';
+        const lessonNotes = valueOf('#lesson-notes') || '';
         const tradeSlot = valueOf('#trade-slot') || '1';
         const direction = valueOf('#direction') || '--';
         const activeOp = tradeSlot === '2' ? 'Operacion 2' : 'Operacion 1';
@@ -340,7 +389,7 @@ async function applyCleanMode() {
                 </div>
                 <div class="actions">
                   <button onclick="window.__codexSetTradeSlot('1')">Ver receta Op 1</button>
-                  <button class="secondary" onclick="window.__codexFocusOriginal('#operation1-result')">Registrar Op 1</button>
+                  <button class="secondary" onclick="document.querySelector('#codex-op1-input')?.focus()">Registrar Op 1</button>
                 </div>
               </article>
 
@@ -359,15 +408,79 @@ async function applyCleanMode() {
                 </div>
                 <div class="actions">
                   <button ${op1Lost ? 'class="danger"' : ''} onclick="window.__codexSetTradeSlot('2')">${op1Lost ? 'No abrir Op 2' : 'Ver receta Op 2'}</button>
-                  <button class="secondary" onclick="window.__codexFocusOriginal('#operation2-result')">Registrar Op 2</button>
+                  <button class="secondary" onclick="document.querySelector('#codex-op2-input')?.focus()">Registrar Op 2</button>
                 </div>
               </article>
             </section>
 
             <section class="close-grid">
-              <div class="close-card"><span class="label">Op 1 USD</span><span class="value">${op1}</span></div>
-              <div class="close-card"><span class="label">Op 2 USD</span><span class="value">${op2}</span></div>
-              <div class="close-card"><span class="label">Cierre del dia</span><span class="value">${resultText}</span></div>
+              <div class="close-card save-zone">
+                <span class="label">Resultado Operacion 1 USD</span>
+                <input id="codex-op1-input" type="number" step="0.01" value="${op1}" oninput="window.__codexSetOriginalValue('#operation1-result', this.value)" />
+              </div>
+              <div class="close-card save-zone">
+                <span class="label">Resultado Operacion 2 USD</span>
+                <input id="codex-op2-input" type="number" step="0.01" value="${op2}" oninput="window.__codexSetOriginalValue('#operation2-result', this.value)" />
+              </div>
+              <div class="close-card">
+                <span class="label">Cierre del dia</span>
+                <span class="value">${resultText}</span>
+                <div class="actions">
+                  <button onclick="window.__codexClickByText('Guardar cierre del dia')">Guardar cierre</button>
+                  <button class="secondary" onclick="window.__codexClickByText('Limpiar resultados')">Nuevo dia</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="op-head">
+                <div>
+                  <h2>Ajustes y aprendizaje</h2>
+                  <p class="subtitle">Todo se guarda usando los controles reales del dashboard, pero sin volver a la pantalla anterior.</p>
+                </div>
+                <span class="badge">completo</span>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="label">Movimiento de capital</span>
+                  <input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" oninput="window.__codexSetOriginalValue('#capital-movement', this.value)" />
+                </label>
+                <div class="field">
+                  <span class="label">Capital actual</span>
+                  <span class="value">${capital}</span>
+                </div>
+                <div class="field">
+                  <span class="label">Acciones capital</span>
+                  <button onclick="window.__codexClickByText('Aplicar al capital')">Aplicar movimiento</button>
+                </div>
+                <label class="field">
+                  <span class="label">Resultado receta USD</span>
+                  <input type="number" step="0.01" value="${lessonResult}" oninput="window.__codexSetOriginalValue('#lesson-result', this.value)" />
+                </label>
+                <label class="field">
+                  <span class="label">Que paso</span>
+                  <select onchange="window.__codexSetOriginalValue('#lesson-outcome', this.value)">
+                    <option value="pending" ${lessonOutcome === 'pending' ? 'selected' : ''}>Pendiente</option>
+                    <option value="win" ${lessonOutcome === 'win' ? 'selected' : ''}>Gano / toco meta</option>
+                    <option value="loss" ${lessonOutcome === 'loss' ? 'selected' : ''}>Perdio / toco stop</option>
+                    <option value="manual" ${lessonOutcome === 'manual' ? 'selected' : ''}>Cierre manual</option>
+                    <option value="skipped" ${lessonOutcome === 'skipped' ? 'selected' : ''}>No entre</option>
+                  </select>
+                </label>
+                <div class="field">
+                  <span class="label">Aprendizaje</span>
+                  <button class="secondary" onclick="window.__codexClickByText('Guardar aprendizaje')">Guardar aprendizaje</button>
+                </div>
+                <label class="field wide">
+                  <span class="label">Nota breve</span>
+                  <textarea oninput="window.__codexSetOriginalValue('#lesson-notes', this.value)" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion...">${lessonNotes}</textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary" onclick="window.__codexClickByText('Exportar reporte mensual Excel')">Exportar Excel</button>
+                <button class="secondary" onclick="window.__codexClickByText('Activar alertas IA')">Activar alertas</button>
+                <button class="secondary" onclick="window.__codexClickByText('Probar alerta')">Probar alerta</button>
+              </div>
             </section>
 
             <section class="panel">
@@ -377,7 +490,7 @@ async function applyCleanMode() {
                 <div><strong>3. Cierre</strong>Al cerrar, registra ganancia/perdida en Op 1 u Op 2 y guarda cierre del dia.</div>
                 <div><strong>4. Regla</strong>Si Op 1 pierde, se termina el dia. No recuperacion, no revancha.</div>
               </div>
-              <p class="tiny">El dashboard original sigue debajo y funcionando; solo esta oculto para evitar ruido. Usa “Registrar” si necesitas volver al campo exacto.</p>
+              <p class="tiny">La pantalla anterior ya no es necesaria para el uso diario: esta vista escribe sobre los mismos campos reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p>
             </section>
           </div>
         `;
