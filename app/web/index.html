@@ -110,6 +110,31 @@
             <p class="mt-2 text-xs text-zinc-400">Perdida = volumen x movimiento en contra x valor por punto. Si sube el volumen, el stop debe acercarse para mantener la misma perdida maxima.</p>
           </div>
           <div id="leverage-capacity" class="mt-3 rounded-xl border border-white/10 bg-ink p-3 text-xs text-zinc-300">Calculando capacidad con apalancamiento...</div>
+          <div class="mt-3 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
+            <p class="text-xs font-bold uppercase text-sky-300">Memoria IA</p>
+            <p class="mt-2 text-xs text-zinc-400">No subes codigo cada dia: guardas resultado y nota. La app acumula experiencia.</p>
+            <label class="mt-2 grid gap-1 text-xs font-bold text-zinc-300">
+              Resultado de esta receta USD
+              <input id="lesson-result" class="field" type="number" step="0.01" value="0" />
+            </label>
+            <label class="mt-2 grid gap-1 text-xs font-bold text-zinc-300">
+              Que paso
+              <select id="lesson-outcome" class="field">
+                <option value="pending">Pendiente</option>
+                <option value="win">Gano / toco meta</option>
+                <option value="loss">Perdio / toco stop</option>
+                <option value="manual">Cierre manual</option>
+                <option value="missed">No entre</option>
+              </select>
+            </label>
+            <label class="mt-2 grid gap-1 text-xs font-bold text-zinc-300">
+              Nota breve
+              <textarea id="lesson-notes" class="field min-h-20 resize-y" maxlength="1000" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion..."></textarea>
+            </label>
+            <button id="save-trade-lesson" type="button" class="mt-2 w-full rounded-xl border border-sky-400/30 px-3 py-2 text-xs font-black text-sky-300">Guardar aprendizaje</button>
+            <div id="lesson-status" class="mt-2 rounded-xl border border-white/10 bg-ink p-3 text-xs font-bold text-zinc-500">Aprendizaje: esperando registro.</div>
+            <div id="lesson-summary" class="mt-2 rounded-xl border border-white/10 bg-ink p-3 text-xs text-zinc-400">Memoria: cargando...</div>
+          </div>
           <div class="mt-3 rounded-xl border border-white/10 bg-ink p-3">
             <p class="text-xs font-bold uppercase text-zinc-500">Resultado real del dia</p>
             <label class="mt-2 grid gap-1 text-xs font-bold text-zinc-300">

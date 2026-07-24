@@ -1452,6 +1452,98 @@ function renderDailyResultCard() {
   target.textContent = `Resultado cerrado: ${money(total)}. ${status}`;
 }
 
+function updateLessonStatus(message, tone = "neutral") {
+  const target = document.getElementById("lesson-status");
+  if (!target) return;
+  const tones = {
+    ok: "border-bull/30 text-bull",
+    error: "border-bear/40 text-bear",
+    neutral: "border-white/10 text-zinc-500",
+  };
+  target.className = `mt-2 rounded-xl border bg-ink p-3 text-xs font-bold ${tones[tone] || tones.neutral}`;
+  target.textContent = message;
+}
+
+function currentMarketPhaseLabel() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const total = Number(parts.hour) * 60 + Number(parts.minute);
+  if (total < 9 * 60 + 30) return "pre-market";
+  if (total < 9 * 60 + 35) return "orb-forming";
+  if (total < 9 * 60 + 45) return "golden-window";
+  if (total < 11 * 60 + 30) return "morning";
+  if (total < 15 * 60 + 45) return "midday";
+  if (total < 16 * 60) return "close-window";
+  return "closed";
+}
+
+async function saveTradeLesson() {
+  if (!lastResult || !lastResult.symbol) {
+    updateLessonStatus("Aprendizaje: calcula una receta antes de guardar.", "error");
+    return;
+  }
+  const payload = {
+    trade_date: todayKey(),
+    symbol: lastResult.symbol,
+    direction: lastResult.direction,
+    planned_volume: Number(lastResult.volume || 0),
+    entry_price: Number(lastResult.entry_price || 0),
+    stop_price: Number(lastResult.stop_price || 0),
+    take_profit_price: Number(lastResult.take_profit_price || 0),
+    expected_loss: Number(lastResult.expected_loss || 0),
+    expected_profit: Number(lastResult.expected_profit || 0),
+    actual_result: Number(document.getElementById("lesson-result")?.value || 0),
+    outcome: document.getElementById("lesson-outcome")?.value || "pending",
+    confidence: Number((buildAiConfirmation().confidence || 0)),
+    market_phase: currentMarketPhaseLabel(),
+    notes: document.getElementById("lesson-notes")?.value || "",
+  };
+  updateLessonStatus("Aprendizaje: guardando...");
+  try {
+    const response = await fetch("/lessons/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    updateLessonStatus(`Aprendizaje guardado: ${payload.symbol} ${payload.direction} ${money(payload.actual_result)}.`, "ok");
+    document.getElementById("lesson-notes").value = "";
+    await loadLessonSummary();
+  } catch (error) {
+    updateLessonStatus("Aprendizaje: no se pudo guardar. Revisa base de datos.", "error");
+  }
+}
+
+async function loadLessonSummary() {
+  const target = document.getElementById("lesson-summary");
+  if (!target) return;
+  try {
+    const response = await fetch("/lessons/trades?limit=20");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const summary = payload.summary || {};
+    const best = (summary.best_symbols || []).slice(0, 3).map((item) => `${item.symbol}: ${money(item.result)} (${item.wins}/${item.count})`).join(" | ");
+    target.innerHTML = `
+      <div class="grid gap-1">
+        <div><strong>Registros:</strong> ${summary.closed || 0} cerrados</div>
+        <div><strong>Acierto:</strong> ${numberText(summary.win_rate || 0)}%</div>
+        <div><strong>Resultado aprendido:</strong> ${money(summary.total_result || 0)}</div>
+        <div><strong>Mejores:</strong> ${best || "sin historial suficiente"}</div>
+      </div>
+    `;
+  } catch (error) {
+    target.textContent = "Memoria: sin conexion a base de datos.";
+  }
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -1918,6 +2010,7 @@ function bindInputs() {
   document.getElementById("save-day-close").addEventListener("click", saveDayClose);
   document.getElementById("clear-day-results").addEventListener("click", clearDayResults);
   document.getElementById("apply-capital-movement").addEventListener("click", applyCapitalMovement);
+  document.getElementById("save-trade-lesson").addEventListener("click", saveTradeLesson);
 }
 
 loadConfigLocal();
@@ -1925,6 +2018,7 @@ renderTabs();
 renderAssets();
 bindInputs();
 verifyDatabaseAndLoadLatest();
+loadLessonSummary();
 updateGoldenWindow();
 setInterval(updateGoldenWindow, 1000);
 selectedAsset = selectedAssetFromForm();

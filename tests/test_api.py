@@ -194,6 +194,42 @@ def test_capital_health() -> None:
     assert "latest_balance" in payload
 
 
+def test_save_trade_lesson() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/lessons/trades",
+        json={
+            "trade_date": "2026-07-14",
+            "symbol": "AAPL.US",
+            "direction": "LONG",
+            "planned_volume": 2,
+            "entry_price": 330.5,
+            "stop_price": 325.5,
+            "take_profit_price": 340.5,
+            "expected_loss": 10,
+            "expected_profit": 20,
+            "actual_result": 18.5,
+            "outcome": "win",
+            "confidence": 76,
+            "market_phase": "morning",
+            "notes": "Buena entrada despues de ORB.",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "AAPL.US"
+    assert payload["outcome"] == "win"
+    assert payload["actual_result"] == 18.5
+
+    history = client.get("/lessons/trades?limit=10")
+
+    assert history.status_code == 200
+    history_payload = history.json()
+    assert history_payload["summary"]["closed"] >= 1
+    assert any(item["symbol"] == "AAPL.US" for item in history_payload["history"])
+
+
 def test_engine_universe() -> None:
     client = TestClient(app)
     response = client.get("/engine/universe")

@@ -61,3 +61,24 @@ class DailyCapital(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
+class TradeLesson(Base):
+    __tablename__ = "trade_lessons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    direction: Mapped[str] = mapped_column(String(16))
+    planned_volume: Mapped[float] = mapped_column(Float, default=0)
+    entry_price: Mapped[float] = mapped_column(Float, default=0)
+    stop_price: Mapped[float] = mapped_column(Float, default=0)
+    take_profit_price: Mapped[float] = mapped_column(Float, default=0)
+    expected_loss: Mapped[float] = mapped_column(Float, default=0)
+    expected_profit: Mapped[float] = mapped_column(Float, default=0)
+    actual_result: Mapped[float] = mapped_column(Float, default=0)
+    outcome: Mapped[str] = mapped_column(String(32), default="pending")
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    market_phase: Mapped[str] = mapped_column(String(64), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)

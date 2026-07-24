@@ -37,6 +37,7 @@ from app.services.capital import CapitalService
 from app.services.market_clock import MarketClockService
 from app.services.decision_engine import DecisionEngineService
 from app.services.live_market import LiveMarketService
+from app.services.lessons import TradeLessonService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -72,6 +73,23 @@ class EngineCalculateRequest(BaseModel):
     stop_price: float = Field(gt=0)
     take_profit_price: float | None = Field(default=None, gt=0)
     requested_volume: float | None = Field(default=None, gt=0)
+
+
+class TradeLessonRequest(BaseModel):
+    trade_date: date
+    symbol: str = Field(min_length=1, max_length=32)
+    direction: str = Field(pattern="^(LONG|SHORT)$")
+    planned_volume: float = Field(ge=0)
+    entry_price: float = Field(ge=0)
+    stop_price: float = Field(ge=0)
+    take_profit_price: float = Field(ge=0)
+    expected_loss: float = Field(ge=0)
+    expected_profit: float = Field(ge=0)
+    actual_result: float = 0
+    outcome: str = Field(default="pending", pattern="^(win|loss|manual|missed|pending)$")
+    confidence: float = Field(default=0, ge=0, le=100)
+    market_phase: str = Field(default="", max_length=64)
+    notes: str = Field(default="", max_length=1000)
 
 
 def validate_ticker(ticker: str) -> str:
@@ -431,4 +449,52 @@ def save_daily_capital(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Base de datos no disponible: {exc}",
+        ) from exc
+
+
+@router.get("/lessons/trades")
+def trade_lessons(
+    limit: int = Query(50, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        service = TradeLessonService()
+        return {
+            "summary": service.summary(session),
+            "history": service.history(session, limit=limit),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo cargar aprendizaje: {exc}",
+        ) from exc
+
+
+@router.post("/lessons/trades")
+def save_trade_lesson(
+    payload: TradeLessonRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return TradeLessonService().save(
+            session=session,
+            trade_date=payload.trade_date,
+            symbol=payload.symbol,
+            direction=payload.direction,
+            planned_volume=payload.planned_volume,
+            entry_price=payload.entry_price,
+            stop_price=payload.stop_price,
+            take_profit_price=payload.take_profit_price,
+            expected_loss=payload.expected_loss,
+            expected_profit=payload.expected_profit,
+            actual_result=payload.actual_result,
+            outcome=payload.outcome,
+            confidence=payload.confidence,
+            market_phase=payload.market_phase,
+            notes=payload.notes,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo guardar aprendizaje: {exc}",
         ) from exc
