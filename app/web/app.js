@@ -1462,6 +1462,17 @@ function setControlValue(id, value) {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function syncOutcomeFromResults() {
+  const op1 = Number(document.getElementById("operation1-result")?.value || 0);
+  const op2 = Number(document.getElementById("operation2-result")?.value || 0);
+  const total = Number((op1 + op2).toFixed(2));
+  const outcome = total > 0 ? "win" : total < 0 ? "loss" : "pending";
+  const lessonResult = document.getElementById("lesson-result");
+  const lessonOutcome = document.getElementById("lesson-outcome");
+  if (lessonResult) lessonResult.value = total.toFixed(2);
+  if (lessonOutcome) lessonOutcome.value = outcome;
+}
+
 function renderSimpleDashboard() {
   const target = document.getElementById("simple-dashboard");
   if (!target) return;
@@ -1476,14 +1487,17 @@ function renderSimpleDashboard() {
   const op1 = document.getElementById("operation1-result")?.value || "0";
   const op2 = document.getElementById("operation2-result")?.value || "0";
   const movement = document.getElementById("capital-movement")?.value || "";
-  const lessonResult = document.getElementById("lesson-result")?.value || "0";
   const lessonOutcome = document.getElementById("lesson-outcome")?.value || "pending";
   const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const tradeSlot = document.getElementById("trade-slot")?.value || "1";
   const direction = document.getElementById("direction")?.value || "--";
+  const activeResultTarget = tradeSlot === "2" ? "operation2-result" : "operation1-result";
+  const activeResult = tradeSlot === "2" ? op2 : op1;
   const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
   const resultText = dailyText.match(/Resultado cerrado:[^\.]+/)?.[0]?.replace("Resultado cerrado:", "").trim() || "$0";
   const op1Lost = Number(op1) < 0;
+  const dayTotal = Number(op1 || 0) + Number(op2 || 0);
+  const inferredOutcome = dayTotal > 0 ? "Gano / toco meta" : dayTotal < 0 ? "Perdio / toco stop" : "Pendiente";
 
   target.innerHTML = `
     <div class="simple-shell">
@@ -1530,10 +1544,30 @@ function renderSimpleDashboard() {
           <div class="simple-actions"><button type="button" class="${op1Lost ? "danger" : ""}" data-simple-action="slot-2">${op1Lost ? "No abrir Op 2" : "Ver receta Op 2"}</button><button type="button" class="secondary" data-simple-focus="simple-op2-result">Registrar Op 2</button></div>
         </article>
       </section>
-      <section class="simple-close-grid">
-        <div class="simple-card"><label class="simple-field"><span class="simple-label">Resultado Operacion 1 USD</span><input id="simple-op1-result" type="number" step="0.01" value="${op1}" data-sync-target="operation1-result" /></label></div>
-        <div class="simple-card"><label class="simple-field"><span class="simple-label">Resultado Operacion 2 USD</span><input id="simple-op2-result" type="number" step="0.01" value="${op2}" data-sync-target="operation2-result" /></label></div>
-        <div class="simple-card"><span class="simple-label">Cierre del dia</span><span class="simple-value">${resultText}</span><div class="simple-actions"><button type="button" data-simple-action="save-close">Guardar cierre</button><button type="button" class="secondary" data-simple-action="clear-day">Nuevo dia</button></div></div>
+      <section class="simple-panel">
+        <div class="simple-head">
+          <div>
+            <h2>Cierre de operacion</h2>
+            <p class="simple-subtitle">Escribe el resultado de la operacion activa. Guardar cierre actualiza capital, guarda el dia y limpia el campo.</p>
+          </div>
+          <span class="simple-badge">${resultText}</span>
+        </div>
+        <div class="simple-form-grid">
+          <label class="simple-field">
+            <span class="simple-label">Resultado ${tradeSlot === "2" ? "Operacion 2" : "Operacion 1"} USD</span>
+            <input id="simple-active-result" type="number" step="0.01" value="${activeResult}" data-sync-target="${activeResultTarget}" placeholder="-15.70 o 23.90" />
+          </label>
+          <div class="simple-field">
+            <span class="simple-label">Que paso</span>
+            <span class="simple-value">${inferredOutcome}</span>
+            <span class="simple-tiny">Se deduce automaticamente por el resultado guardado.</span>
+          </div>
+          <div class="simple-field">
+            <span class="simple-label">Accion</span>
+            <button type="button" data-simple-action="save-close">Guardar cierre</button>
+          </div>
+        </div>
+        <p class="simple-tiny">Internamente se conserva Op 1: ${money(Number(op1 || 0))} y Op 2: ${money(Number(op2 || 0))} para respetar el plan de dos operaciones.</p>
       </section>
       <section class="simple-panel">
         <div class="simple-head"><div><h2>Ajustes y aprendizaje</h2><p class="simple-subtitle">Capital, memoria IA, notas, alertas y exportacion sin volver a la pantalla anterior.</p></div><span class="simple-badge">completo</span></div>
@@ -1541,8 +1575,8 @@ function renderSimpleDashboard() {
           <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
           <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
           <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
-          <label class="simple-field"><span class="simple-label">Resultado receta USD</span><input type="number" step="0.01" value="${lessonResult}" data-sync-target="lesson-result" /></label>
-          <label class="simple-field"><span class="simple-label">Que paso</span><select data-sync-target="lesson-outcome"><option value="pending" ${lessonOutcome === "pending" ? "selected" : ""}>Pendiente</option><option value="win" ${lessonOutcome === "win" ? "selected" : ""}>Gano / toco meta</option><option value="loss" ${lessonOutcome === "loss" ? "selected" : ""}>Perdio / toco stop</option><option value="manual" ${lessonOutcome === "manual" ? "selected" : ""}>Cierre manual</option><option value="missed" ${lessonOutcome === "missed" ? "selected" : ""}>No entre</option></select></label>
+          <div class="simple-field"><span class="simple-label">Resultado para aprendizaje</span><span class="simple-value">${money(dayTotal)}</span><span class="simple-tiny">Se toma automaticamente de Op 1 + Op 2.</span></div>
+          <div class="simple-field"><span class="simple-label">Que paso</span><span class="simple-value">${lessonOutcome === "win" ? "Gano" : lessonOutcome === "loss" ? "Perdio" : lessonOutcome === "manual" ? "Cierre manual" : lessonOutcome === "missed" ? "No entre" : inferredOutcome}</span><span class="simple-tiny">Se actualiza solo al guardar cierre.</span></div>
           <div class="simple-field"><span class="simple-label">Aprendizaje</span><button type="button" class="secondary" data-simple-action="save-lesson">Guardar aprendizaje</button></div>
           <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion...">${lessonNotes}</textarea></label>
         </div>
@@ -1558,11 +1592,17 @@ function bindSimpleDashboard() {
   if (!target) return;
   target.addEventListener("input", (event) => {
     const syncTarget = event.target?.dataset?.syncTarget;
-    if (syncTarget) setControlValue(syncTarget, event.target.value);
+    if (syncTarget) {
+      setControlValue(syncTarget, event.target.value);
+      if (syncTarget === "operation1-result" || syncTarget === "operation2-result") syncOutcomeFromResults();
+    }
   });
   target.addEventListener("change", (event) => {
     const syncTarget = event.target?.dataset?.syncTarget;
-    if (syncTarget) setControlValue(syncTarget, event.target.value);
+    if (syncTarget) {
+      setControlValue(syncTarget, event.target.value);
+      if (syncTarget === "operation1-result" || syncTarget === "operation2-result") syncOutcomeFromResults();
+    }
   });
   target.addEventListener("click", (event) => {
     const focusTarget = event.target?.dataset?.simpleFocus;
@@ -1575,7 +1615,6 @@ function bindSimpleDashboard() {
     if (action === "slot-1") setControlValue("trade-slot", "1");
     if (action === "slot-2") setControlValue("trade-slot", "2");
     if (action === "save-close") saveDayClose();
-    if (action === "clear-day") clearDayResults();
     if (action === "apply-capital") applyCapitalMovement();
     if (action === "save-lesson") saveTradeLesson();
     if (action === "export-excel") exportMonthlyReport();
@@ -1828,8 +1867,39 @@ async function postbackConfig() {
 }
 
 async function saveDayClose() {
+  const op1Input = document.getElementById("operation1-result");
+  const op2Input = document.getElementById("operation2-result");
+  const balanceInput = document.getElementById("account-balance");
+  const lessonResultInput = document.getElementById("lesson-result");
+  const lessonOutcomeInput = document.getElementById("lesson-outcome");
+  const op1 = Number(op1Input?.value || 0);
+  const op2 = Number(op2Input?.value || 0);
+  const total = Number((op1 + op2).toFixed(2));
+
+  if (!total) {
+    updatePostbackStatus("Cierre sin resultado: registra Op 1 u Op 2 antes de guardar.", "error");
+    return;
+  }
+
+  const currentBalance = Number(balanceInput?.value || defaultAccountBalance);
+  const nextBalance = Math.max(0, Number((currentBalance + total).toFixed(2)));
+
+  if (lessonResultInput) lessonResultInput.value = total.toFixed(2);
+  if (lessonOutcomeInput) {
+    lessonOutcomeInput.value = total > 0 ? "win" : "loss";
+  }
+
+  if (balanceInput) balanceInput.value = nextBalance.toFixed(2);
   await postbackConfig();
-  updatePostbackStatus("Cierre del dia guardado. Ya puedes limpiar para el proximo dia.", "ok");
+  if (lastResult?.symbol) {
+    await saveTradeLesson();
+  }
+  if (op1Input) op1Input.value = 0;
+  if (op2Input) op2Input.value = 0;
+  saveConfigLocal();
+  await postbackConfig();
+  updatePostbackStatus(`Cierre guardado: ${money(total)} aplicado al capital. Capital nuevo: ${money(nextBalance)}.`, "ok");
+  calculate();
 }
 
 function clearDayResults() {
