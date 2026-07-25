@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "jobs": "node src/jobs.js"
+    "jobs": "node src/jobs.js",
+    "start": "npm --prefix XTB run start",
+    "xtb:read": "npm --prefix XTB run read",
+    "xtb:monitor": "npm --prefix XTB run monitor",
+    "xtb:day": "npm --prefix XTB run day:start"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
