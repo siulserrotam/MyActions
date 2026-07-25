@@ -22,6 +22,7 @@ class LiveMarketService:
         "NATGAS": "NG=F",
         "BTCUSD": "BTC-USD",
         "ETHUSD": "ETH-USD",
+        "AVAX": "AVAX-USD",
         "EURUSD": "EURUSD=X",
         "GBPUSD": "GBPUSD=X",
         "USDJPY": "JPY=X",

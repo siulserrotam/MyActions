@@ -5,6 +5,7 @@ const assetGroups = {
     { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1, marketPrice: 23000 },
     { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100, marketPrice: 3400 },
     { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
+    { symbol: "AVAX", name: "Avalanche CFD", category: "crypto", multiplier: 1, marketPrice: 6.5, volumeStep: 1 },
   ],
   forex: [
     { symbol: "EURUSD", name: "Euro / US Dollar", category: "forex", multiplier: 100000, marketPrice: 1.09 },
@@ -24,6 +25,7 @@ const assetGroups = {
   crypto: [
     { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
     { symbol: "ETHUSD", name: "Ethereum CFD", category: "crypto", multiplier: 1, marketPrice: 3400 },
+    { symbol: "AVAX", name: "Avalanche CFD", category: "crypto", multiplier: 1, marketPrice: 6.5, volumeStep: 1 },
   ],
   stocks: [
     { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1, marketPrice: 420.5 },
@@ -56,7 +58,7 @@ const maxAiRiskPct = 1;
 const maxPlannedTrades = 2;
 const aggressiveDailyRiskUsd = 20;
 const tradeRiskWeights = { 1: 0.6, 2: 0.4 };
-const defaultsVersion = "capital-2016-split-risk-v1";
+const defaultsVersion = "capital-2016-split-risk-avax-v2";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -69,9 +71,9 @@ let liveQuotes = {};
 
 function favoriteSymbols() {
   try {
-    return JSON.parse(localStorage.getItem("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD"];
+    return JSON.parse(localStorage.getItem("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
   } catch {
-    return ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD"];
+    return ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
   }
 }
 
@@ -81,6 +83,13 @@ function setFavoriteSymbols(symbols) {
 
 function getFavoriteAssets() {
   return favoriteSymbols().map(findAsset);
+}
+
+function ensureDefaultFavorites() {
+  const symbols = favoriteSymbols();
+  const required = ["AVAX"];
+  const merged = [...symbols, ...required.filter((symbol) => !symbols.includes(symbol))];
+  if (merged.length !== symbols.length) setFavoriteSymbols(merged);
 }
 
 function money(value) {
@@ -405,9 +414,17 @@ function nyMarketMinutes() {
   };
 }
 
-function marketTimingProfile() {
+function marketTimingProfile(asset = selectedAssetFromForm()) {
   const { weekday, total } = nyMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
+  if (asset?.category === "crypto" && !isWeekday) {
+    return {
+      quality: "CRIPTO 24/7",
+      score: -5,
+      riskCap: 0.35,
+      message: "Fin de semana cripto: puede estar abierto, pero usa riesgo bajo, spread confirmado y no mezcles con ORB de acciones.",
+    };
+  }
   if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
     return {
       quality: "CERRADO",
@@ -556,6 +573,7 @@ function roundVolumeForXtb(volume, asset) {
 }
 
 function volumeStepForXtb(asset) {
+  if (asset.volumeStep) return asset.volumeStep;
   if (asset.category === "stocks") return 1;
   return 0.01;
 }
@@ -732,6 +750,7 @@ function findAsset(symbol) {
 
 function priceDecimals(asset) {
   if (asset.category === "forex") return asset.symbol.includes("JPY") ? 3 : 5;
+  if (asset.symbol === "AVAX") return 3;
   if (asset.symbol === "OIL" || asset.symbol === "NATGAS") return 3;
   if (asset.category === "crypto" || asset.category === "indices") return 1;
   return 2;
@@ -745,6 +764,7 @@ function priceStepPct(asset) {
   if (asset.category === "forex") return 0.0015;
   if (asset.category === "indices") return 0.003;
   if (asset.category === "commodities") return 0.004;
+  if (asset.symbol === "AVAX") return 0.0045;
   if (asset.category === "crypto") return 0.006;
   return 0.01;
 }
@@ -1420,6 +1440,7 @@ function dailyCapitalPayload() {
 
 function loadConfigLocal() {
   try {
+    ensureDefaultFavorites();
     const config = JSON.parse(localStorage.getItem("decision_engine_config") || "null");
     const alreadyMigrated = localStorage.getItem("decision_engine_defaults_version") === defaultsVersion;
     if (!config) {
@@ -1446,7 +1467,6 @@ function loadConfigLocal() {
     document.getElementById("requested-volume").value = "";
     if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
-      document.getElementById("account-balance").value = defaultAccountBalance;
       document.getElementById("risk-pct").value = "dynamic";
       localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
     }
@@ -2079,6 +2099,9 @@ function buildWarnings(asset, direction) {
   if (asset.category === "forex" || asset.category === "crypto") {
     warnings.push({ level: "info", message: "APALANCAMIENTO ALTO: Verifica el spread en XTB antes de activar." });
   }
+  if (asset.symbol === "AVAX") {
+    warnings.push({ level: "info", message: "AVAX/AVALANCHE es cripto CFD: puede abrir fin de semana, pero no usa la misma regla ORB de acciones. Primera version: observar spread y operar solo con riesgo reducido." });
+  }
   return warnings;
 }
 
@@ -2088,7 +2111,7 @@ function renderWarnings() {
   const positionValue = lastResult?.position_value ?? 0;
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
   const marginRequired = positionValue * cfdMarginPct() / 100;
-  const timing = marketTimingProfile();
+  const timing = marketTimingProfile(lastResult?.asset);
   if (timing.quality === "NO OPERAR") {
     warnings.push({ level: "danger", message: `HORARIO NO CONFIABLE: ${timing.message}` });
   } else if (["ALTA VOLATILIDAD", "BAJA CALIDAD", "CIERRE VOLATIL"].includes(timing.quality)) {

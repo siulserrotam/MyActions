@@ -39,6 +39,7 @@ class DecisionEngineService:
         "NATGAS": AssetConfig("NATGAS", "Natural Gas CFD", "commodities", 10_000),
         "BTCUSD": AssetConfig("BTCUSD", "Bitcoin CFD", "crypto", 1),
         "ETHUSD": AssetConfig("ETHUSD", "Ethereum CFD", "crypto", 1),
+        "AVAX": AssetConfig("AVAX", "Avalanche CFD", "crypto", 1),
     }
 
     def universe(self) -> dict[str, object]:
@@ -50,7 +51,7 @@ class DecisionEngineService:
             "crypto": [],
             "stocks": [],
         }
-        favorite_symbols = {"TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD"}
+        favorite_symbols = {"TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"}
         for asset in self.assets.values():
             payload = self._asset_payload(asset)
             grouped[asset.category].append(payload)

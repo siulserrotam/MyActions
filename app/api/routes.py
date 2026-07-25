@@ -338,7 +338,7 @@ def market_clock() -> dict[str, object]:
 
 
 @router.get("/market/live")
-def market_live(symbols: str = Query("TSM.US,NVDA.US,US100,GOLD,BTCUSD")) -> dict[str, object]:
+def market_live(symbols: str = Query("TSM.US,NVDA.US,US100,GOLD,BTCUSD,AVAX")) -> dict[str, object]:
     parsed_symbols = [item.strip().upper() for item in symbols.split(",") if item.strip()]
     return LiveMarketService().quotes(parsed_symbols[:20])
 

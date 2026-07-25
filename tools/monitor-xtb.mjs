@@ -69,7 +69,10 @@ function numberAfterExactLabel(lines, label) {
 }
 
 function parseQuotes(lines) {
-  const wanted = new Set(["Tesla", "Apple", "Nvidia", "TSMC", "BITCOIN", "ETHEREUM", "EURUSD", "GBPUSD", "GOLD", "NATGAS", "OIL", "SILVER", "US100", "US30"]);
+  const symbolAliases = new Map([
+    ["AVALANCHE", "AVAX"],
+  ]);
+  const wanted = new Set(["Tesla", "Apple", "Nvidia", "TSMC", "BITCOIN", "ETHEREUM", "AVALANCHE", "EURUSD", "GBPUSD", "GOLD", "NATGAS", "OIL", "SILVER", "US100", "US30"]);
   const quotes = [];
   const labelWords = new Set(["VENTA", "COMPRA", "LOW", "HIGH", "SPREAD", "VARIACION DIARIA", "VARIACIÓN DIARIA"]);
   for (let index = 0; index < lines.length - 3; index += 1) {
@@ -100,7 +103,7 @@ function parseQuotes(lines) {
       ask = ask ?? numericValues[1] ?? null;
     }
     if (bid !== null && ask !== null) {
-      quotes.push({ symbol, type, change, bid, ask, mid: Number(((bid + ask) / 2).toFixed(5)) });
+      quotes.push({ symbol: symbolAliases.get(symbol) || symbol, display_symbol: symbol, type, change, bid, ask, mid: Number(((bid + ask) / 2).toFixed(5)) });
     }
   }
   return quotes;

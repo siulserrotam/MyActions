@@ -238,6 +238,30 @@ def test_engine_universe() -> None:
     payload = response.json()
     assert payload["count"] >= 10
     assert any(item["symbol"] == "GOLD" for item in payload["groups"]["commodities"])
+    assert any(item["symbol"] == "AVAX" for item in payload["groups"]["crypto"])
+
+
+def test_engine_calculates_avax_crypto() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/engine/calculate",
+        json={
+            "symbol": "AVAX",
+            "direction": "LONG",
+            "account_balance": 2000,
+            "risk_pct": 0.35,
+            "entry_price": 6.55,
+            "stop_price": 6.25,
+            "take_profit_price": 7.15,
+            "requested_volume": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["asset"]["category"] == "crypto"
+    assert payload["asset"]["symbol"] == "AVAX"
+    assert payload["volume"] == 3
 
 
 def test_engine_calculates_dynamic_volume() -> None:

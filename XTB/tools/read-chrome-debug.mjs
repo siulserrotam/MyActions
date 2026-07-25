@@ -45,6 +45,7 @@ function extractXtbQuotes(text) {
     ['TSM.US', /TSMC CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
     ['BTCUSD', /BITCOIN CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
     ['ETHUSD', /ETHEREUM CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
+    ['AVAX', /AVALANCHE CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
     ['EURUSD', /EURUSD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
     ['GBPUSD', /GBPUSD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
     ['GOLD', /GOLD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
