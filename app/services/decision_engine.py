@@ -40,6 +40,12 @@ class DecisionEngineService:
         "BTCUSD": AssetConfig("BTCUSD", "Bitcoin CFD", "crypto", 1),
         "ETHUSD": AssetConfig("ETHUSD", "Ethereum CFD", "crypto", 1),
         "AVAX": AssetConfig("AVAX", "Avalanche CFD", "crypto", 1),
+        "SOL": AssetConfig("SOL", "Solana CFD", "crypto", 1),
+        "XRP": AssetConfig("XRP", "Ripple / XRP CFD", "crypto", 1),
+        "DOGE": AssetConfig("DOGE", "Dogecoin CFD", "crypto", 1),
+        "ADA": AssetConfig("ADA", "Cardano CFD", "crypto", 1),
+        "LINK": AssetConfig("LINK", "Chainlink CFD", "crypto", 1),
+        "DOT": AssetConfig("DOT", "Polkadot CFD", "crypto", 1),
     }
 
     def universe(self) -> dict[str, object]:

@@ -239,6 +239,8 @@ def test_engine_universe() -> None:
     assert payload["count"] >= 10
     assert any(item["symbol"] == "GOLD" for item in payload["groups"]["commodities"])
     assert any(item["symbol"] == "AVAX" for item in payload["groups"]["crypto"])
+    assert any(item["symbol"] == "SOL" for item in payload["groups"]["crypto"])
+    assert any(item["symbol"] == "XRP" for item in payload["groups"]["crypto"])
 
 
 def test_engine_calculates_avax_crypto() -> None:

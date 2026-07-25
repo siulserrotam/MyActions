@@ -71,8 +71,14 @@ function numberAfterExactLabel(lines, label) {
 function parseQuotes(lines) {
   const symbolAliases = new Map([
     ["AVALANCHE", "AVAX"],
+    ["SOLANA", "SOL"],
+    ["RIPPLE", "XRP"],
+    ["DOGECOIN", "DOGE"],
+    ["CARDANO", "ADA"],
+    ["CHAINLINK", "LINK"],
+    ["POLKADOT", "DOT"],
   ]);
-  const wanted = new Set(["Tesla", "Apple", "Nvidia", "TSMC", "BITCOIN", "ETHEREUM", "AVALANCHE", "EURUSD", "GBPUSD", "GOLD", "NATGAS", "OIL", "SILVER", "US100", "US30"]);
+  const wanted = new Set(["Tesla", "Apple", "Nvidia", "TSMC", "BITCOIN", "ETHEREUM", "AVALANCHE", "SOLANA", "RIPPLE", "DOGECOIN", "CARDANO", "CHAINLINK", "POLKADOT", "EURUSD", "GBPUSD", "GOLD", "NATGAS", "OIL", "SILVER", "US100", "US30"]);
   const quotes = [];
   const labelWords = new Set(["VENTA", "COMPRA", "LOW", "HIGH", "SPREAD", "VARIACION DIARIA", "VARIACIÓN DIARIA"]);
   for (let index = 0; index < lines.length - 3; index += 1) {

@@ -26,6 +26,12 @@ const assetGroups = {
     { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
     { symbol: "ETHUSD", name: "Ethereum CFD", category: "crypto", multiplier: 1, marketPrice: 3400 },
     { symbol: "AVAX", name: "Avalanche CFD", category: "crypto", multiplier: 1, marketPrice: 6.5, volumeStep: 1 },
+    { symbol: "SOL", name: "Solana CFD", category: "crypto", multiplier: 1, marketPrice: 180, volumeStep: 1 },
+    { symbol: "XRP", name: "Ripple / XRP CFD", category: "crypto", multiplier: 1, marketPrice: 3, volumeStep: 1 },
+    { symbol: "DOGE", name: "Dogecoin CFD", category: "crypto", multiplier: 1, marketPrice: 0.25, volumeStep: 1 },
+    { symbol: "ADA", name: "Cardano CFD", category: "crypto", multiplier: 1, marketPrice: 0.85, volumeStep: 1 },
+    { symbol: "LINK", name: "Chainlink CFD", category: "crypto", multiplier: 1, marketPrice: 18, volumeStep: 1 },
+    { symbol: "DOT", name: "Polkadot CFD", category: "crypto", multiplier: 1, marketPrice: 4.5, volumeStep: 1 },
   ],
   stocks: [
     { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1, marketPrice: 420.5 },
@@ -751,6 +757,8 @@ function findAsset(symbol) {
 function priceDecimals(asset) {
   if (asset.category === "forex") return asset.symbol.includes("JPY") ? 3 : 5;
   if (asset.symbol === "AVAX") return 3;
+  if (["XRP", "DOGE", "ADA", "DOT"].includes(asset.symbol)) return 4;
+  if (["SOL", "LINK"].includes(asset.symbol)) return 3;
   if (asset.symbol === "OIL" || asset.symbol === "NATGAS") return 3;
   if (asset.category === "crypto" || asset.category === "indices") return 1;
   return 2;
