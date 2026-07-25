@@ -107,7 +107,7 @@ async function main() {
       has_dashboard: dashboardSignals.hasDashboard,
       source: 'myactions-dashboard'
     } : null,
-    next_step: 'Si login_required es true, inicia sesion en la ventana de Opera y vuelve a ejecutar npm.cmd run read.'
+    next_step: 'Si login_required es true, inicia sesion en la ventana del navegador controlable y vuelve a ejecutar npm.cmd run read.'
   };
 
   if (xtbPage && dashboardPage) {

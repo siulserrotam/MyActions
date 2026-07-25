@@ -5,24 +5,30 @@ $rootDir = Split-Path -Parent $scriptDir
 
 Push-Location $rootDir
 try {
-  & "$scriptDir\start-opera-debug.ps1"
+  try {
+    & "$scriptDir\start-opera-debug.ps1"
+  } catch {
+    Write-Host "Opera no disponible, usando Chrome debug..."
+    & "$scriptDir\start-chrome-debug.ps1"
+  }
   Start-Sleep -Seconds 4
   node tools\ensure-pages.mjs
   Start-Sleep -Seconds 3
   node tools\read-chrome-debug.mjs
 
+  $escapedRoot = $rootDir.Replace("'", "''")
   Start-Process -FilePath 'powershell.exe' -ArgumentList @(
     '-ExecutionPolicy', 'Bypass',
     '-NoProfile',
     '-Command',
-    '$env:XTB_SYNC_INTERVAL_MS="10000"; Set-Location "C:\Users\Admin\OneDrive\Documentos\INTRUCCION EMPLEO\XTB"; npm.cmd run sync:watch'
+    "`$env:XTB_SYNC_INTERVAL_MS='10000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
   ) -WindowStyle Hidden
 
   Start-Process -FilePath 'powershell.exe' -ArgumentList @(
     '-ExecutionPolicy', 'Bypass',
     '-NoProfile',
     '-Command',
-    '$env:DASHBOARD_CLEAN_INTERVAL_MS="10000"; Set-Location "C:\Users\Admin\OneDrive\Documentos\INTRUCCION EMPLEO\XTB"; npm.cmd run clean:watch'
+    "`$env:DASHBOARD_CLEAN_INTERVAL_MS='10000'; Set-Location '$escapedRoot'; npm.cmd run clean:watch"
   ) -WindowStyle Hidden
 
   Write-Host ''

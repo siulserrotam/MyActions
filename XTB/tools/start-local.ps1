@@ -5,9 +5,11 @@ $rootDir = Split-Path -Parent $scriptDir
 
 Push-Location $rootDir
 try {
-  & "$scriptDir\start-opera-debug.ps1"
-  if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+  try {
+    & "$scriptDir\start-opera-debug.ps1"
+  } catch {
+    Write-Host "Opera no disponible, usando Chrome debug..."
+    & "$scriptDir\start-chrome-debug.ps1"
   }
 
   Start-Sleep -Seconds 4
