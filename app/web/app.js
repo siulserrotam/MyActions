@@ -66,7 +66,7 @@ const baseTradeTargetPct = 1;
 const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = true;
-const defaultsVersion = "capital-dynamic-no-stop-1pct-plus40-avax-v3";
+const defaultsVersion = "capital-dynamic-no-stop-1pct-plus40-fee-v4";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -229,8 +229,14 @@ function extensionTradesAllowed() {
   return op1 > 0 && op2 > 0 && total < 10 * 60 + 30;
 }
 
+function xtbCostPerOperation() {
+  const raw = Number(document.getElementById("xtb-cost-per-operation")?.value || 0);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
 function buildDailyTradePlan() {
   const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const estimatedXtbCost = xtbCostPerOperation();
   const baseTradeTargetAmount = accountBalance * baseTradeTargetPct / 100;
   const baseTargetAmount = baseTradeTargetAmount * 2;
   const fullDayTargetAmount = baseTargetAmount / baseProfitShareOfDay;
@@ -245,26 +251,39 @@ function buildDailyTradePlan() {
     3: extensionTargetAmount / 2,
     4: extensionTargetAmount / 2,
   };
-  const currentTradeRiskAmount = tradeTargets[currentSlot] || tradeTargets[1];
+  const grossTradeTargets = Object.fromEntries(
+    Object.entries(tradeTargets).map(([slot, amount]) => [slot, amount + estimatedXtbCost])
+  );
+  const currentTradeNetTargetAmount = tradeTargets[currentSlot] || tradeTargets[1];
+  const currentTradeRiskAmount = grossTradeTargets[currentSlot] || grossTradeTargets[1];
   const currentTradeRiskPct = accountBalance > 0 ? currentTradeRiskAmount / accountBalance * 100 : defaultRiskPct;
   return {
     baseRiskPct: accountBalance > 0 ? Number((baseTargetAmount / accountBalance * 100).toFixed(4)) : defaultRiskPct,
-    dailyRiskAmount: baseTargetAmount,
+    dailyRiskAmount: baseTargetAmount + estimatedXtbCost * 2,
     plannedTrades,
     currentSlot,
-    firstRiskAmount: tradeTargets[1],
-    secondRiskAmount: tradeTargets[2],
-    thirdRiskAmount: tradeTargets[3],
-    fourthRiskAmount: tradeTargets[4],
+    firstRiskAmount: grossTradeTargets[1],
+    secondRiskAmount: grossTradeTargets[2],
+    thirdRiskAmount: grossTradeTargets[3],
+    fourthRiskAmount: grossTradeTargets[4],
+    firstNetTargetAmount: tradeTargets[1],
+    secondNetTargetAmount: tradeTargets[2],
+    thirdNetTargetAmount: tradeTargets[3],
+    fourthNetTargetAmount: tradeTargets[4],
     currentTradeRiskAmount,
+    currentTradeNetTargetAmount,
     currentTradeRiskPct: Number(currentTradeRiskPct.toFixed(4)),
     contractTargetValue,
     baseTradeTargetAmount,
     baseTargetAmount,
+    grossBaseTargetAmount: baseTargetAmount + estimatedXtbCost * 2,
     fullDayTargetAmount,
     extensionTargetAmount,
+    grossExtensionTargetAmount: extensionTargetAmount + estimatedXtbCost * 2,
+    estimatedXtbCost,
     extensionEnabled,
-    dailyTargetAmount: baseTargetAmount + (extensionEnabled ? extensionTargetAmount : 0),
+    dailyNetTargetAmount: baseTargetAmount + (extensionEnabled ? extensionTargetAmount : 0),
+    dailyTargetAmount: baseTargetAmount + (extensionEnabled ? extensionTargetAmount : 0) + estimatedXtbCost * plannedTrades,
   };
 }
 
@@ -289,11 +308,12 @@ function renderAiDecisionSummary() {
     <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
     <div class="mt-2 grid gap-2">
       <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
-      <div class="summary-row"><span>Meta receta actual</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)}</strong></div>
-      <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operaciones / meta ${money(plan.dailyTargetAmount)}</strong></div>
-      <div class="summary-row"><span>Operacion 1</span><strong>Objetivo ${money(plan.firstRiskAmount)}</strong></div>
-      <div class="summary-row"><span>Operacion 2</span><strong>Objetivo ${money(plan.secondRiskAmount)}</strong></div>
-      <div class="summary-row"><span>Operacion 3/4</span><strong>${plan.extensionEnabled ? `${money(plan.thirdRiskAmount)} c/u habilitadas` : `Solo si Op1 y Op2 ganan antes de 10:30`}</strong></div>
+      <div class="summary-row"><span>Meta receta actual</span><strong>Op ${plan.currentSlot}: neto ${money(plan.currentTradeNetTargetAmount)} / bruto ${money(plan.currentTradeRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operaciones / neto ${money(plan.dailyNetTargetAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 1</span><strong>Neto ${money(plan.firstNetTargetAmount)} / bruto ${money(plan.firstRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 2</span><strong>Neto ${money(plan.secondNetTargetAmount)} / bruto ${money(plan.secondRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 3/4</span><strong>${plan.extensionEnabled ? `Neto ${money(plan.thirdNetTargetAmount)} / bruto ${money(plan.thirdRiskAmount)} c/u` : `Solo si Op1 y Op2 ganan antes de 10:30`}</strong></div>
+      <div class="summary-row"><span>Costo XTB estimado</span><strong>${money(plan.estimatedXtbCost)} por operacion</strong></div>
       <div class="summary-row"><span>Contrato buscado</span><strong>${money(plan.contractTargetValue)}</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
       <div class="summary-row"><span>Stop / objetivo</span><strong>Sin stop / ${profitText}</strong></div>
@@ -302,7 +322,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Base: Op1 y Op2 buscan ${money(plan.firstRiskAmount)} cada una. Esos ${money(plan.baseTargetAmount)} son el 60% del dia; Op3+Op4 reparten el 40% restante.</p>
+    <p class="mt-2 text-xs text-zinc-400">Base: Op1 y Op2 buscan neto ${money(plan.firstNetTargetAmount)} cada una. Si agregas costo XTB, el take profit se calcula sobre la meta bruta para intentar conservar el neto.</p>
   `;
 }
 
@@ -1366,9 +1386,10 @@ function currentConfigPayload() {
   const operation2Result = Number(document.getElementById("operation2-result")?.value || 0);
   const operation3Result = Number(document.getElementById("operation3-result")?.value || 0);
   const operation4Result = Number(document.getElementById("operation4-result")?.value || 0);
+  const xtbEstimatedCostPerOperation = xtbCostPerOperation();
   const realized = operation1Result + operation2Result + operation3Result + operation4Result;
   const plan = buildDailyTradePlan();
-  const dailyStatus = realized >= plan.dailyTargetAmount
+  const dailyStatus = realized >= plan.dailyNetTargetAmount
     ? "target_hit"
     : realized < 0
       ? "risk_hit"
@@ -1403,6 +1424,7 @@ function currentConfigPayload() {
     operation2_result: operation2Result,
     operation3_result: operation3Result,
     operation4_result: operation4Result,
+    xtb_estimated_cost_per_operation: xtbEstimatedCostPerOperation,
     daily_result_status: dailyStatus,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
@@ -1434,6 +1456,7 @@ function dailyCapitalPayload() {
     operation2_result: config.operation2_result,
     operation3_result: config.operation3_result,
     operation4_result: config.operation4_result,
+    xtb_estimated_cost_per_operation: config.xtb_estimated_cost_per_operation,
     daily_result_status: config.daily_result_status,
     risk_pct: config.risk_pct,
     notes: "Intradia XTB: capital, receta IA, resultados reales op1-op4 y estado diario.",
@@ -1461,6 +1484,7 @@ function loadConfigLocal() {
     if (config.operation2_result !== undefined) document.getElementById("operation2-result").value = config.operation2_result;
     if (config.operation3_result !== undefined) document.getElementById("operation3-result").value = config.operation3_result;
     if (config.operation4_result !== undefined) document.getElementById("operation4-result").value = config.operation4_result;
+    if (config.xtb_estimated_cost_per_operation !== undefined) document.getElementById("xtb-cost-per-operation").value = config.xtb_estimated_cost_per_operation;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
     document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
@@ -1502,9 +1526,9 @@ function renderLeverageCapacity() {
   const balance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
   const available = Number(document.getElementById("available-capital")?.value || 0);
   const leverage = cfdLeverageRatio();
-  const riskPct = getEffectiveRiskPct();
-  const riskUsd = balance * riskPct / 100;
-  const targetUsd = riskUsd * 2;
+  const plan = buildDailyTradePlan();
+  const riskPct = plan.currentTradeRiskPct;
+  const targetUsd = plan.currentTradeRiskAmount;
   const nominalByBalance = balance * leverage;
   const nominalByAvailable = (available || balance) * leverage;
   const box = document.getElementById("leverage-capacity");
@@ -1516,9 +1540,9 @@ function renderLeverageCapacity() {
       <div class="summary-row"><span>Garantia estimada</span><strong>${cfdMarginPct()}%</strong></div>
       <div class="summary-row"><span>Nominal por capital</span><strong>${money(nominalByBalance)}</strong></div>
       <div class="summary-row"><span>Nominal por disponible</span><strong>${money(nominalByAvailable)}</strong></div>
-      <div class="summary-row"><span>Riesgo / meta</span><strong>${riskPct}% = ${money(riskUsd)} / ${money(targetUsd)}</strong></div>
+      <div class="summary-row"><span>Meta receta</span><strong>${riskPct}% = bruto ${money(targetUsd)} / neto ${money(plan.currentTradeNetTargetAmount)}</strong></div>
     </div>
-    <p class="mt-2 text-xs text-zinc-500">El nominal ayuda a saber si cabe por margen. El riesgo maximo sigue siendo ${money(riskUsd)}.</p>
+    <p class="mt-2 text-xs text-zinc-500">El nominal ayuda a saber si cabe por margen. La meta bruta incluye ${money(plan.estimatedXtbCost)} de costo XTB estimado.</p>
   `;
 }
 
@@ -1527,7 +1551,7 @@ function renderDailyResultCard() {
   if (!target) return;
   const plan = buildDailyTradePlan();
   const total = totalOperationResult();
-  const status = total >= plan.dailyTargetAmount
+  const status = total >= plan.dailyNetTargetAmount
     ? "Meta diaria cumplida: cerrar el dia."
     : total < 0
       ? "Perdida diaria tocada: cerrar el dia."
@@ -1535,7 +1559,7 @@ function renderDailyResultCard() {
         ? "Sin resultado cerrado aun."
         : "Resultado parcial: no forzar otra entrada.";
   target.className = `mt-2 rounded-xl border p-3 text-xs font-bold ${total >= 0 ? "border-bull/30 text-bull" : "border-bear/40 text-bear"}`;
-  target.textContent = `Resultado cerrado: ${money(total)}. ${status}`;
+  target.textContent = `Resultado cerrado: ${money(total)}. Meta neta ${money(plan.dailyNetTargetAmount)}. ${status}`;
   renderSimpleDashboard();
 }
 
@@ -1583,6 +1607,17 @@ function startOperation(slot) {
   calculate();
 }
 
+function cancelStartedOperation(slot) {
+  const started = startedOperations();
+  delete started[String(slot)];
+  localStorage.setItem("decision_engine_started_operations", JSON.stringify(started));
+  setOperationResult(slot, 0);
+  syncOutcomeFromResults();
+  saveConfigLocal();
+  schedulePostback();
+  calculate();
+}
+
 function syncOutcomeFromResults() {
   const total = Number(totalOperationResult().toFixed(2));
   const outcome = total > 0 ? "win" : total < 0 ? "loss" : "pending";
@@ -1619,6 +1654,12 @@ function renderSimpleDashboard() {
     3: plan.thirdRiskAmount,
     4: plan.fourthRiskAmount,
   };
+  const opNetTargets = {
+    1: plan.firstNetTargetAmount,
+    2: plan.secondNetTargetAmount,
+    3: plan.thirdNetTargetAmount,
+    4: plan.fourthNetTargetAmount,
+  };
   const activeResultTarget = operationResultId(tradeSlot);
   const activeResult = opResults[tradeSlot] || "0";
   const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
@@ -1639,14 +1680,16 @@ function renderSimpleDashboard() {
     const isActive = tradeSlot === String(slot);
     const isStarted = Boolean(started[String(slot)]);
     const targetAmount = opTargets[slot] || 0;
+    const netTargetAmount = opNetTargets[slot] || targetAmount;
     const result = opResults[slot] || "0";
-    const badge = slot <= 2 ? `Objetivo ${money(targetAmount)}` : `Extension ${money(targetAmount)}`;
+    const badge = slot <= 2 ? `Neto ${money(netTargetAmount)}` : `Extension ${money(netTargetAmount)}`;
     return `
       <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""}">
         <div class="simple-head">
           <h2>Operacion ${slot}</h2>
           <span class="simple-badge">${isStarted ? "Iniciada" : badge}</span>
         </div>
+        <p class="simple-tiny">Meta neta ${money(netTargetAmount)}${plan.estimatedXtbCost ? ` + costo XTB ${money(plan.estimatedXtbCost)} = bruto ${money(targetAmount)}` : ""}</p>
         <div class="simple-numbers">
           <div class="simple-number"><span class="simple-label">Direccion</span><strong>${isActive ? direction : "--"}</strong></div>
           <div class="simple-number"><span class="simple-label">Volumen</span><strong>${isActive ? volume : "--"}</strong></div>
@@ -1661,6 +1704,7 @@ function renderSimpleDashboard() {
           <button type="button" data-simple-action="start-op-${slot}">${isStarted ? "Operacion iniciada" : `Iniciar Op ${slot}`}</button>
           <button type="button" class="secondary" data-simple-action="slot-${slot}">Ver receta</button>
           <button type="button" class="secondary" data-simple-action="submit-op-${slot}">Enviar resultado</button>
+          ${isStarted ? `<button type="button" class="danger" data-simple-action="cancel-op-${slot}">Cancelar inicio</button>` : ""}
         </div>
       </article>
     `;
@@ -1671,11 +1715,12 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Op1 y Op2 buscan ${money(plan.firstRiskAmount)} cada una. Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de ${money(plan.thirdRiskAmount)} cada una.</p>
+          <p class="simple-subtitle">Op1 y Op2 buscan neto ${money(plan.firstNetTargetAmount)} cada una. Si agregas costo XTB estimado, la meta bruta queda en ${money(plan.firstRiskAmount)} por operacion.</p>
           <div class="simple-status">
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
             <span class="simple-chip">${sourceLabel}</span>
+            <span class="simple-chip">Costo XTB/op ${money(plan.estimatedXtbCost)}</span>
             <span class="simple-chip warn">Sin stop: cierre manual obligatorio</span>
           </div>
         </section>
@@ -1740,6 +1785,7 @@ function renderSimpleDashboard() {
         <div class="simple-head"><div><h2>Ajustes y aprendizaje</h2><p class="simple-subtitle">Capital, memoria IA, notas, alertas y exportacion sin volver a la pantalla anterior.</p></div><span class="simple-badge">completo</span></div>
         <div class="simple-form-grid">
           <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
+          <label class="simple-field"><span class="simple-label">Costo XTB estimado/op USD</span><input type="number" step="0.01" value="${plan.estimatedXtbCost}" placeholder="0.00" data-sync-target="xtb-cost-per-operation" /><span class="simple-tiny">Usa el costo real que veas en XTB. Se suma a la meta bruta, no cambia el neto buscado.</span></label>
           <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
           <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
           <div class="simple-field"><span class="simple-label">Resultado para aprendizaje</span><span class="simple-value">${money(dayTotal)}</span><span class="simple-tiny">Se toma automaticamente de las operaciones enviadas.</span></div>
@@ -1749,7 +1795,7 @@ function renderSimpleDashboard() {
         </div>
         <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
-      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Base</strong>Op1 y Op2 usan contrato cercano al capital operativo y buscan ${money(plan.firstRiskAmount)} cada una.</div><div><strong>3. Extension</strong>Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de ${money(plan.thirdRiskAmount)} cada una.</div><div><strong>4. Cierre</strong>Sin stop: cierre manual obligatorio segun la regla horaria.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
+      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Base</strong>Op1 y Op2 usan contrato cercano al capital operativo y buscan neto ${money(plan.firstNetTargetAmount)} cada una.</div><div><strong>3. Costo XTB</strong>Si XTB cobra spread/comision/conversion, escribe el costo estimado por operacion para subir la meta bruta.</div><div><strong>4. Cierre</strong>Sin stop: cierre manual obligatorio segun la regla horaria.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
     </div>
   `;
 }
@@ -1805,6 +1851,10 @@ function bindSimpleDashboard() {
     if (action === "slot-4") setControlValue("trade-slot", "4");
     if (action.startsWith("start-op-")) {
       startOperation(action.replace("start-op-", ""));
+      return;
+    }
+    if (action.startsWith("cancel-op-")) {
+      cancelStartedOperation(action.replace("cancel-op-", ""));
       return;
     }
     if (action.startsWith("submit-op-")) {
@@ -2356,9 +2406,10 @@ function renderMath() {
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Capital operativo</span><strong>${money(lastResult.account_balance)}</strong></div>
-    <div class="summary-row"><span>Meta del dia</span><strong>${money(plan.dailyTargetAmount)} (${money(plan.baseTargetAmount)} = 60%${plan.extensionEnabled ? " + 40%" : ""})</strong></div>
-    <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: objetivo ${money(plan.currentTradeRiskAmount)}</strong></div>
+    <div class="summary-row"><span>Meta del dia</span><strong>Neta ${money(plan.dailyNetTargetAmount)} / bruta ${money(plan.dailyTargetAmount)}</strong></div>
+    <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: neto ${money(plan.currentTradeNetTargetAmount)} / bruto ${money(plan.currentTradeRiskAmount)}</strong></div>
     <div class="summary-row"><span>Stop/meta esta receta</span><strong>Sin stop / ${money(lastResult.expected_profit)}</strong></div>
+    <div class="summary-row"><span>Costo XTB estimado</span><strong>${money(plan.estimatedXtbCost)} por operacion</strong></div>
     <div class="summary-row"><span>Margen aprox. que bloquea XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Exposicion nominal</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Perdida maxima</span><strong class="text-bear">No definida sin cierre manual</strong></div>
@@ -2368,7 +2419,7 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["stop-price", "take-profit-price", "expiry-mode", "operation1-result", "operation2-result", "operation3-result", "operation4-result"].forEach((id) => {
+  ["stop-price", "take-profit-price", "expiry-mode", "operation1-result", "operation2-result", "operation3-result", "operation4-result", "xtb-cost-per-operation"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
@@ -2406,7 +2457,7 @@ function bindInputs() {
   });
   document.getElementById("xtb-price").addEventListener("input", applyXtbPriceOverride);
   document.getElementById("xtb-price").addEventListener("change", applyXtbPriceOverride);
-  ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result", "operation3-result", "operation4-result"].forEach((id) => {
+  ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result", "operation3-result", "operation4-result", "xtb-cost-per-operation"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });
