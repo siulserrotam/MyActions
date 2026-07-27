@@ -61,10 +61,13 @@ const defaultAccountBalance = 2016;
 const defaultRiskPct = 0.5;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
-const maxPlannedTrades = 2;
-const aggressiveDailyRiskUsd = 20;
-const tradeRiskWeights = { 1: 0.6, 2: 0.4 };
-const defaultsVersion = "capital-2016-split-risk-avax-v2";
+const maxPlannedTrades = 4;
+const baseTradeTargetUsd = 20;
+const extensionProfitFactor = 0.4;
+const baseProfitShareOfDay = 0.6;
+const aggressiveDailyRiskUsd = baseTradeTargetUsd * 2;
+const noStopMode = true;
+const defaultsVersion = "capital-2016-no-stop-20-20-plus40-avax-v2";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -220,30 +223,47 @@ function getEffectiveRiskPct() {
   return buildDailyTradePlan().currentTradeRiskPct;
 }
 
+function extensionTradesAllowed() {
+  const { total } = coMarketMinutes();
+  const op1 = Number(document.getElementById("operation1-result")?.value || 0);
+  const op2 = Number(document.getElementById("operation2-result")?.value || 0);
+  return op1 > 0 && op2 > 0 && total < 10 * 60 + 30;
+}
+
 function buildDailyTradePlan() {
   const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
-  const fixedRiskPct = accountBalance > 0 ? aggressiveDailyRiskUsd / accountBalance * 100 : defaultRiskPct;
-  const baseRiskPct = Number(Math.min(maxAiRiskPct, Math.max(minAiRiskPct, fixedRiskPct)).toFixed(4));
-  const viableCount = uniqueAssets()
-    .map((asset) => buildAssetOpportunity(asset, baseRiskPct))
-    .filter((item) => item.usable).length;
-  const plannedTrades = Math.min(maxPlannedTrades, Math.max(1, viableCount));
-  const dailyRiskAmount = accountBalance * baseRiskPct / 100;
+  const baseTargetAmount = baseTradeTargetUsd * 2;
+  const fullDayTargetAmount = baseTargetAmount / baseProfitShareOfDay;
+  const extensionTargetAmount = fullDayTargetAmount * extensionProfitFactor;
+  const extensionEnabled = extensionTradesAllowed();
+  const plannedTrades = extensionEnabled ? maxPlannedTrades : 2;
   const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
-  const useSplitPlan = plannedTrades > 1;
-  const currentWeight = useSplitPlan ? tradeRiskWeights[currentSlot] || tradeRiskWeights[1] : 1;
-  const firstRiskAmount = useSplitPlan ? dailyRiskAmount * tradeRiskWeights[1] : dailyRiskAmount;
-  const secondRiskAmount = useSplitPlan ? dailyRiskAmount * tradeRiskWeights[2] : 0;
-  const currentTradeRiskAmount = dailyRiskAmount * currentWeight;
+  const contractTargetValue = accountBalance;
+  const tradeTargets = {
+    1: baseTradeTargetUsd,
+    2: baseTradeTargetUsd,
+    3: extensionTargetAmount / 2,
+    4: extensionTargetAmount / 2,
+  };
+  const currentTradeRiskAmount = tradeTargets[currentSlot] || tradeTargets[1];
+  const currentTradeRiskPct = accountBalance > 0 ? currentTradeRiskAmount / accountBalance * 100 : defaultRiskPct;
   return {
-    baseRiskPct,
-    dailyRiskAmount,
+    baseRiskPct: accountBalance > 0 ? Number((baseTargetAmount / accountBalance * 100).toFixed(4)) : defaultRiskPct,
+    dailyRiskAmount: baseTargetAmount,
     plannedTrades,
     currentSlot,
-    firstRiskAmount,
-    secondRiskAmount,
+    firstRiskAmount: tradeTargets[1],
+    secondRiskAmount: tradeTargets[2],
+    thirdRiskAmount: tradeTargets[3],
+    fourthRiskAmount: tradeTargets[4],
     currentTradeRiskAmount,
-    currentTradeRiskPct: Number((baseRiskPct * currentWeight).toFixed(4)),
+    currentTradeRiskPct: Number(currentTradeRiskPct.toFixed(4)),
+    contractTargetValue,
+    baseTargetAmount,
+    fullDayTargetAmount,
+    extensionTargetAmount,
+    extensionEnabled,
+    dailyTargetAmount: baseTargetAmount + (extensionEnabled ? extensionTargetAmount : 0),
   };
 }
 
@@ -268,107 +288,93 @@ function renderAiDecisionSummary() {
     <p class="text-xs font-black uppercase text-sky-300">Decision automatica IA</p>
     <div class="mt-2 grid gap-2">
       <div class="summary-row"><span>Direccion sugerida</span><strong>${action}</strong></div>
-      <div class="summary-row"><span>Riesgo/meta diario</span><strong>${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
-      <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operacion${plan.plannedTrades > 1 ? "es" : ""}</strong></div>
-      <div class="summary-row"><span>Operacion 1</span><strong>${money(plan.firstRiskAmount)} / ${money(plan.firstRiskAmount * 2)}</strong></div>
-      <div class="summary-row"><span>Operacion 2</span><strong>${plan.secondRiskAmount ? `${money(plan.secondRiskAmount)} / ${money(plan.secondRiskAmount * 2)}` : "Solo si aplica"}</strong></div>
-      <div class="summary-row"><span>Receta actual</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)} / ${money(plan.currentTradeRiskAmount * 2)}</strong></div>
+      <div class="summary-row"><span>Meta receta actual</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Plan del dia</span><strong>${plan.plannedTrades} operaciones / meta ${money(plan.dailyTargetAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 1</span><strong>Objetivo ${money(plan.firstRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 2</span><strong>Objetivo ${money(plan.secondRiskAmount)}</strong></div>
+      <div class="summary-row"><span>Operacion 3/4</span><strong>${plan.extensionEnabled ? `${money(plan.thirdRiskAmount)} c/u habilitadas` : `Solo si Op1 y Op2 ganan antes de 10:30`}</strong></div>
+      <div class="summary-row"><span>Contrato buscado</span><strong>${money(plan.contractTargetValue)}</strong></div>
       <div class="summary-row"><span>Volumen IA</span><strong>${volumeText}</strong></div>
-      <div class="summary-row"><span>Perdida / objetivo</span><strong>${lossText} / ${profitText}</strong></div>
+      <div class="summary-row"><span>Stop / objetivo</span><strong>Sin stop / ${profitText}</strong></div>
       <div class="summary-row"><span>Horario</span><strong>${marketTimingProfile().quality}</strong></div>
       <div class="summary-row"><span>Gestion ahora</span><strong>${management.action}</strong></div>
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Regla 60/40: primera operacion con escudo mas amplio; segunda mas estricta. Si la primera pierde, no se abre segunda.</p>
+    <p class="mt-2 text-xs text-zinc-400">Base: Op1 y Op2 buscan ${money(baseTradeTargetUsd)} cada una. Esos ${money(plan.baseTargetAmount)} son el 60% del dia; Op3+Op4 reparten el 40% restante.</p>
   `;
 }
 
 function tradeSchedulePlan() {
-  const { weekday, total } = nyMarketMinutes();
+  const { weekday, total } = coMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
-  const firstStart = 9 * 60 + 35;
-  const firstIdeal = 9 * 60 + 45;
-  const firstEnd = 10 * 60 + 30;
-  const secondStart = 10 * 60 + 30;
-  const secondEnd = 11 * 60 + 30;
-  const noNewAfter = 11 * 60 + 30;
-  const manageOnlyAfter = 14 * 60;
-  const hardClose = 15 * 60 + 45;
+  const entryStart = 8 * 60 + 45;
+  const entryEnd = 9 * 60 + 45;
+  const favorableClose = 10 * 60 + 30;
+  const losingHardClose = 12 * 60 + 30;
 
-  if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
+  if (!isWeekday || total < 8 * 60 + 30 || total >= 15 * 60) {
     return {
       title: "Mercado cerrado",
       now: "Prepara lista, no abras operaciones.",
-      first: "Operacion 1: 9:35-10:30 NY. Mejor desde 9:45 si hay direccion clara.",
-      second: "Operacion 2: solo 10:30-11:30 NY si la primera cerro en ganancia o esta protegida sin riesgo.",
-      stop: "No abrir nuevas despues de 11:30 NY.",
-      close: "Cierre maximo intradia: 15:45 NY si no toco stop ni meta.",
+      first: "Operacion 1: 8:45-9:45 Colombia.",
+      second: "Operacion 2: 8:45-9:45 Colombia si hay segunda senal clara.",
+      stop: "No abrir nuevas despues de 9:45 Colombia.",
+      close: "10:30 alerta si favorece; 12:30 cerrar perdedoras manualmente.",
       tone: "muted",
     };
   }
-  if (total < firstStart) {
+  if (total < entryStart) {
     return {
-      title: "Esperar primera vela",
-      now: `No abrir. Faltan ${formatMinutesUntil(firstStart, total)} para evaluar ORB.`,
-      first: "Operacion 1: programa solo despues de 9:35 NY.",
-      second: "Operacion 2: todavia no aplica.",
-      stop: "Nada antes de cierre de vela 9:30-9:35 NY.",
-      close: "Si entras hoy, cierre maximo 15:45 NY.",
+      title: "Esperar ventana",
+      now: `No abrir. Faltan ${formatMinutesUntil(entryStart, total)} para 8:45 Colombia.`,
+      first: "Operacion 1: preparar activo, direccion, volumen y meta.",
+      second: "Operacion 2: preparar solo si hay otra oportunidad clara.",
+      stop: "Sin stop automatico: no enviar orden si no vas a vigilarla.",
+      close: "Primera revision fuerte: 10:30 Colombia.",
       tone: "danger",
     };
   }
-  if (total < firstEnd) {
+  if (total < entryEnd) {
     return {
-      title: "Ventana de Operacion 1",
-      now: total < firstIdeal ? "Puedes preparar, pero 9:35-9:45 aun tiene ruido. Opera solo con semaforo OPERABLE." : "Mejor ventana para la primera entrada si el semaforo esta OPERABLE.",
-      first: `Operacion 1: ahora hasta 10:30 NY. Quedan ${formatMinutesUntil(firstEnd, total)}.`,
-      second: "Operacion 2: no abrir mientras la primera siga viva con riesgo.",
-      stop: "Si no activa antes de 10:30 NY, cancela esa idea.",
-      close: "Cierre maximo si queda abierta: 15:45 NY.",
-      tone: total < firstIdeal ? "warning" : "ok",
+      title: "Ventana de entrada",
+      now: `Puedes entrar manualmente si el semaforo esta OPERABLE. Quedan ${formatMinutesUntil(entryEnd, total)}.`,
+      first: "Operacion 1: contrato cercano al capital operativo; objetivo $20.",
+      second: "Operacion 2: solo otra senal clara dentro de esta misma ventana.",
+      stop: "No abrir nuevas despues de 9:45 Colombia.",
+      close: "Si Op1+Op2 ganan $40 antes de 10:30, se habilitan Op3+Op4 para sumar el 40% restante.",
+      tone: "ok",
     };
   }
-  if (total < secondEnd) {
+  if (total < favorableClose) {
     return {
-      title: "Ventana de Operacion 2",
-      now: "Solo segunda oportunidad. No repitas por ansiedad: exige nueva senal clara.",
-      first: "Operacion 1: ya paso la ventana ideal.",
-      second: `Operacion 2: ahora hasta 11:30 NY. Quedan ${formatMinutesUntil(secondEnd, total)}. Solo si la primera cerro en ganancia o esta protegida sin riesgo.`,
-      stop: "Si la primera fue perdida o sigue abierta con riesgo, no abrir segunda.",
-      close: "Cierre maximo si queda abierta: 15:45 NY.",
+      title: "Gestion hasta 10:30",
+      now: "No abrir base nuevas. Vigila si Op1+Op2 cierran positivas antes de 10:30.",
+      first: "Operacion 1: mantener solo si sigue justificandose.",
+      second: "Operacion 2: mantener solo si sigue justificandose.",
+      stop: "Entradas nuevas bloqueadas.",
+      close: `Si favorece y no llego a la meta base, alerta de cierre en ${formatMinutesUntil(favorableClose, total)}.`,
       tone: "warning",
     };
   }
-  if (total < manageOnlyAfter) {
+  if (total < losingHardClose) {
     return {
-      title: "No abrir nuevas",
-      now: "Gestiona lo abierto. No busques entradas nuevas en mediodia lento.",
-      first: "Operacion 1: cerrada o protegida.",
-      second: "Operacion 2: ventana cerrada.",
-      stop: "Desde 11:30 NY no abrir nuevas salvo caso excepcional muy fuerte.",
-      close: "Si no toco stop/meta, empieza a reducir antes de 14:00 NY.",
+      title: "Gestion defensiva",
+      now: "No abrir nuevas. Si favorece, cerrar manualmente; si pierde, vigilar hasta 12:30.",
+      first: "Operacion 1: cerrar si favorece y no alcanzo la meta.",
+      second: "Operacion 2: cerrar si favorece y no alcanzo la meta.",
+      stop: "Entradas nuevas bloqueadas.",
+      close: `Si alguna va perdiendo, cierre manual obligatorio a las 12:30. Quedan ${formatMinutesUntil(losingHardClose, total)}.`,
       tone: "warning",
-    };
-  }
-  if (total < hardClose) {
-    return {
-      title: "Gestion de cierre",
-      now: "No abrir. Solo proteger, cerrar parcial o cerrar total.",
-      first: "Entradas nuevas bloqueadas.",
-      second: "Entradas nuevas bloqueadas.",
-      stop: "Evita quedarte esperando una recuperacion tarde.",
-      close: `Cierre maximo: 15:45 NY. Quedan ${formatMinutesUntil(hardClose, total)}.`,
-      tone: "danger",
     };
   }
   return {
-    title: "Cerrar intradia",
-    now: "Cierra lo abierto. No dejes la operacion viva por esperanza.",
+    title: "Cerrar perdedoras",
+    now: "Si alguna operacion sigue perdiendo, cerrar manualmente sin esperar recuperacion.",
     first: "Operacion 1: finalizada.",
     second: "Operacion 2: finalizada.",
     stop: "No abrir nuevas.",
-    close: "Regla: fuera antes de cierre del mercado.",
+    close: "Regla 12:30 Colombia: cerrar perdedoras manualmente.",
     tone: "danger",
   };
 }
@@ -420,18 +426,40 @@ function nyMarketMinutes() {
   };
 }
 
+function coTimeParts() {
+  const now = new Date();
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+}
+
+function coMarketMinutes() {
+  const parts = coTimeParts();
+  return {
+    weekday: parts.weekday,
+    total: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
 function marketTimingProfile(asset = selectedAssetFromForm()) {
-  const { weekday, total } = nyMarketMinutes();
+  const { weekday, total } = coMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   if (asset?.category === "crypto" && !isWeekday) {
     return {
       quality: "CRIPTO 24/7",
       score: -5,
-      riskCap: 0.35,
-      message: "Fin de semana cripto: puede estar abierto, pero usa riesgo bajo, spread confirmado y no mezcles con ORB de acciones.",
+      riskCap: buildDailyTradePlan().currentTradeRiskPct,
+      message: "Fin de semana cripto: puede estar abierto, pero confirma spread y aplica cierre manual.",
     };
   }
-  if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
+  if (!isWeekday || total < 8 * 60 + 30 || total >= 15 * 60) {
     return {
       quality: "CERRADO",
       score: -10,
@@ -439,43 +467,35 @@ function marketTimingProfile(asset = selectedAssetFromForm()) {
       message: "Mercado cerrado: solo preparar ordenes, no ejecutar.",
     };
   }
-  if (total < 9 * 60 + 35) {
+  if (total < 8 * 60 + 45) {
     return {
       quality: "NO OPERAR",
       score: -35,
       riskCap: 0.25,
-      message: "9:30-9:35 NY: ruido inicial. Espera cierre de la primera vela ORB.",
+      message: "Antes de 8:45 Colombia: preparar, no ejecutar.",
     };
   }
   if (total < 9 * 60 + 45) {
     return {
-      quality: "ALTA VOLATILIDAD",
-      score: -10,
-      riskCap: 0.5,
-      message: "9:35-9:45 NY: ventana ORB valida, pero usa riesgo moderado y stop realista.",
-    };
-  }
-  if (total < 11 * 60 + 30) {
-    return {
       quality: "MEJOR VENTANA",
       score: 15,
-      riskCap: 1,
-      message: "9:45-11:30 NY: mejor equilibrio entre direccion y ruido.",
+      riskCap: buildDailyTradePlan().baseRiskPct,
+      message: "8:45-9:45 Colombia: ventana de entrada para Op1 y Op2.",
     };
   }
-  if (total < 14 * 60) {
+  if (total < 10 * 60 + 30) {
     return {
-      quality: "BAJA CALIDAD",
-      score: -15,
-      riskCap: 0.5,
-      message: "11:30-14:00 NY: suele bajar volumen. Evita entradas si no hay ruptura clara.",
+      quality: "GESTION",
+      score: -5,
+      riskCap: 0,
+      message: "9:45-10:30 Colombia: no abrir base nuevas; habilitar Op3/Op4 solo si Op1 y Op2 ganaron.",
     };
   }
   return {
-    quality: "CIERRE VOLATIL",
+    quality: "SOLO CIERRE",
     score: -10,
-    riskCap: 0.5,
-    message: "14:00-16:00 NY: puede haber reversas fuertes. Reduce riesgo o espera confirmacion.",
+    riskCap: 0,
+    message: "Despues de 10:30 Colombia: solo gestionar cierres manuales; 12:30 cerrar perdedoras.",
   };
 }
 
@@ -488,15 +508,13 @@ function formatMinutesUntil(targetTotal, currentTotal) {
 }
 
 function tradeManagementProfile(result = lastResult) {
-  const { weekday, total } = nyMarketMinutes();
+  const { weekday, total } = coMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   const openProfit = Number(document.getElementById("open-profit")?.value || 0);
-  const target = result?.risk_amount ? result.risk_amount * 2 : 0;
-  const risk = result?.risk_amount || 0;
+  const target = result?.expected_profit || buildDailyTradePlan().currentTradeRiskAmount;
   const profitProgress = target > 0 ? openProfit / target : 0;
-  const lossProgress = risk > 0 ? Math.abs(Math.min(openProfit, 0)) / risk : 0;
 
-  if (!isWeekday || total < 9 * 60 + 30 || total >= 16 * 60) {
+  if (!isWeekday || total < 8 * 60 + 30 || total >= 15 * 60) {
     return {
       phase: "CERRADO",
       action: "Preparar lista",
@@ -506,68 +524,60 @@ function tradeManagementProfile(result = lastResult) {
       shouldNotify: false,
     };
   }
-  if (total < 9 * 60 + 35) {
+  if (total < 8 * 60 + 45) {
     return {
-      phase: "ESPERAR ORB",
+      phase: "ESPERAR VENTANA",
       action: "No operar",
       tone: "danger",
-      deadline: "9:35 NY",
-      message: `Faltan ${formatMinutesUntil(9 * 60 + 35, total)} para cerrar la primera vela. No abras antes.`,
+      deadline: "8:45 Colombia",
+      message: `Faltan ${formatMinutesUntil(8 * 60 + 45, total)} para la ventana de entrada.`,
+      shouldNotify: false,
+    };
+  }
+  if (total < 9 * 60 + 45) {
+    return {
+      phase: "ENTRADA PRINCIPAL",
+      action: "Abrir solo si IA dice OPERABLE",
+      tone: "ok",
+      deadline: "9:45 Colombia",
+      message: "Ventana para Op1 y Op2. Sin stop: debes vigilar la posicion.",
       shouldNotify: false,
     };
   }
   if (total < 10 * 60 + 30) {
     return {
-      phase: "ENTRADA PRINCIPAL",
-      action: "Abrir solo si IA dice OPERABLE",
-      tone: "ok",
-      deadline: "10:30 NY",
-      message: `Ventana principal. Si no activa antes de 10:30 NY, cancela la idea.`,
+      phase: "GESTION TEMPRANA",
+      action: openProfit > 0 && profitProgress < 1 ? "Preparar cierre favorable" : "No abrir nuevas",
+      tone: openProfit > 0 ? "ok" : "warning",
+      deadline: "10:30 Colombia",
+      message: openProfit > 0 && profitProgress < 1
+        ? "Si no llega a la meta antes de 10:30 y sigue favoreciendo, cerrar manualmente."
+        : "No abrir nuevas; espera meta o cierre manual por regla.",
       shouldNotify: false,
     };
   }
-  if (total < 11 * 60 + 30) {
-    const protect = profitProgress >= 0.5;
-    const defend = lossProgress >= 0.5;
+  if (total < 12 * 60 + 30) {
     return {
-      phase: "GESTION TEMPRANA",
-      action: protect ? "Proteger ganancia" : defend ? "Reducir o salir" : "No abrir tarde",
-      tone: protect ? "ok" : defend ? "danger" : "warning",
-      deadline: "11:30 NY",
-      message: protect
-        ? "Ya hay avance relevante: acerca stop o toma parcial, no dejes que vuelva a perdida."
-        : defend
-          ? "La operacion ya consumio media perdida diaria: considera salir y cerrar el dia."
-          : "Si no entro en ritmo, no persigas. Espera nueva senal fuerte o cancela.",
-      shouldNotify: protect || defend,
-    };
-  }
-  if (total < 14 * 60) {
-    return {
-      phase: "MEDIODIA LENTO",
-      action: openProfit > 0 ? "Proteger o tomar parcial" : "Evitar nuevas entradas",
-      tone: openProfit > 0 ? "ok" : "warning",
-      deadline: "14:00 NY",
-      message: "Horario de menor calidad. Gestiona lo abierto; evita abrir una operacion nueva por ansiedad.",
+      phase: "REVISION 10:30",
+      action: openProfit > 0 && profitProgress < 1 ? "Cerrar si favorece" : openProfit < 0 ? "Esperar regla 12:30" : "Gestionar",
+      tone: openProfit > 0 ? "ok" : openProfit < 0 ? "danger" : "warning",
+      deadline: "12:30 Colombia",
+      message: openProfit > 0 && profitProgress < 1
+        ? "Alerta 10:30: favorece, pero no llego a la meta. Cierre manual recomendado."
+        : openProfit < 0
+          ? "Operacion en contra: si sigue perdiendo a las 12:30, cerrar manualmente sin importar la perdida."
+          : "Sin ventaja clara: no abrir nuevas y prepara cierre manual.",
       shouldNotify: openProfit !== 0,
     };
   }
-  if (total < 15 * 60 + 15) {
-    return {
-      phase: "CIERRE VOLATIL",
-      action: openProfit > 0 ? "Asegurar beneficio" : "Cerrar si no mejora",
-      tone: openProfit > 0 ? "ok" : "danger",
-      deadline: "15:15 NY",
-      message: "La tarde puede revertir fuerte. Si no estas cerca de meta, reduce exposicion.",
-      shouldNotify: true,
-    };
-  }
   return {
-    phase: "CIERRE DEL DIA",
-    action: "Cerrar intradia",
+    phase: "CIERRE 12:30",
+    action: openProfit < 0 ? "Cerrar perdedora" : "Cerrar o proteger",
     tone: "danger",
-    deadline: "15:45 NY",
-    message: "No dejes una operacion intradia abierta por esperanza. Cierra o protege estrictamente.",
+    deadline: "Ahora",
+    message: openProfit < 0
+      ? "Regla 12:30: cerrar manualmente la operacion que vaya perdiendo sin importar la perdida."
+      : "Despues de 12:30 no abrir nuevas; cierra manualmente si la operacion ya no justifica seguir.",
     shouldNotify: true,
   };
 }
@@ -586,6 +596,12 @@ function volumeStepForXtb(asset) {
 
 function volumeDecimalsForXtb(asset) {
   return volumeStepForXtb(asset) >= 1 ? 0 : 2;
+}
+
+function targetContractVolume(asset, entry, balance) {
+  const contractTarget = balance || defaultAccountBalance;
+  const rawVolume = contractTarget / (entry * asset.multiplier);
+  return roundVolumeForXtb(rawVolume, asset);
 }
 
 function formatVolumeForXtb(volume, asset) {
@@ -782,13 +798,15 @@ function resetOrderFieldsForAsset(asset) {
   const market = activeMarketPriceFor(asset) || Number(asset.marketPrice || 100);
   const step = priceStepPct(asset);
   const entry = direction === "LONG" ? market * (1 + step) : market * (1 - step);
-  const stop = direction === "LONG" ? market * (1 - step * 1.5) : market * (1 + step * 1.5);
-  const riskDistance = Math.abs(entry - stop);
-  const takeProfit = direction === "LONG" ? entry + riskDistance * 2 : entry - riskDistance * 2;
+  const balance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const volume = targetContractVolume(asset, entry, balance);
+  const targetAmount = buildDailyTradePlan().currentTradeRiskAmount;
+  const targetDistance = volume > 0 ? targetAmount / (volume * asset.multiplier) : 0;
+  const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
 
   document.getElementById("market-price").value = formatPriceForAsset(market, asset);
   document.getElementById("entry-price").value = formatPriceForAsset(entry, asset);
-  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("stop-price").value = "0";
   document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
   lastResetSymbol = asset.symbol;
 }
@@ -826,12 +844,10 @@ function applyVolumeFirstTargets() {
   const direction = document.getElementById("direction").value;
   const volume = roundVolumeForXtb(requestedVolume, asset);
   if (!entry || !volume) return;
-  const riskAmount = balance * getEffectiveRiskPct() / 100;
-  const stopDistance = riskAmount / (volume * asset.multiplier);
-  const targetDistance = stopDistance * 2;
-  const stop = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
+  const targetAmount = buildDailyTradePlan().currentTradeRiskAmount;
+  const targetDistance = targetAmount / (volume * asset.multiplier);
   const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
-  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("stop-price").value = "0";
   document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
 }
 
@@ -847,12 +863,10 @@ function applyAiAggressiveTargets(asset) {
   const volume = opportunity.volume;
   const direction = aiDirectionForAsset(asset);
   if (!entry || !volume) return;
-  const stopDistance = plan.currentTradeRiskAmount / (volume * asset.multiplier);
-  const targetDistance = stopDistance * 2;
-  const stop = direction === "LONG" ? entry - stopDistance : entry + stopDistance;
+  const targetDistance = plan.currentTradeRiskAmount / (volume * asset.multiplier);
   const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
   document.getElementById("requested-volume").value = formatVolumeForXtb(volume, asset);
-  document.getElementById("stop-price").value = formatPriceForAsset(stop, asset);
+  document.getElementById("stop-price").value = "0";
   document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
 }
 
@@ -1067,9 +1081,6 @@ function buildAiConfirmation() {
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
-  const stopDistance = Math.abs(lastResult.entry_price - lastResult.stop_loss);
-  const stopPct = lastResult.entry_price > 0 ? stopDistance / lastResult.entry_price * 100 : 0;
-  const minimumStopPct = volatilityStopPct(asset);
   const marketOpen = isMarketOpenNow();
   const timing = marketTimingProfile();
   const reasons = [];
@@ -1086,13 +1097,8 @@ function buildAiConfirmation() {
     reasons.push(`Movimiento ${numberText(driftPct)}% va contra la direccion seleccionada.`);
   }
 
-  if (lastResult.risk_ok) {
-    score += 10;
-    reasons.push(`Riesgo fijo respetado: perdida estimada ${money(lastResult.expected_loss)} de maximo ${money(lastResult.risk_amount)}.`);
-  } else {
-    score -= 40;
-    reasons.push(`Riesgo excedido: perderias ${money(lastResult.expected_loss)} y el maximo es ${money(lastResult.risk_amount)}.`);
-  }
+  score -= 5;
+  reasons.push(`Modo sin stop: la perdida no esta limitada por MyActions. Meta de la receta: ${money(lastResult.expected_profit)}.`);
 
   if (availableCapital > 0 && marginRequired > availableCapital) {
     score -= 45;
@@ -1102,14 +1108,6 @@ function buildAiConfirmation() {
     reasons.push(`Margen estimado dentro del disponible: ${money(marginRequired)}.`);
   } else {
     reasons.push("Capital disponible no informado: valida margen manualmente en XTB.");
-  }
-
-  if (stopPct < minimumStopPct) {
-    score -= 20;
-    reasons.push(`Stop muy cercano: ${numberText(stopPct)}% vs minimo sugerido ${numberText(minimumStopPct)}%.`);
-  } else {
-    score += 10;
-    reasons.push(`Stop con distancia aceptable: ${numberText(stopPct)}%.`);
   }
 
   if (!marketOpen) {
@@ -1125,7 +1123,7 @@ function buildAiConfirmation() {
   }
 
   const confidence = Math.max(0, Math.min(95, Math.round(score)));
-  const hardBlock = !lastResult.risk_ok || (availableCapital > 0 && marginRequired > availableCapital) || stopPct < minimumStopPct || timing.quality === "NO OPERAR";
+  const hardBlock = (availableCapital > 0 && marginRequired > availableCapital) || timing.quality === "NO OPERAR" || timing.quality === "GESTION" || timing.quality === "SOLO CIERRE";
   const status = hardBlock ? "NO OPERAR" : confidence >= 70 && marketOpen ? "OPERABLE" : "ESPERAR";
   const bias = driftDirection === "WAIT" ? selectedDirection : driftDirection;
   const toneClass = status === "NO OPERAR"
@@ -1159,7 +1157,7 @@ function renderAiConfirmation() {
       <ul class="grid gap-1 text-xs text-zinc-200">
         ${ai.reasons.map((reason) => `<li>- ${reason}</li>`).join("")}
       </ul>
-      <span class="text-xs text-zinc-500">Modelo usado: scoring heuristico local, no machine learning externo. El riesgo sigue dependiendo de saldo real, volumen, stop y multiplicador.</span>
+      <span class="text-xs text-zinc-500">Modelo usado: scoring heuristico local. En modo sin stop, MyActions calcula volumen/meta y alerta; la perdida depende del cierre manual en XTB.</span>
     </div>
   `;
 }
@@ -1210,29 +1208,25 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const driftDirection = directionFromMove(changePct);
   const step = priceStepPct(asset);
   const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
-  const riskAmount = accountBalance * riskPct / 100;
+  const targetAmount = buildDailyTradePlan().currentTradeRiskAmount;
   const nominalBudget = marginBudget / (cfdMarginPct() / 100);
-  const marginVolume = nominalBudget / (entry * asset.multiplier);
-  const minimumStopDistance = entry * volatilityStopPct(asset) / 100;
-  const stopSafeVolume = riskAmount / (minimumStopDistance * asset.multiplier);
-  const volume = roundVolumeForXtb(Math.min(marginVolume, stopSafeVolume), asset);
-  const distance = volume > 0 ? riskAmount / (volume * asset.multiplier) : 0;
+  const contractVolume = targetContractVolume(asset, entry, accountBalance);
+  const marginVolume = roundVolumeForXtb(nominalBudget / (entry * asset.multiplier), asset);
+  const volume = roundVolumeForXtb(Math.min(contractVolume, marginVolume), asset);
+  const targetDistance = volume > 0 ? targetAmount / (volume * asset.multiplier) : 0;
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
-  const targetAmount = riskAmount * 2;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
-  const stopPct = entry > 0 ? distance / entry * 100 : 0;
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
-  const hasSafeStop = stopPct >= volatilityStopPct(asset);
-  const usable = hasVolume && hasMargin && hasSafeStop;
+  const usable = hasVolume && hasMargin;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
   const volumePenalty = hasVolume ? 0 : -80;
   const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
   const marginUseScore = usable ? marginUsePct / 5 : 0;
-  const limitReason = marginVolume < stopSafeVolume ? "limitado por margen" : "limitado por stop/riesgo";
+  const limitReason = volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
   const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty;
   return {
     asset,
@@ -1242,15 +1236,15 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     directionLabel: labelFromDirection(direction),
     usable,
     entry,
-    stopDistance: distance,
+    stopDistance: 0,
     marginRequired,
     targetMovePct,
     targetAmount,
-    stopPct,
-    minimumStopPct: volatilityStopPct(asset),
+    stopPct: 0,
+    minimumStopPct: 0,
     reason: usable
-      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
-      : "Oculto: no cabe por margen, volumen o stop seguro.",
+      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
+      : "Oculto: no cabe por margen o volumen.",
   };
 }
 
@@ -1323,18 +1317,7 @@ async function calculate() {
   renderLeverageCapacity();
   renderDailyResultCard();
   renderPriceGapStatus();
-  try {
-    const response = await fetch("/engine/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    lastResult = await response.json();
-  } catch (error) {
-    console.warn("Usando calculo local", error);
-    lastResult = localCalculate(payload);
-  }
+  lastResult = localCalculate(payload);
   renderWarnings();
   renderTicket();
   renderMath();
@@ -1581,8 +1564,8 @@ function renderSimpleDashboard() {
   const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const tradeSlot = document.getElementById("trade-slot")?.value || "1";
   const direction = document.getElementById("direction")?.value || "--";
-  const activeResultTarget = tradeSlot === "2" ? "operation2-result" : "operation1-result";
-  const activeResult = tradeSlot === "2" ? op2 : op1;
+  const activeResultTarget = tradeSlot === "2" || tradeSlot === "4" ? "operation2-result" : "operation1-result";
+  const activeResult = tradeSlot === "2" || tradeSlot === "4" ? op2 : op1;
   const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
   const resultText = dailyText.match(/Resultado cerrado:[^\.]+/)?.[0]?.replace("Resultado cerrado:", "").trim() || "$0";
   const op1Lost = Number(op1) < 0;
@@ -1603,12 +1586,12 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Dos operaciones maximo. Precio XTB sincronizado, receta, resultado, aprendizaje y cierre del dia en una sola pantalla.</p>
+          <p class="simple-subtitle">Op1 y Op2 buscan $20 cada una. Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de $13.33 cada una.</p>
           <div class="simple-status">
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
             <span class="simple-chip">${sourceLabel}</span>
-            <span class="simple-chip warn">Si Op 1 pierde, no abrir Op 2</span>
+            <span class="simple-chip warn">Sin stop: cierre manual obligatorio</span>
           </div>
         </section>
         <section class="simple-metrics">
@@ -1642,7 +1625,7 @@ function renderSimpleDashboard() {
       </section>
       <section class="simple-ops">
         <article class="simple-operation ${tradeSlot === "1" ? "active" : ""}">
-          <div class="simple-head"><h2>Operacion 1</h2><span class="simple-badge">60% riesgo/meta</span></div>
+          <div class="simple-head"><h2>Operacion 1</h2><span class="simple-badge">Objetivo $20</span></div>
           <div class="simple-numbers">
             <div class="simple-number"><span class="simple-label">Direccion</span><strong>${direction}</strong></div>
             <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "1" ? volume : "--"}</strong></div>
@@ -1654,7 +1637,7 @@ function renderSimpleDashboard() {
           <div class="simple-actions"><button type="button" data-simple-action="slot-1">Ver receta Op 1</button><button type="button" class="secondary" data-simple-focus="simple-op1-result">Registrar Op 1</button></div>
         </article>
         <article class="simple-operation ${tradeSlot === "2" ? "active" : ""} ${op1Lost ? "blocked" : ""}">
-          <div class="simple-head"><h2>Operacion 2</h2><span class="simple-badge">${op1Lost ? "bloqueada por perdida Op 1" : "40% si Op 1 no perdio"}</span></div>
+          <div class="simple-head"><h2>Operacion 2</h2><span class="simple-badge">Objetivo $20</span></div>
           <div class="simple-numbers">
             <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "2" ? direction : "--"}</strong></div>
             <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "2" ? volume : "--"}</strong></div>
@@ -1663,7 +1646,29 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "2" ? takeProfit : "--"}</strong></div>
             <div class="simple-number"><span class="simple-label">Resultado</span><strong>${op2}</strong></div>
           </div>
-          <div class="simple-actions"><button type="button" class="${op1Lost ? "danger" : ""}" data-simple-action="slot-2">${op1Lost ? "No abrir Op 2" : "Ver receta Op 2"}</button><button type="button" class="secondary" data-simple-focus="simple-op2-result">Registrar Op 2</button></div>
+          <div class="simple-actions"><button type="button" data-simple-action="slot-2">Ver receta Op 2</button><button type="button" class="secondary" data-simple-focus="simple-op2-result">Registrar Op 2</button></div>
+        </article>
+        <article class="simple-operation ${tradeSlot === "3" ? "active" : ""}">
+          <div class="simple-head"><h2>Operacion 3</h2><span class="simple-badge">Extension $13.33</span></div>
+          <div class="simple-numbers">
+            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "3" ? direction : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "3" ? volume : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "3" ? entry : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>SIN STOP</strong></div>
+            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "3" ? takeProfit : "--"}</strong></div>
+          </div>
+          <div class="simple-actions"><button type="button" data-simple-action="slot-3">Ver receta Op 3</button></div>
+        </article>
+        <article class="simple-operation ${tradeSlot === "4" ? "active" : ""}">
+          <div class="simple-head"><h2>Operacion 4</h2><span class="simple-badge">Extension $13.33</span></div>
+          <div class="simple-numbers">
+            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "4" ? direction : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "4" ? volume : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "4" ? entry : "--"}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>SIN STOP</strong></div>
+            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "4" ? takeProfit : "--"}</strong></div>
+          </div>
+          <div class="simple-actions"><button type="button" data-simple-action="slot-4">Ver receta Op 4</button></div>
         </article>
       </section>
       <section class="simple-panel">
@@ -1676,7 +1681,7 @@ function renderSimpleDashboard() {
         </div>
         <div class="simple-form-grid">
           <label class="simple-field">
-            <span class="simple-label">Resultado ${tradeSlot === "2" ? "Operacion 2" : "Operacion 1"} USD</span>
+            <span class="simple-label">Resultado Operacion ${tradeSlot} USD</span>
             <input id="simple-active-result" type="number" step="0.01" value="${activeResult}" data-sync-target="${activeResultTarget}" placeholder="-15.70 o 23.90" />
           </label>
           <div class="simple-field">
@@ -1689,7 +1694,7 @@ function renderSimpleDashboard() {
             <button type="button" data-simple-action="save-close">Guardar cierre</button>
           </div>
         </div>
-        <p class="simple-tiny">Internamente se conserva Op 1: ${money(Number(op1 || 0))} y Op 2: ${money(Number(op2 || 0))} para respetar el plan de dos operaciones.</p>
+        <p class="simple-tiny">Base guardada: Op 1 ${money(Number(op1 || 0))} y Op 2 ${money(Number(op2 || 0))}. Op3/Op4 son extension manual si la base fue exitosa antes de 10:30.</p>
       </section>
       <section class="simple-panel">
         <div class="simple-head"><div><h2>Ajustes y aprendizaje</h2><p class="simple-subtitle">Capital, memoria IA, notas, alertas y exportacion sin volver a la pantalla anterior.</p></div><span class="simple-badge">completo</span></div>
@@ -1704,7 +1709,7 @@ function renderSimpleDashboard() {
         </div>
         <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
-      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Copia</strong>Usa entrada, stop, meta y volumen de la operacion activa.</div><div><strong>3. Cierre</strong>Al cerrar, registra ganancia/perdida y guarda cierre del dia.</div><div><strong>4. Regla</strong>Si Op 1 pierde, se termina el dia. No recuperacion, no revancha.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
+      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Base</strong>Op1 y Op2 usan contrato cercano al capital operativo y buscan $20 cada una.</div><div><strong>3. Extension</strong>Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de $13.33 cada una.</div><div><strong>4. Cierre</strong>Sin stop: cierre manual obligatorio segun la regla horaria.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
     </div>
   `;
 }
@@ -1742,13 +1747,15 @@ function bindSimpleDashboard() {
     if (!action) return;
     if (action === "slot-1") setControlValue("trade-slot", "1");
     if (action === "slot-2") setControlValue("trade-slot", "2");
+    if (action === "slot-3") setControlValue("trade-slot", "3");
+    if (action === "slot-4") setControlValue("trade-slot", "4");
     if (action === "save-close") saveDayClose();
     if (action === "apply-capital") applyCapitalMovement();
     if (action === "save-lesson") saveTradeLesson();
     if (action === "export-excel") exportMonthlyReport();
     if (action === "enable-alerts") enableNotifications();
     if (action === "test-alert") testNotifications();
-    if (action === "slot-1" || action === "slot-2") calculate();
+    if (["slot-1", "slot-2", "slot-3", "slot-4"].includes(action)) calculate();
   });
 }
 
@@ -2057,17 +2064,17 @@ function applyCapitalMovement() {
 
 function localCalculate(payload) {
   const asset = findAsset(payload.symbol);
-  const distance = Math.abs(payload.entry_price - payload.stop_price);
-  const normalizedRiskPct = Math.max(minAiRiskPct, Math.min(maxAiRiskPct, Number(payload.risk_pct || defaultRiskPct)));
+  const normalizedRiskPct = Number(payload.risk_pct || buildDailyTradePlan().currentTradeRiskPct);
   const riskAmount = payload.account_balance * normalizedRiskPct / 100;
-  const rawVolume = riskAmount / (distance * asset.multiplier);
+  const rawVolume = targetContractVolume(asset, payload.entry_price, payload.account_balance);
   const capitalVolume = payload.account_balance / (payload.entry_price * asset.multiplier);
-  const autoVolume = roundVolumeForXtb(rawVolume, asset);
+  const autoVolume = rawVolume;
   const volume = payload.requested_volume ? roundVolumeForXtb(payload.requested_volume, asset) : autoVolume;
-  const volumeBasis = payload.requested_volume ? "manual" : "riesgo";
+  const volumeBasis = payload.requested_volume ? "manual" : "contrato";
   const orderType = payload.direction === "LONG" ? "BUY STOP" : "SELL STOP";
+  const targetDistance = volume > 0 ? riskAmount / (volume * asset.multiplier) : 0;
   const takeProfit = payload.take_profit_price ||
-    (payload.direction === "LONG" ? payload.entry_price + distance * 2 : payload.entry_price - distance * 2);
+    (payload.direction === "LONG" ? payload.entry_price + targetDistance : payload.entry_price - targetDistance);
   const positionValue = Number((payload.entry_price * asset.multiplier * volume).toFixed(2));
   const capitalUsagePct = payload.account_balance > 0 ? Number((positionValue / payload.account_balance * 100).toFixed(2)) : 0;
   return {
@@ -2076,7 +2083,7 @@ function localCalculate(payload) {
     order_type: orderType,
     simple_order_explanation: payload.direction === "LONG" ? "Compra si rompe hacia arriba." : "Vende si rompe hacia abajo.",
     entry_price: payload.entry_price,
-    stop_loss: payload.stop_price,
+    stop_loss: 0,
     take_profit: takeProfit,
     account_balance: payload.account_balance,
     risk_pct: normalizedRiskPct,
@@ -2090,11 +2097,11 @@ function localCalculate(payload) {
     volume,
     position_value: positionValue,
     capital_usage_pct: capitalUsagePct,
-    expected_loss: Number((distance * asset.multiplier * volume).toFixed(2)),
+    expected_loss: 0,
     expected_profit: Number((Math.abs(takeProfit - payload.entry_price) * asset.multiplier * volume).toFixed(2)),
-    risk_ok: Number((distance * asset.multiplier * volume).toFixed(2)) <= Number(riskAmount.toFixed(2)),
-    risk_excess: Number(Math.max((distance * asset.multiplier * volume) - riskAmount, 0).toFixed(2)),
-    risk_reward: "1:2",
+    risk_ok: true,
+    risk_excess: 0,
+    risk_reward: "sin stop / objetivo por operacion",
     warnings: buildWarnings(asset, payload.direction),
   };
 }
@@ -2231,8 +2238,8 @@ function notifyIfNeeded() {
     return;
   }
   if (ai.status !== "OPERABLE") return;
-  const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${numberText(lastResult.entry_price)}, stop ${numberText(lastResult.stop_loss)}, meta ${numberText(lastResult.take_profit)}, volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)}. Riesgo ${lastResult.risk_pct}%. ${timing.quality}.`;
-  const key = `ai-operable:${lastResult.asset.symbol}:${lastResult.order_type}:${lastResult.entry_price}:${lastResult.stop_loss}:${lastResult.take_profit}:${lastResult.volume}:${lastResult.risk_pct}`;
+  const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${numberText(lastResult.entry_price)}, SIN STOP, meta ${numberText(lastResult.take_profit)}, volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)}. Objetivo ${lastResult.risk_pct}%. ${timing.quality}.`;
+  const key = `ai-operable:${lastResult.asset.symbol}:${lastResult.order_type}:${lastResult.entry_price}:no-stop:${lastResult.take_profit}:${lastResult.volume}:${lastResult.risk_pct}`;
   if (sessionStorage.getItem("lastDecisionNotification") === key) return;
   sessionStorage.setItem("lastDecisionNotification", key);
   sendBrowserNotification("MyActions IA: momento operable", body);
@@ -2252,7 +2259,7 @@ function renderTicket() {
     ["Operacion", `Operacion ${buildDailyTradePlan().currentSlot}`, false],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
     ["Precio de Entrada", numberText(lastResult.entry_price), true],
-    ["Stop Loss (Escudo)", numberText(lastResult.stop_loss), true],
+    ["Stop Loss", "SIN STOP - cierre manual", false],
     ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
     ["Vencimiento", expiryLabel, true],
     [volumeLabel, formatVolumeForXtb(lastResult.volume, lastResult.asset), true],
@@ -2282,14 +2289,14 @@ function renderMath() {
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Capital operativo</span><strong>${money(lastResult.account_balance)}</strong></div>
-    <div class="summary-row"><span>Riesgo/meta del dia</span><strong>${money(plan.dailyRiskAmount)} / ${money(plan.dailyRiskAmount * 2)}</strong></div>
-    <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: ${money(plan.currentTradeRiskAmount)} / ${money(plan.currentTradeRiskAmount * 2)}</strong></div>
-    <div class="summary-row"><span>Riesgo/meta esta receta</span><strong>${money(lastResult.expected_loss)} / ${money(lastResult.expected_profit)}</strong></div>
+    <div class="summary-row"><span>Meta del dia</span><strong>${money(plan.dailyTargetAmount)} (${money(plan.baseTargetAmount)} = 60%${plan.extensionEnabled ? " + 40%" : ""})</strong></div>
+    <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: objetivo ${money(plan.currentTradeRiskAmount)}</strong></div>
+    <div class="summary-row"><span>Stop/meta esta receta</span><strong>Sin stop / ${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Margen aprox. que bloquea XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Exposicion nominal</span><strong>${money(positionValue)}</strong></div>
-    <div class="summary-row"><span>Resultado si toca stop</span><strong class="text-bear">${money(lastResult.expected_loss)}</strong></div>
+    <div class="summary-row"><span>Perdida maxima</span><strong class="text-bear">No definida sin cierre manual</strong></div>
     <div class="summary-row"><span>Resultado si toca meta</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
-    <div class="summary-row"><span>Estado del riesgo</span><strong class="${lastResult.risk_ok ? "text-bull" : "text-bear"}">${lastResult.risk_ok ? `Cumple ${lastResult.risk_pct}%` : `Se pasa por ${money(lastResult.risk_excess || 0)}`}</strong></div>
+    <div class="summary-row"><span>Estado del plan</span><strong class="text-gold">Sin stop: cierre manual obligatorio</strong></div>
   `;
 }
 
