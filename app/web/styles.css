@@ -177,6 +177,10 @@ body {
   box-shadow: 0 0 0 1px rgb(55 235 157 / 0.18), 0 22px 70px rgb(0 0 0 / 0.3);
 }
 
+.simple-operation.started {
+  border-color: rgb(255 188 72 / 0.55);
+}
+
 .simple-operation.blocked {
   opacity: 0.72;
 }
@@ -320,6 +324,15 @@ body {
 .simple-field {
   display: grid;
   gap: 7px;
+}
+
+.simple-result-entry {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 10px;
 }
 
 .simple-dashboard input,

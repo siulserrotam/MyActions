@@ -62,12 +62,11 @@ const defaultRiskPct = 0.5;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
 const maxPlannedTrades = 4;
-const baseTradeTargetUsd = 20;
+const baseTradeTargetPct = 1;
 const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
-const aggressiveDailyRiskUsd = baseTradeTargetUsd * 2;
 const noStopMode = true;
-const defaultsVersion = "capital-2016-no-stop-20-20-plus40-avax-v2";
+const defaultsVersion = "capital-dynamic-no-stop-1pct-plus40-avax-v3";
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -232,7 +231,8 @@ function extensionTradesAllowed() {
 
 function buildDailyTradePlan() {
   const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
-  const baseTargetAmount = baseTradeTargetUsd * 2;
+  const baseTradeTargetAmount = accountBalance * baseTradeTargetPct / 100;
+  const baseTargetAmount = baseTradeTargetAmount * 2;
   const fullDayTargetAmount = baseTargetAmount / baseProfitShareOfDay;
   const extensionTargetAmount = fullDayTargetAmount * extensionProfitFactor;
   const extensionEnabled = extensionTradesAllowed();
@@ -240,8 +240,8 @@ function buildDailyTradePlan() {
   const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
   const contractTargetValue = accountBalance;
   const tradeTargets = {
-    1: baseTradeTargetUsd,
-    2: baseTradeTargetUsd,
+    1: baseTradeTargetAmount,
+    2: baseTradeTargetAmount,
     3: extensionTargetAmount / 2,
     4: extensionTargetAmount / 2,
   };
@@ -259,6 +259,7 @@ function buildDailyTradePlan() {
     currentTradeRiskAmount,
     currentTradeRiskPct: Number(currentTradeRiskPct.toFixed(4)),
     contractTargetValue,
+    baseTradeTargetAmount,
     baseTargetAmount,
     fullDayTargetAmount,
     extensionTargetAmount,
@@ -301,7 +302,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Base: Op1 y Op2 buscan ${money(baseTradeTargetUsd)} cada una. Esos ${money(plan.baseTargetAmount)} son el 60% del dia; Op3+Op4 reparten el 40% restante.</p>
+    <p class="mt-2 text-xs text-zinc-400">Base: Op1 y Op2 buscan ${money(plan.firstRiskAmount)} cada una. Esos ${money(plan.baseTargetAmount)} son el 60% del dia; Op3+Op4 reparten el 40% restante.</p>
   `;
 }
 
@@ -1333,8 +1334,11 @@ function todayKey() {
 }
 
 function resetDailyResultInputs() {
-  document.getElementById("operation1-result").value = 0;
-  document.getElementById("operation2-result").value = 0;
+  [1, 2, 3, 4].forEach((slot) => {
+    const input = document.getElementById(operationResultId(slot));
+    if (input) input.value = 0;
+  });
+  localStorage.removeItem("decision_engine_started_operations");
   localStorage.setItem("decision_engine_active_trade_date", todayKey());
   renderDailyResultCard();
 }
@@ -1360,10 +1364,13 @@ function currentConfigPayload() {
   const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
   const operation1Result = Number(document.getElementById("operation1-result")?.value || 0);
   const operation2Result = Number(document.getElementById("operation2-result")?.value || 0);
-  const realized = operation1Result + operation2Result;
-  const dailyStatus = realized >= aggressiveDailyRiskUsd * 2
+  const operation3Result = Number(document.getElementById("operation3-result")?.value || 0);
+  const operation4Result = Number(document.getElementById("operation4-result")?.value || 0);
+  const realized = operation1Result + operation2Result + operation3Result + operation4Result;
+  const plan = buildDailyTradePlan();
+  const dailyStatus = realized >= plan.dailyTargetAmount
     ? "target_hit"
-    : realized <= -aggressiveDailyRiskUsd
+    : realized < 0
       ? "risk_hit"
       : realized === 0
         ? "pending"
@@ -1394,6 +1401,8 @@ function currentConfigPayload() {
     open_profit: openProfit,
     operation1_result: operation1Result,
     operation2_result: operation2Result,
+    operation3_result: operation3Result,
+    operation4_result: operation4Result,
     daily_result_status: dailyStatus,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
@@ -1423,9 +1432,11 @@ function dailyCapitalPayload() {
     open_profit: config.open_profit,
     operation1_result: config.operation1_result,
     operation2_result: config.operation2_result,
+    operation3_result: config.operation3_result,
+    operation4_result: config.operation4_result,
     daily_result_status: config.daily_result_status,
     risk_pct: config.risk_pct,
-    notes: "Intradia XTB: capital, receta IA, resultados reales op1/op2 y estado diario.",
+    notes: "Intradia XTB: capital, receta IA, resultados reales op1-op4 y estado diario.",
   };
 }
 
@@ -1448,6 +1459,8 @@ function loadConfigLocal() {
     if (config.open_profit !== undefined) document.getElementById("open-profit").value = config.open_profit;
     if (config.operation1_result !== undefined) document.getElementById("operation1-result").value = config.operation1_result;
     if (config.operation2_result !== undefined) document.getElementById("operation2-result").value = config.operation2_result;
+    if (config.operation3_result !== undefined) document.getElementById("operation3-result").value = config.operation3_result;
+    if (config.operation4_result !== undefined) document.getElementById("operation4-result").value = config.operation4_result;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
     document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
@@ -1512,12 +1525,11 @@ function renderLeverageCapacity() {
 function renderDailyResultCard() {
   const target = document.getElementById("daily-result-card");
   if (!target) return;
-  const op1 = Number(document.getElementById("operation1-result")?.value || 0);
-  const op2 = Number(document.getElementById("operation2-result")?.value || 0);
-  const total = op1 + op2;
-  const status = total >= aggressiveDailyRiskUsd * 2
+  const plan = buildDailyTradePlan();
+  const total = totalOperationResult();
+  const status = total >= plan.dailyTargetAmount
     ? "Meta diaria cumplida: cerrar el dia."
-    : total <= -aggressiveDailyRiskUsd
+    : total < 0
       ? "Perdida diaria tocada: cerrar el dia."
       : total === 0
         ? "Sin resultado cerrado aun."
@@ -1535,10 +1547,44 @@ function setControlValue(id, value) {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function operationResultId(slot) {
+  return `operation${slot}-result`;
+}
+
+function operationResultValue(slot) {
+  return Number(document.getElementById(operationResultId(slot))?.value || 0);
+}
+
+function setOperationResult(slot, value) {
+  const input = document.getElementById(operationResultId(slot));
+  if (input) input.value = value;
+}
+
+function totalOperationResult() {
+  return [1, 2, 3, 4].reduce((total, slot) => total + operationResultValue(slot), 0);
+}
+
+function startedOperations() {
+  try {
+    return JSON.parse(localStorage.getItem("decision_engine_started_operations") || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function startOperation(slot) {
+  const started = startedOperations();
+  started[String(slot)] = {
+    at: new Date().toISOString(),
+    symbol: document.getElementById("symbol")?.value || "",
+  };
+  localStorage.setItem("decision_engine_started_operations", JSON.stringify(started));
+  setControlValue("trade-slot", String(slot));
+  calculate();
+}
+
 function syncOutcomeFromResults() {
-  const op1 = Number(document.getElementById("operation1-result")?.value || 0);
-  const op2 = Number(document.getElementById("operation2-result")?.value || 0);
-  const total = Number((op1 + op2).toFixed(2));
+  const total = Number(totalOperationResult().toFixed(2));
   const outcome = total > 0 ? "win" : total < 0 ? "loss" : "pending";
   const lessonResult = document.getElementById("lesson-result");
   const lessonOutcome = document.getElementById("lesson-outcome");
@@ -1553,24 +1599,33 @@ function renderSimpleDashboard() {
   const symbol = document.getElementById("symbol")?.value || "--";
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || "--";
   const entry = document.getElementById("entry-price")?.value || "--";
-  const stop = document.getElementById("stop-price")?.value || "--";
   const takeProfit = document.getElementById("take-profit-price")?.value || "--";
   const volume = document.getElementById("requested-volume")?.value || "--";
   const capital = document.getElementById("account-balance")?.value || "--";
   const op1 = document.getElementById("operation1-result")?.value || "0";
   const op2 = document.getElementById("operation2-result")?.value || "0";
+  const op3 = document.getElementById("operation3-result")?.value || "0";
+  const op4 = document.getElementById("operation4-result")?.value || "0";
   const movement = document.getElementById("capital-movement")?.value || "";
   const lessonOutcome = document.getElementById("lesson-outcome")?.value || "pending";
   const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const tradeSlot = document.getElementById("trade-slot")?.value || "1";
   const direction = document.getElementById("direction")?.value || "--";
-  const activeResultTarget = tradeSlot === "2" || tradeSlot === "4" ? "operation2-result" : "operation1-result";
-  const activeResult = tradeSlot === "2" || tradeSlot === "4" ? op2 : op1;
+  const plan = buildDailyTradePlan();
+  const opResults = { 1: op1, 2: op2, 3: op3, 4: op4 };
+  const opTargets = {
+    1: plan.firstRiskAmount,
+    2: plan.secondRiskAmount,
+    3: plan.thirdRiskAmount,
+    4: plan.fourthRiskAmount,
+  };
+  const activeResultTarget = operationResultId(tradeSlot);
+  const activeResult = opResults[tradeSlot] || "0";
   const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
   const resultText = dailyText.match(/Resultado cerrado:[^\.]+/)?.[0]?.replace("Resultado cerrado:", "").trim() || "$0";
-  const op1Lost = Number(op1) < 0;
-  const dayTotal = Number(op1 || 0) + Number(op2 || 0);
+  const dayTotal = Number(totalOperationResult().toFixed(2));
   const inferredOutcome = dayTotal > 0 ? "Gano / toco meta" : dayTotal < 0 ? "Perdio / toco stop" : "Pendiente";
+  const started = startedOperations();
   const ai = buildAiConfirmation();
   const topOpportunities = buildTopOpportunities();
   const selectedQuote = liveQuotes[String(symbol).toUpperCase()];
@@ -1580,13 +1635,43 @@ function renderSimpleDashboard() {
     : ai.status === "ESPERAR"
       ? ai.reasons[0] || "Espera confirmacion antes de operar."
       : "CFD operable solo si coincide con XTB, spread y pestana CFD.";
+  const opCard = (slot) => {
+    const isActive = tradeSlot === String(slot);
+    const isStarted = Boolean(started[String(slot)]);
+    const targetAmount = opTargets[slot] || 0;
+    const result = opResults[slot] || "0";
+    const badge = slot <= 2 ? `Objetivo ${money(targetAmount)}` : `Extension ${money(targetAmount)}`;
+    return `
+      <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""}">
+        <div class="simple-head">
+          <h2>Operacion ${slot}</h2>
+          <span class="simple-badge">${isStarted ? "Iniciada" : badge}</span>
+        </div>
+        <div class="simple-numbers">
+          <div class="simple-number"><span class="simple-label">Direccion</span><strong>${isActive ? direction : "--"}</strong></div>
+          <div class="simple-number"><span class="simple-label">Volumen</span><strong>${isActive ? volume : "--"}</strong></div>
+          <div class="simple-number"><span class="simple-label">Entrada</span><strong>${isActive ? entry : "--"}</strong></div>
+          <div class="simple-number"><span class="simple-label">Meta</span><strong>${isActive ? takeProfit : "--"}</strong></div>
+        </div>
+        <label class="simple-result-entry">
+          <span class="simple-label">Resultado USD</span>
+          <input type="number" step="0.01" value="${result}" data-op-result="${slot}" placeholder="0.00" />
+        </label>
+        <div class="simple-actions">
+          <button type="button" data-simple-action="start-op-${slot}">${isStarted ? "Operacion iniciada" : `Iniciar Op ${slot}`}</button>
+          <button type="button" class="secondary" data-simple-action="slot-${slot}">Ver receta</button>
+          <button type="button" class="secondary" data-simple-action="submit-op-${slot}">Enviar resultado</button>
+        </div>
+      </article>
+    `;
+  };
 
   target.innerHTML = `
     <div class="simple-shell">
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Op1 y Op2 buscan $20 cada una. Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de $13.33 cada una.</p>
+          <p class="simple-subtitle">Op1 y Op2 buscan ${money(plan.firstRiskAmount)} cada una. Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de ${money(plan.thirdRiskAmount)} cada una.</p>
           <div class="simple-status">
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
@@ -1624,52 +1709,7 @@ function renderSimpleDashboard() {
         </div>
       </section>
       <section class="simple-ops">
-        <article class="simple-operation ${tradeSlot === "1" ? "active" : ""}">
-          <div class="simple-head"><h2>Operacion 1</h2><span class="simple-badge">Objetivo $20</span></div>
-          <div class="simple-numbers">
-            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${direction}</strong></div>
-            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "1" ? volume : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "1" ? entry : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>${tradeSlot === "1" ? stop : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "1" ? takeProfit : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Resultado</span><strong>${op1}</strong></div>
-          </div>
-          <div class="simple-actions"><button type="button" data-simple-action="slot-1">Ver receta Op 1</button><button type="button" class="secondary" data-simple-focus="simple-op1-result">Registrar Op 1</button></div>
-        </article>
-        <article class="simple-operation ${tradeSlot === "2" ? "active" : ""} ${op1Lost ? "blocked" : ""}">
-          <div class="simple-head"><h2>Operacion 2</h2><span class="simple-badge">Objetivo $20</span></div>
-          <div class="simple-numbers">
-            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "2" ? direction : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "2" ? volume : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "2" ? entry : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>${tradeSlot === "2" ? stop : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "2" ? takeProfit : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Resultado</span><strong>${op2}</strong></div>
-          </div>
-          <div class="simple-actions"><button type="button" data-simple-action="slot-2">Ver receta Op 2</button><button type="button" class="secondary" data-simple-focus="simple-op2-result">Registrar Op 2</button></div>
-        </article>
-        <article class="simple-operation ${tradeSlot === "3" ? "active" : ""}">
-          <div class="simple-head"><h2>Operacion 3</h2><span class="simple-badge">Extension $13.33</span></div>
-          <div class="simple-numbers">
-            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "3" ? direction : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "3" ? volume : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "3" ? entry : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>SIN STOP</strong></div>
-            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "3" ? takeProfit : "--"}</strong></div>
-          </div>
-          <div class="simple-actions"><button type="button" data-simple-action="slot-3">Ver receta Op 3</button></div>
-        </article>
-        <article class="simple-operation ${tradeSlot === "4" ? "active" : ""}">
-          <div class="simple-head"><h2>Operacion 4</h2><span class="simple-badge">Extension $13.33</span></div>
-          <div class="simple-numbers">
-            <div class="simple-number"><span class="simple-label">Direccion</span><strong>${tradeSlot === "4" ? direction : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${tradeSlot === "4" ? volume : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${tradeSlot === "4" ? entry : "--"}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>SIN STOP</strong></div>
-            <div class="simple-number"><span class="simple-label">Meta</span><strong>${tradeSlot === "4" ? takeProfit : "--"}</strong></div>
-          </div>
-          <div class="simple-actions"><button type="button" data-simple-action="slot-4">Ver receta Op 4</button></div>
-        </article>
+        ${[1, 2, 3, 4].map(opCard).join("")}
       </section>
       <section class="simple-panel">
         <div class="simple-head">
@@ -1702,14 +1742,14 @@ function renderSimpleDashboard() {
           <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
           <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
           <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
-          <div class="simple-field"><span class="simple-label">Resultado para aprendizaje</span><span class="simple-value">${money(dayTotal)}</span><span class="simple-tiny">Se toma automaticamente de Op 1 + Op 2.</span></div>
+          <div class="simple-field"><span class="simple-label">Resultado para aprendizaje</span><span class="simple-value">${money(dayTotal)}</span><span class="simple-tiny">Se toma automaticamente de las operaciones enviadas.</span></div>
           <div class="simple-field"><span class="simple-label">Que paso</span><span class="simple-value">${lessonOutcome === "win" ? "Gano" : lessonOutcome === "loss" ? "Perdio" : lessonOutcome === "manual" ? "Cierre manual" : lessonOutcome === "missed" ? "No entre" : inferredOutcome}</span><span class="simple-tiny">Se actualiza solo al guardar cierre.</span></div>
           <div class="simple-field"><span class="simple-label">Aprendizaje</span><button type="button" class="secondary" data-simple-action="save-lesson">Guardar aprendizaje</button></div>
           <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion...">${lessonNotes}</textarea></label>
         </div>
         <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
-      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Base</strong>Op1 y Op2 usan contrato cercano al capital operativo y buscan $20 cada una.</div><div><strong>3. Extension</strong>Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de $13.33 cada una.</div><div><strong>4. Cierre</strong>Sin stop: cierre manual obligatorio segun la regla horaria.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
+      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Base</strong>Op1 y Op2 usan contrato cercano al capital operativo y buscan ${money(plan.firstRiskAmount)} cada una.</div><div><strong>3. Extension</strong>Si ambas ganan antes de 10:30, Op3 y Op4 buscan cerca de ${money(plan.thirdRiskAmount)} cada una.</div><div><strong>4. Cierre</strong>Sin stop: cierre manual obligatorio segun la regla horaria.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
     </div>
   `;
 }
@@ -1718,17 +1758,31 @@ function bindSimpleDashboard() {
   const target = document.getElementById("simple-dashboard");
   if (!target) return;
   target.addEventListener("input", (event) => {
+    const opResult = event.target?.dataset?.opResult;
+    if (opResult) {
+      setOperationResult(opResult, event.target.value);
+      syncOutcomeFromResults();
+      return;
+    }
     const syncTarget = event.target?.dataset?.syncTarget;
     if (syncTarget) {
       setControlValue(syncTarget, event.target.value);
-      if (syncTarget === "operation1-result" || syncTarget === "operation2-result") syncOutcomeFromResults();
+      if (syncTarget.startsWith("operation") && syncTarget.endsWith("-result")) syncOutcomeFromResults();
     }
   });
   target.addEventListener("change", (event) => {
+    const opResult = event.target?.dataset?.opResult;
+    if (opResult) {
+      setOperationResult(opResult, event.target.value);
+      syncOutcomeFromResults();
+      renderDailyResultCard();
+      schedulePostback();
+      return;
+    }
     const syncTarget = event.target?.dataset?.syncTarget;
     if (syncTarget) {
       setControlValue(syncTarget, event.target.value);
-      if (syncTarget === "operation1-result" || syncTarget === "operation2-result") syncOutcomeFromResults();
+      if (syncTarget.startsWith("operation") && syncTarget.endsWith("-result")) syncOutcomeFromResults();
     }
   });
   target.addEventListener("click", (event) => {
@@ -1749,6 +1803,20 @@ function bindSimpleDashboard() {
     if (action === "slot-2") setControlValue("trade-slot", "2");
     if (action === "slot-3") setControlValue("trade-slot", "3");
     if (action === "slot-4") setControlValue("trade-slot", "4");
+    if (action.startsWith("start-op-")) {
+      startOperation(action.replace("start-op-", ""));
+      return;
+    }
+    if (action.startsWith("submit-op-")) {
+      const slot = action.replace("submit-op-", "");
+      const input = target.querySelector(`[data-op-result="${slot}"]`);
+      setOperationResult(slot, input?.value || 0);
+      syncOutcomeFromResults();
+      saveConfigLocal();
+      schedulePostback();
+      renderDailyResultCard();
+      return;
+    }
     if (action === "save-close") saveDayClose();
     if (action === "apply-capital") applyCapitalMovement();
     if (action === "save-lesson") saveTradeLesson();
@@ -2002,17 +2070,14 @@ async function postbackConfig() {
 }
 
 async function saveDayClose() {
-  const op1Input = document.getElementById("operation1-result");
-  const op2Input = document.getElementById("operation2-result");
+  const resultInputs = [1, 2, 3, 4].map((slot) => document.getElementById(operationResultId(slot)));
   const balanceInput = document.getElementById("account-balance");
   const lessonResultInput = document.getElementById("lesson-result");
   const lessonOutcomeInput = document.getElementById("lesson-outcome");
-  const op1 = Number(op1Input?.value || 0);
-  const op2 = Number(op2Input?.value || 0);
-  const total = Number((op1 + op2).toFixed(2));
+  const total = Number(totalOperationResult().toFixed(2));
 
   if (!total) {
-    updatePostbackStatus("Cierre sin resultado: registra Op 1 u Op 2 antes de guardar.", "error");
+    updatePostbackStatus("Cierre sin resultado: registra al menos una operacion antes de guardar.", "error");
     return;
   }
 
@@ -2029,8 +2094,10 @@ async function saveDayClose() {
   if (lastResult?.symbol) {
     await saveTradeLesson();
   }
-  if (op1Input) op1Input.value = 0;
-  if (op2Input) op2Input.value = 0;
+  resultInputs.forEach((input) => {
+    if (input) input.value = 0;
+  });
+  localStorage.removeItem("decision_engine_started_operations");
   saveConfigLocal();
   await postbackConfig();
   updatePostbackStatus(`Cierre guardado: ${money(total)} aplicado al capital. Capital nuevo: ${money(nextBalance)}.`, "ok");
@@ -2301,7 +2368,7 @@ function renderMath() {
 }
 
 function bindInputs() {
-  ["stop-price", "take-profit-price", "expiry-mode", "operation1-result", "operation2-result"].forEach((id) => {
+  ["stop-price", "take-profit-price", "expiry-mode", "operation1-result", "operation2-result", "operation3-result", "operation4-result"].forEach((id) => {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
@@ -2339,7 +2406,7 @@ function bindInputs() {
   });
   document.getElementById("xtb-price").addEventListener("input", applyXtbPriceOverride);
   document.getElementById("xtb-price").addEventListener("change", applyXtbPriceOverride);
-  ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result"].forEach((id) => {
+  ["account-balance", "available-capital", "open-profit", "margin-level-pct", "operation1-result", "operation2-result", "operation3-result", "operation4-result"].forEach((id) => {
     document.getElementById(id).addEventListener("input", schedulePostback);
     document.getElementById(id).addEventListener("change", schedulePostback);
   });

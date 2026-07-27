@@ -21,7 +21,7 @@
         },
       };
     </script>
-    <link rel="stylesheet" href="/dashboard/styles.css?v=simple-xtb-v4" />
+    <link rel="stylesheet" href="/dashboard/styles.css?v=simple-xtb-v5" />
   </head>
   <body class="bg-ink text-zinc-100">
     <section id="simple-dashboard" class="simple-dashboard" aria-label="Plan diario XTB simplificado"></section>
@@ -148,6 +148,8 @@
               Operacion 2 USD
               <input id="operation2-result" class="field" type="number" step="0.01" value="0" />
             </label>
+            <input id="operation3-result" type="hidden" value="0" />
+            <input id="operation4-result" type="hidden" value="0" />
             <div id="daily-result-card" class="mt-2 rounded-xl border border-white/10 p-3 text-xs font-bold text-zinc-400">Resultado: esperando cierre.</div>
             <button id="save-day-close" type="button" class="mt-2 w-full rounded-xl border border-sky-400/30 px-3 py-2 text-xs font-black text-sky-300">Guardar cierre del dia</button>
             <button id="clear-day-results" type="button" class="mt-2 w-full rounded-xl border border-white/10 px-3 py-2 text-xs font-black text-zinc-300">Limpiar resultados para nuevo dia</button>
@@ -240,6 +242,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=simple-xtb-v4"></script>
+    <script src="/dashboard/app.js?v=simple-xtb-v5"></script>
   </body>
 </html>
