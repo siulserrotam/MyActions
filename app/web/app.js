@@ -20,7 +20,7 @@ const assetGroups = {
   commodities: [
     { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100, marketPrice: 3400 },
     { symbol: "OIL", name: "Oil CFD", category: "commodities", multiplier: 1000, marketPrice: 85 },
-    { symbol: "NATGAS", name: "Natural Gas CFD", category: "commodities", multiplier: 10000, marketPrice: 2.9 },
+    { symbol: "NATGAS", name: "Natural Gas CFD", category: "commodities", multiplier: 30000, marketPrice: 2.9 },
   ],
   crypto: [
     { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
@@ -674,6 +674,14 @@ function providerPriceFor(symbol) {
   return Number(liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
 }
 
+function estimatedSpreadCost(asset, volume) {
+  const quote = liveQuotes[asset.symbol] || {};
+  const bid = Number(quote.bid || 0);
+  const ask = Number(quote.ask || 0);
+  if (!bid || !ask || ask <= bid || !volume) return 0;
+  return (ask - bid) * asset.multiplier * volume;
+}
+
 function xtbPriceValue() {
   return Number(document.getElementById("xtb-price")?.value || 0);
 }
@@ -1260,17 +1268,22 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
+  const spreadCost = estimatedSpreadCost(asset, volume);
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
-  const usable = hasVolume && hasMargin;
+  const spreadOk = !spreadCost || spreadCost <= targetAmount;
+  const usable = hasVolume && hasMargin && spreadOk;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
   const volumePenalty = hasVolume ? 0 : -80;
+  const spreadPenalty = spreadOk ? 0 : -120;
   const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
   const marginUseScore = usable ? marginUsePct / 5 : 0;
-  const limitReason = volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
-  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty;
+  const limitReason = !spreadOk
+    ? `spread ${money(spreadCost)} supera meta ${money(targetAmount)}`
+    : volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
+  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty;
   return {
     asset,
     volume,
@@ -1281,13 +1294,14 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     entry,
     stopDistance: 0,
     marginRequired,
+    spreadCost,
     targetMovePct,
     targetAmount,
     stopPct: 0,
     minimumStopPct: 0,
     reason: usable
       ? `${numberText(changePct)}% ${movementLabelForAsset(asset)}. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
-      : "Oculto: no cabe por margen o volumen.",
+      : `Oculto: ${limitReason}.`,
   };
 }
 
@@ -2215,6 +2229,7 @@ function localCalculate(payload) {
   const takeProfit = payload.take_profit_price ||
     (payload.direction === "LONG" ? payload.entry_price + targetDistance : payload.entry_price - targetDistance);
   const positionValue = Number((payload.entry_price * asset.multiplier * volume).toFixed(2));
+  const spreadCost = Number(estimatedSpreadCost(asset, volume).toFixed(2));
   const capitalUsagePct = payload.account_balance > 0 ? Number((positionValue / payload.account_balance * 100).toFixed(2)) : 0;
   return {
     asset,
@@ -2235,6 +2250,7 @@ function localCalculate(payload) {
     volume_basis: volumeBasis,
     volume,
     position_value: positionValue,
+    spread_cost: spreadCost,
     capital_usage_pct: capitalUsagePct,
     expected_loss: 0,
     expected_profit: Number((Math.abs(takeProfit - payload.entry_price) * asset.multiplier * volume).toFixed(2)),
@@ -2279,6 +2295,9 @@ function renderWarnings() {
   }
   if (availableCapital > 0 && marginRequired > availableCapital) {
     warnings.push({ level: "danger", message: `NO OPERAR: margen estimado ${money(marginRequired)} supera tu capital disponible ${money(availableCapital)}. El apalancamiento no evita este bloqueo.` });
+  }
+  if (lastResult?.spread_cost && lastResult.spread_cost > lastResult.expected_profit) {
+    warnings.push({ level: "danger", message: `NO OPERAR: el spread estimado ${money(lastResult.spread_cost)} supera la meta ${money(lastResult.expected_profit)}. El costo de entrada se come la operacion.` });
   }
   if (lastResult?.requested_volume && !lastResult.risk_ok) {
     warnings.push({ level: "danger", message: `NO OPERAR ASI: con volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)} pierdes aprox. ${money(lastResult.expected_loss)}, que supera tu riesgo permitido de ${money(lastResult.risk_amount)} por ${money(lastResult.risk_excess)}.` });
@@ -2432,6 +2451,7 @@ function renderMath() {
     <div class="summary-row"><span>Perfil de esta receta</span><strong>Op ${plan.currentSlot}: neto ${money(plan.currentTradeNetTargetAmount)} / bruto ${money(plan.currentTradeRiskAmount)}</strong></div>
     <div class="summary-row"><span>Stop/meta esta receta</span><strong>Sin stop / ${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Costo XTB estimado</span><strong>${money(plan.estimatedXtbCost)} por operacion</strong></div>
+    <div class="summary-row"><span>Costo spread estimado</span><strong>${money(lastResult.spread_cost || 0)}</strong></div>
     <div class="summary-row"><span>Margen aprox. que bloquea XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Exposicion nominal</span><strong>${money(positionValue)}</strong></div>
     <div class="summary-row"><span>Perdida maxima</span><strong class="text-bear">No definida sin cierre manual</strong></div>
