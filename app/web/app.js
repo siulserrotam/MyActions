@@ -76,6 +76,7 @@ let postbackTimer = null;
 let autoRefreshTimer = null;
 let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
+let xtbTicketValidation = null;
 
 function favoriteSymbols() {
   try {
@@ -680,6 +681,28 @@ function estimatedSpreadCost(asset, volume) {
   const ask = Number(quote.ask || 0);
   if (!bid || !ask || ask <= bid || !volume) return 0;
   return (ask - bid) * asset.multiplier * volume;
+}
+
+function applyXtbTicketValidation(ticket = {}) {
+  const symbol = String(ticket.symbol || document.getElementById("symbol")?.value || "").trim().toUpperCase();
+  const volume = Number(ticket.volume || 0);
+  const contractValue = Number(ticket.contract_value || 0);
+  const spreadUsd = Number(ticket.spread_usd || 0);
+  const price = xtbPriceValue() || providerPriceFor(symbol);
+  const multiplier = contractValue > 0 && price > 0 && volume > 0 ? contractValue / (price * volume) : null;
+  xtbTicketValidation = {
+    ...ticket,
+    symbol,
+    volume,
+    contract_value: contractValue || null,
+    spread_usd: spreadUsd || null,
+    margin_usd: Number(ticket.margin_usd || 0) || null,
+    inferred_multiplier: multiplier ? Number(multiplier.toFixed(4)) : null,
+    updated_at: ticket.updated_at || new Date().toISOString(),
+  };
+  renderWarnings();
+  if (lastResult) renderMath();
+  renderSimpleDashboard();
 }
 
 function xtbPriceValue() {
@@ -2299,6 +2322,23 @@ function renderWarnings() {
   if (lastResult?.spread_cost && lastResult.spread_cost > lastResult.expected_profit) {
     warnings.push({ level: "danger", message: `NO OPERAR: el spread estimado ${money(lastResult.spread_cost)} supera la meta ${money(lastResult.expected_profit)}. El costo de entrada se come la operacion.` });
   }
+  if (lastResult && xtbTicketValidation?.symbol === lastResult.asset.symbol) {
+    const contractValue = Number(xtbTicketValidation.contract_value || 0);
+    const spreadUsd = Number(xtbTicketValidation.spread_usd || 0);
+    const maxContract = lastResult.account_balance * 1.2;
+    if (contractValue > maxContract) {
+      warnings.push({ level: "danger", message: `NO OPERAR: XTB muestra contrato real ${money(contractValue)}, mayor al limite ${money(maxContract)} (capital * 1.2). Baja volumen o cambia activo.` });
+    }
+    if (spreadUsd > lastResult.expected_profit) {
+      warnings.push({ level: "danger", message: `NO OPERAR: XTB muestra spread real ${money(spreadUsd)}, mayor que la meta ${money(lastResult.expected_profit)}.` });
+    }
+    if (xtbTicketValidation.inferred_multiplier) {
+      const diffPct = Math.abs(xtbTicketValidation.inferred_multiplier - lastResult.asset.multiplier) / lastResult.asset.multiplier * 100;
+      if (diffPct > 10) {
+        warnings.push({ level: "danger", message: `NO OPERAR: multiplicador XTB detectado ${numberText(xtbTicketValidation.inferred_multiplier)} no coincide con MyActions ${numberText(lastResult.asset.multiplier)}.` });
+      }
+    }
+  }
   if (lastResult?.requested_volume && !lastResult.risk_ok) {
     warnings.push({ level: "danger", message: `NO OPERAR ASI: con volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)} pierdes aprox. ${money(lastResult.expected_loss)}, que supera tu riesgo permitido de ${money(lastResult.risk_amount)} por ${money(lastResult.risk_excess)}.` });
   }
@@ -2445,6 +2485,7 @@ function renderMath() {
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
   const estimatedMarginPct = cfdMarginPct();
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
+  const ticketMatches = xtbTicketValidation?.symbol === lastResult.asset.symbol;
   document.getElementById("math-summary").innerHTML = `
     <div class="summary-row"><span>Capital operativo</span><strong>${money(lastResult.account_balance)}</strong></div>
     <div class="summary-row"><span>Meta del dia</span><strong>Neta ${money(plan.dailyNetTargetAmount)} / bruta ${money(plan.dailyTargetAmount)}</strong></div>
@@ -2454,6 +2495,9 @@ function renderMath() {
     <div class="summary-row"><span>Costo spread estimado</span><strong>${money(lastResult.spread_cost || 0)}</strong></div>
     <div class="summary-row"><span>Margen aprox. que bloquea XTB</span><strong>${money(estimatedMargin)} (${estimatedMarginPct}%)</strong></div>
     <div class="summary-row"><span>Exposicion nominal</span><strong>${money(positionValue)}</strong></div>
+    <div class="summary-row"><span>Contrato real XTB visible</span><strong>${ticketMatches && xtbTicketValidation.contract_value ? money(xtbTicketValidation.contract_value) : "No visible"}</strong></div>
+    <div class="summary-row"><span>Spread real XTB visible</span><strong>${ticketMatches && xtbTicketValidation.spread_usd ? money(xtbTicketValidation.spread_usd) : "No visible"}</strong></div>
+    <div class="summary-row"><span>Multiplicador detectado</span><strong>${ticketMatches && xtbTicketValidation.inferred_multiplier ? numberText(xtbTicketValidation.inferred_multiplier) : "No visible"}</strong></div>
     <div class="summary-row"><span>Perdida maxima</span><strong class="text-bear">No definida sin cierre manual</strong></div>
     <div class="summary-row"><span>Resultado si toca meta</span><strong class="text-bull">${money(lastResult.expected_profit)}</strong></div>
     <div class="summary-row"><span>Estado del plan</span><strong class="text-gold">Sin stop: cierre manual obligatorio</strong></div>
@@ -2513,6 +2557,7 @@ function bindInputs() {
   document.getElementById("apply-capital-movement").addEventListener("click", applyCapitalMovement);
   document.getElementById("save-trade-lesson").addEventListener("click", saveTradeLesson);
   window.addEventListener("xtb-quotes", (event) => applyXtbQuoteBatch(event.detail?.items || []));
+  window.addEventListener("xtb-ticket", (event) => applyXtbTicketValidation(event.detail || {}));
 }
 
 loadConfigLocal();

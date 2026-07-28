@@ -88,6 +88,27 @@ function pickPrice(quote) {
   return Number((((quote.bid || 0) + (quote.ask || 0)) / 2).toFixed(2));
 }
 
+function extractXtbTicket(text) {
+  const cleaned = normalize(text);
+  const contractMatch = cleaned.match(/Valor\s+del\s+contrato\s*(?:≈|~|=)?\s*([0-9.,\s]+)\s*USD/i);
+  const spreadMatch = cleaned.match(/Spread\s*:\s*([0-9.,\s]+)\s*USD/i);
+  const marginMatch = cleaned.match(/Margen\s*(?:≈|~|=)?\s*([0-9.,\s]+)\s*USD/i);
+  const volumeMatch = cleaned.match(/Volumen\s+(?:Margen\s+)?(?:-|−|\+|\s)*([0-9]+(?:[.,][0-9]+)?)/i);
+  const contractValue = contractMatch ? parseMoney(contractMatch[1]) : null;
+  const spreadUsd = spreadMatch ? parseMoney(spreadMatch[1]) : null;
+  const marginUsd = marginMatch ? parseMoney(marginMatch[1]) : null;
+  const volume = volumeMatch ? parseMoney(volumeMatch[1]) : null;
+
+  if (contractValue === null && spreadUsd === null && marginUsd === null && volume === null) return null;
+  return {
+    contract_value: contractValue,
+    spread_usd: spreadUsd,
+    margin_usd: marginUsd,
+    volume,
+    source: 'xtb-visible-ticket'
+  };
+}
+
 async function setDashboardPrice(page, symbol, value) {
   const formatted = value.toFixed(2);
   await page.evaluate(({ nextSymbol, price }) => {
@@ -140,6 +161,21 @@ async function sendQuoteBatchToDashboard(page, quotes) {
   return { applied, items };
 }
 
+async function sendTicketToDashboard(page, ticket, symbol) {
+  if (!ticket) return false;
+  return page.evaluate(({ ticketPayload, ticketSymbol }) => {
+    if (typeof window.dispatchEvent !== 'function') return false;
+    window.dispatchEvent(new CustomEvent('xtb-ticket', {
+      detail: {
+        ...ticketPayload,
+        symbol: ticketSymbol || '',
+        updated_at: new Date().toISOString()
+      }
+    }));
+    return true;
+  }, { ticketPayload: ticket, ticketSymbol: symbol });
+}
+
 async function syncOnce() {
   const browser = await connectChrome();
   try {
@@ -161,6 +197,7 @@ async function syncOnce() {
     const xtbText = await xtbPage.evaluate(() => document.body?.innerText || '');
     const quotes = extractXtbQuotes(xtbText);
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
+    const ticket = extractXtbTicket(xtbText);
     await dashboardPage.waitForTimeout(500);
     const afterBatchState = await dashboardPage.evaluate(() => ({
       symbol: document.querySelector('#symbol')?.value || '',
@@ -171,6 +208,7 @@ async function syncOnce() {
     const syncSymbol = afterBatchState.symbol?.trim().toUpperCase() || (quotes[selectedSymbol] ? selectedSymbol : activeSymbol);
     const quote = quotes[syncSymbol];
     const price = pickPrice(quote);
+    const ticketApplied = await sendTicketToDashboard(dashboardPage, ticket, syncSymbol);
 
     if (!quoteBatch.items.length && !syncSymbol) {
       throw new Error('No encontre un activo sincronizable. Selecciona o deja visible el activo en XTB.');
@@ -190,6 +228,7 @@ async function syncOnce() {
       visible_xtb_symbols: quoteBatch.items.map((item) => item.symbol),
       side: SIDE,
       xtb: quote || null,
+      xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
       applied_xtb_price: applied,
       dashboard_market_price_before: dashboardState.marketPrice,
       dashboard_xtb_price_before: dashboardState.xtbPrice,
