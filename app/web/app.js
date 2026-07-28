@@ -657,13 +657,15 @@ function updateLiveStatus(text, tone = "muted") {
 function applyLiveQuote(quote) {
   const price = Number(quote.price || 0);
   if (!price) return;
-  liveQuotes[quote.symbol] = quote;
+  liveQuotes[quote.symbol] = { ...(liveQuotes[quote.symbol] || {}), ...quote };
   Object.values(assetGroups).flat().forEach((asset) => {
     if (asset.symbol === quote.symbol) {
       asset.marketPrice = price;
-      asset.liveChangePct = quote.change_pct;
-      asset.liveSource = quote.source;
-      asset.liveUpdatedAt = quote.updated_at;
+      asset.liveChangePct = liveQuotes[quote.symbol].change_pct;
+      asset.liveSource = liveQuotes[quote.symbol].source;
+      asset.signal_source = liveQuotes[quote.symbol].signal_source;
+      asset.liveMarketPhase = liveQuotes[quote.symbol].market_phase;
+      asset.liveUpdatedAt = liveQuotes[quote.symbol].updated_at;
     }
   });
 }
@@ -733,13 +735,24 @@ function applyXtbQuoteBatch(items = []) {
       const symbol = String(item.symbol || "").trim().toUpperCase();
       const price = Number(item.price || 0);
       if (!symbol || !price) return null;
+      const previousProviderQuote = liveQuotes[symbol] || {};
+      const previousSignalSource = previousProviderQuote.signal_source || previousProviderQuote.source || "";
+      const shouldKeepProviderMove = symbol.endsWith(".US") && String(previousSignalSource).startsWith("yfinance");
+      const shouldIgnoreXtbMove = symbol.endsWith(".US") && !shouldKeepProviderMove;
+      const xtbChangePct = Number(item.change_pct || 0);
       return {
         symbol,
         price,
         bid: Number(item.bid || 0) || null,
         ask: Number(item.ask || 0) || null,
-        change_pct: Number(item.change_pct || 0),
+        xtb_change_pct: xtbChangePct,
+        change_pct: shouldKeepProviderMove ? previousProviderQuote.change_pct : shouldIgnoreXtbMove ? 0 : xtbChangePct,
+        premarket_change_pct: previousProviderQuote.premarket_change_pct,
+        regular_change_pct: previousProviderQuote.regular_change_pct,
+        intraday_change_pct: previousProviderQuote.intraday_change_pct,
+        market_phase: previousProviderQuote.market_phase || (shouldIgnoreXtbMove ? "awaiting_yahoo" : "xtb"),
         source: "xtb",
+        signal_source: shouldKeepProviderMove ? previousSignalSource : shouldIgnoreXtbMove ? "awaiting_yahoo_premarket" : "xtb_visible_text",
         updated_at: new Date().toISOString(),
       };
     })
@@ -1109,13 +1122,13 @@ function buildAiConfirmation() {
 
   if (driftDirection === "WAIT") {
     score -= 10;
-    reasons.push("Movimiento intradia sin ventaja clara: no persigas precio.");
+    reasons.push(`Movimiento ${movementLabelForAsset(asset)} sin ventaja clara: no persigas precio.`);
   } else if (driftDirection === selectedDirection) {
     score += 20;
-    reasons.push(`Movimiento ${numberText(driftPct)}% coincide con ${labelFromDirection(selectedDirection)}.`);
+    reasons.push(`Movimiento ${movementLabelForAsset(asset)} ${numberText(driftPct)}% coincide con ${labelFromDirection(selectedDirection)}.`);
   } else {
     score -= 25;
-    reasons.push(`Movimiento ${numberText(driftPct)}% va contra la direccion seleccionada.`);
+    reasons.push(`Movimiento ${movementLabelForAsset(asset)} ${numberText(driftPct)}% va contra la direccion seleccionada.`);
   }
 
   score -= 5;
@@ -1187,6 +1200,15 @@ function directionFromMove(changePct) {
   if (changePct <= -0.35) return "SHORT";
   if (changePct >= 0.35) return "LONG";
   return "WAIT";
+}
+
+function movementLabelForAsset(asset) {
+  if (asset.liveMarketPhase === "pre") return "pre-market Yahoo";
+  if (asset.liveMarketPhase === "post") return "post-market Yahoo";
+  if (asset.liveMarketPhase === "awaiting_yahoo") return "esperando Yahoo";
+  if (asset.liveSource === "xtb" && String(asset.signal_source || "").startsWith("yfinance")) return "Yahoo validado con precio XTB";
+  if (asset.liveSource === "xtb") return "XTB visible";
+  return "intradia";
 }
 
 function labelFromDirection(direction) {
@@ -1264,7 +1286,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     stopPct: 0,
     minimumStopPct: 0,
     reason: usable
-      ? `${numberText(changePct)}% intradia. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
+      ? `${numberText(changePct)}% ${movementLabelForAsset(asset)}. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
       : "Oculto: no cabe por margen o volumen.",
   };
 }
