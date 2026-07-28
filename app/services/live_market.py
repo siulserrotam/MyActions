@@ -43,13 +43,14 @@ class LiveMarketService:
         latest = frame.iloc[-1]
         price = float(latest["close"])
         regular_frame = self._regular_session(frame)
+        market_phase = self._market_phase(latest.name, regular_frame)
+        latest_regular_close, previous_regular_close = self._daily_close_context(yahoo_symbol, price)
         regular_open = float(regular_frame.iloc[0]["open"]) if not regular_frame.empty else float(frame.iloc[0]["open"])
-        previous_close = self._previous_close(yahoo_symbol, price)
-        regular_close = float(regular_frame.iloc[-1]["close"]) if not regular_frame.empty else previous_close
+        previous_close = previous_regular_close
+        regular_close = float(regular_frame.iloc[-1]["close"]) if not regular_frame.empty else latest_regular_close
         premarket_change_pct = ((price - regular_close) / regular_close * 100) if regular_close else 0
         regular_change_pct = ((regular_close - previous_close) / previous_close * 100) if previous_close else 0
         intraday_change_pct = ((price - regular_open) / regular_open * 100) if regular_open else 0
-        market_phase = self._market_phase(latest.name, regular_frame)
         change_pct = premarket_change_pct if market_phase in {"pre", "post"} else intraday_change_pct
         return {
             "symbol": normalized,
@@ -116,16 +117,17 @@ class LiveMarketService:
             raise ValueError(f"Faltan columnas: {', '.join(sorted(missing))}")
         return raw.dropna(subset=list(required))
 
-    def _previous_close(self, yahoo_symbol: str, fallback: float) -> float:
+    def _daily_close_context(self, yahoo_symbol: str, fallback: float) -> tuple[float, float]:
         try:
             daily = self._download(yahoo_symbol, include_prepost=False, period="5d", interval="1d")
             if len(daily) >= 2:
-                return float(daily.iloc[-2]["close"])
+                return float(daily.iloc[-1]["close"]), float(daily.iloc[-2]["close"])
             if len(daily) == 1:
-                return float(daily.iloc[-1]["close"])
+                close = float(daily.iloc[-1]["close"])
+                return close, close
         except Exception:
-            return fallback
-        return fallback
+            return fallback, fallback
+        return fallback, fallback
 
     @staticmethod
     def _regular_session(frame):
