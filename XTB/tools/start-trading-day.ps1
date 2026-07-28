@@ -24,15 +24,8 @@ try {
     "`$env:XTB_SYNC_INTERVAL_MS='5000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
   ) -WindowStyle Hidden
 
-  Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-    '-ExecutionPolicy', 'Bypass',
-    '-NoProfile',
-    '-Command',
-    "`$env:DASHBOARD_CLEAN_INTERVAL_MS='10000'; Set-Location '$escapedRoot'; npm.cmd run clean:watch"
-  ) -WindowStyle Hidden
-
   Write-Host ''
-  Write-Host 'Dia iniciado: sync XTB cada 5 segundos + Modo Simple cada 10 segundos.'
+  Write-Host 'Dia iniciado: sync XTB cada 5 segundos. El dashboard usa la vista simple nativa de produccion.'
 } finally {
   Pop-Location
 }
