@@ -378,7 +378,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Itinerario: Op1 9:00 sin stop; Op2 9:30 stop 0.5%; Op3 10:00 stop 1%; Op4 10:30 stop 1%. Todas buscan neto 1% del contrato/capital.</p>
+    <p class="mt-2 text-xs text-zinc-400">Itinerario: Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%).</p>
   `;
 }
 
@@ -1917,7 +1917,7 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Itinerario: Op1 9:00 sin stop, Op2 9:30 stop 0.5%, Op3 10:00 stop 1%, Op4 10:30 stop 1%. Cada una busca neto 1% del contrato/capital.</p>
+          <p class="simple-subtitle">Itinerario: Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%). Stops y cierres siguen el horario definido.</p>
           <div class="simple-status">
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
