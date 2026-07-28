@@ -44,7 +44,7 @@ class LiveMarketService:
         price = float(latest["close"])
         regular_frame = self._regular_session(frame)
         market_phase = self._market_phase(latest.name, regular_frame)
-        latest_regular_close, previous_regular_close = self._daily_close_context(yahoo_symbol, price)
+        latest_regular_close, previous_regular_close = self._chart_close_context(yahoo_symbol) or self._daily_close_context(yahoo_symbol, price)
         regular_open = float(regular_frame.iloc[0]["open"]) if not regular_frame.empty else float(frame.iloc[0]["open"])
         previous_close = previous_regular_close
         regular_close = float(regular_frame.iloc[-1]["close"]) if not regular_frame.empty else latest_regular_close
@@ -128,6 +128,28 @@ class LiveMarketService:
         except Exception:
             return fallback, fallback
         return fallback, fallback
+
+    @staticmethod
+    def _chart_close_context(yahoo_symbol: str) -> tuple[float, float] | None:
+        try:
+            import httpx
+
+            response = httpx.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
+                params={"interval": "1m", "range": "1d", "includePrePost": "true"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()["chart"]["result"][0]
+            meta = result.get("meta", {})
+            regular_close = float(meta.get("regularMarketPrice") or 0)
+            previous_close = float(meta.get("chartPreviousClose") or 0)
+            if regular_close > 0 and previous_close > 0:
+                return regular_close, previous_close
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def _regular_session(frame):
