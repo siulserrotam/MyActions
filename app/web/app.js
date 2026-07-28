@@ -63,6 +63,7 @@ const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
 const maxPlannedTrades = 4;
 const baseTradeTargetPct = 1;
+const baseTradeSharePct = 30;
 const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
@@ -77,6 +78,8 @@ let autoRefreshTimer = null;
 let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
 let xtbTicketValidation = null;
+let manualOpportunityLockUntil = 0;
+const manualOpportunityLockMs = 3 * 60 * 1000;
 
 function favoriteSymbols() {
   try {
@@ -267,7 +270,7 @@ function operationStrategy(slot) {
       closeTime: "14:30",
       daySharePct: 20,
       stopPct: 1,
-      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Receta inversa: si va a la baja, meta abajo y stop arriba; si va al alza, meta arriba y stop abajo.",
+      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Receta inversa: usa la direccion contraria a la senal base; si la base es LONG, Op4 sera SHORT, y si la base es SHORT, Op4 sera LONG.",
     },
   };
   return strategies[Number(slot)] || strategies[1];
@@ -277,20 +280,20 @@ function buildDailyTradePlan() {
   const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
   const estimatedXtbCost = xtbCostPerOperation();
   const baseTradeTargetAmount = accountBalance * baseTradeTargetPct / 100;
-  const baseTargetAmount = baseTradeTargetAmount * maxPlannedTrades;
-  const fullDayTargetAmount = baseTargetAmount;
-  const extensionTargetAmount = baseTradeTargetAmount * 2;
   const extensionEnabled = extensionTradesAllowed();
   const plannedTrades = maxPlannedTrades;
   const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
   const contractTargetValue = accountBalance;
   const currentStrategy = operationStrategy(currentSlot);
-  const tradeTargets = {
-    1: baseTradeTargetAmount,
-    2: baseTradeTargetAmount,
-    3: baseTradeTargetAmount,
-    4: baseTradeTargetAmount,
-  };
+  const tradeTargets = Object.fromEntries(
+    [1, 2, 3, 4].map((slot) => {
+      const strategy = operationStrategy(slot);
+      return [slot, baseTradeTargetAmount * strategy.daySharePct / baseTradeSharePct];
+    })
+  );
+  const baseTargetAmount = Object.values(tradeTargets).reduce((total, amount) => total + amount, 0);
+  const fullDayTargetAmount = baseTargetAmount;
+  const extensionTargetAmount = tradeTargets[3] + tradeTargets[4];
   const stopTargets = {
     1: 0,
     2: accountBalance * operationStrategy(2).stopPct / 100,
@@ -348,7 +351,7 @@ function renderAiDecisionSummary() {
   if (!target) return;
   const asset = selectedAssetFromForm();
   const plan = buildDailyTradePlan();
-  const direction = aiDirectionForAsset(asset);
+  const direction = effectiveDirectionForSlot(asset, plan.currentSlot);
   const driftDirection = directionFromMove(Number(asset.liveChangePct ?? 0));
   const action = driftDirection === "WAIT" ? "ESPERAR CONFIRMACION" : labelFromDirection(direction);
   const volumeText = lastResult ? formatVolumeForXtb(lastResult.volume, lastResult.asset) : "Calculando";
@@ -819,7 +822,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
       }
       if (liveQuotes[selectedAsset.symbol]) {
         selectedAsset = findAsset(selectedAsset.symbol);
-        resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
+        resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       }
     }
     updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
@@ -863,12 +866,22 @@ function applyXtbQuoteBatch(items = []) {
 
   validQuotes.forEach(applyLiveQuote);
   const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
-  if (best) {
+  if (best && !isManualOpportunityLocked()) {
     applySelectedOpportunity(best, "xtb");
     updateLiveStatus(`XTB: mejor CFD visible ${best.asset.symbol} (${best.directionLabel}, score ${Math.round(best.score)}).`, "ok");
+  } else if (best) {
+    updateLiveStatus(`XTB: precios actualizados. Mantengo tu seleccion manual ${selectedAsset.symbol}.`, "ok");
   } else if (validQuotes.length) {
     updateLiveStatus("XTB: precios recibidos, pero ningun CFD visible cumple volumen/margen/stop.", "error");
   }
+}
+
+function isManualOpportunityLocked() {
+  return Date.now() < manualOpportunityLockUntil;
+}
+
+function lockManualOpportunitySelection() {
+  manualOpportunityLockUntil = Date.now() + manualOpportunityLockMs;
 }
 
 function pickBestCfdOpportunity(symbols = []) {
@@ -881,6 +894,8 @@ function pickBestCfdOpportunity(symbols = []) {
 }
 
 function applySelectedOpportunity(opportunity, source = "auto") {
+  if ((source === "live" || source === "xtb") && isManualOpportunityLocked()) return;
+  if (source === "manual") lockManualOpportunitySelection();
   selectedAsset = findAsset(opportunity.asset.symbol);
   const symbolInput = document.getElementById("symbol");
   const marketInput = document.getElementById("market-price");
@@ -889,7 +904,7 @@ function applySelectedOpportunity(opportunity, source = "auto") {
   if (symbolInput) symbolInput.value = selectedAsset.symbol;
   if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
   if (xtbInput && quotePrice) xtbInput.value = quotePrice.toFixed(2);
-  resetOrderFieldsForAssetDirection(selectedAsset, opportunity.direction || aiDirectionForAsset(selectedAsset));
+  resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
   applyAiAggressiveTargets(selectedAsset);
   renderAssets();
   renderTopOpportunities();
@@ -970,7 +985,7 @@ function applyXtbPriceOverride() {
   }
   document.getElementById("market-price").value = formatPriceForAsset(xtbPrice, asset);
   selectedAsset = { ...findAsset(asset.symbol), marketPrice: xtbPrice };
-  resetOrderFieldsForAssetDirection(selectedAsset, aiDirectionForAsset(selectedAsset));
+  resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
   renderPriceGapStatus();
   calculate();
 }
@@ -1004,7 +1019,7 @@ function applyAiAggressiveTargets(asset) {
   const opportunity = buildAssetOpportunity(asset, plan.currentTradeRiskPct);
   const entry = Number(document.getElementById("entry-price").value || opportunity.entry || 0);
   const volume = opportunity.volume;
-  const direction = aiDirectionForAsset(asset);
+  const direction = effectiveDirectionForSlot(asset);
   if (!entry || !volume) return;
   const targetDistance = plan.currentTradeRiskAmount / (volume * asset.multiplier);
   const stopDistance = plan.currentTradeStopAmount > 0 ? plan.currentTradeStopAmount / (volume * asset.multiplier) : 0;
@@ -1328,6 +1343,15 @@ function labelFromDirection(direction) {
   return "ESPERAR";
 }
 
+function inverseDirection(direction) {
+  return direction === "LONG" ? "SHORT" : "LONG";
+}
+
+function effectiveDirectionForSlot(asset, slot = document.getElementById("trade-slot")?.value || "1") {
+  const baseDirection = aiDirectionForAsset(asset);
+  return String(slot) === "4" ? inverseDirection(baseDirection) : baseDirection;
+}
+
 function resetOrderFieldsForAssetDirection(asset, direction) {
   const directionInput = document.getElementById("direction");
   directionInput.value = direction === "SHORT" ? "SHORT" : "LONG";
@@ -1444,7 +1468,7 @@ function renderTopOpportunities() {
       document.getElementById("symbol").value = selectedAsset.symbol;
       document.getElementById("xtb-price").value = "";
       const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
-      resetOrderFieldsForAssetDirection(selectedAsset, picked?.direction || aiDirectionForAsset(selectedAsset));
+      resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       applyAiAggressiveTargets(selectedAsset);
       renderAssets();
       calculate();
@@ -1457,7 +1481,7 @@ async function calculate() {
   selectedAsset = selectedAssetFromForm();
   document.getElementById("available-capital").value = document.getElementById("account-balance").value || defaultAccountBalance;
   document.getElementById("risk-pct").value = "dynamic";
-  document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
+  document.getElementById("direction").value = effectiveDirectionForSlot(selectedAsset);
   document.getElementById("requested-volume").value = "";
   applyAiAggressiveTargets(selectedAsset);
   const riskPct = getEffectiveRiskPct();
@@ -1626,7 +1650,7 @@ function loadConfigLocal() {
     if (config.xtb_estimated_cost_per_operation !== undefined) document.getElementById("xtb-cost-per-operation").value = config.xtb_estimated_cost_per_operation;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
-    document.getElementById("direction").value = aiDirectionForAsset(selectedAsset);
+    document.getElementById("direction").value = effectiveDirectionForSlot(selectedAsset);
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
     if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
