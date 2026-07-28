@@ -21,7 +21,7 @@ try {
     '-ExecutionPolicy', 'Bypass',
     '-NoProfile',
     '-Command',
-    "`$env:XTB_SYNC_INTERVAL_MS='10000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
+    "`$env:XTB_SYNC_INTERVAL_MS='5000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
   ) -WindowStyle Hidden
 
   Start-Process -FilePath 'powershell.exe' -ArgumentList @(
@@ -32,7 +32,7 @@ try {
   ) -WindowStyle Hidden
 
   Write-Host ''
-  Write-Host 'Dia iniciado: sync XTB + Modo Simple quedaron corriendo cada 10 segundos.'
+  Write-Host 'Dia iniciado: sync XTB cada 5 segundos + Modo Simple cada 10 segundos.'
 } finally {
   Pop-Location
 }

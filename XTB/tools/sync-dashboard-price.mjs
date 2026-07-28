@@ -1,7 +1,7 @@
 import { connectChrome, pickBrowserContext, classifyPage, normalize, parseMoney } from './chrome-debug.mjs';
 
 const SIDE = (process.env.XTB_SYNC_SIDE || 'mid').toLowerCase();
-const INTERVAL_MS = Number.parseInt(process.env.XTB_SYNC_INTERVAL_MS || '10000', 10);
+const INTERVAL_MS = Number.parseInt(process.env.XTB_SYNC_INTERVAL_MS || '5000', 10);
 const RUN_ONCE = process.argv.includes('--once');
 
 function quotePrice(value) {
