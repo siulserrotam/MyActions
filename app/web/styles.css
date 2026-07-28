@@ -321,6 +321,11 @@ body {
   color: #23080b;
 }
 
+.simple-dashboard button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .simple-field {
   display: grid;
   gap: 7px;

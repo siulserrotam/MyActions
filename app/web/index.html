@@ -21,7 +21,7 @@
         },
       };
     </script>
-    <link rel="stylesheet" href="/dashboard/styles.css?v=simple-xtb-v8" />
+    <link rel="stylesheet" href="/dashboard/styles.css?v=simple-xtb-v9" />
   </head>
   <body class="bg-ink text-zinc-100">
     <section id="simple-dashboard" class="simple-dashboard" aria-label="Plan diario XTB simplificado"></section>
@@ -61,7 +61,7 @@
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
               Capital operativo XTB USD
               <input id="account-balance" class="field" type="number" step="0.01" value="2016" />
-              <span class="text-xs font-normal text-zinc-500">Op1 y Op2 usan contratos cercanos al capital operativo y buscan $20 cada una. Si ambas ganan antes de 10:30, Op3+Op4 reparten el 40% restante del dia.</span>
+              <span class="text-xs font-normal text-zinc-500">Op1 9:00 sin stop; Op2 9:30 stop 0.5%; Op3 10:00 stop 1%; Op4 10:30 stop 1%. Todas buscan 1% del contrato/capital.</span>
             </label>
             <div class="rounded-xl border border-white/10 bg-ink p-3">
               <p class="text-xs font-bold uppercase text-zinc-500">Movimiento de capital</p>
@@ -73,10 +73,10 @@
               <select id="trade-slot" class="field">
                 <option value="1">Operacion 1: base</option>
                 <option value="2">Operacion 2: base</option>
-                <option value="3">Operacion 3: extension 40%</option>
-                <option value="4">Operacion 4: extension 40%</option>
+                <option value="3">Operacion 3: 10:00 stop 1%</option>
+                <option value="4">Operacion 4: 10:30 stop 1%</option>
               </select>
-              <span class="text-xs font-normal text-zinc-500">Op3 y Op4 solo aplican si Op1 y Op2 ya fueron positivas antes de 10:30 Colombia.</span>
+              <span class="text-xs font-normal text-zinc-500">Op3 requiere Op1 ganadora. Op4 requiere Op1 y Op2 ganadoras.</span>
             </label>
             <input id="available-capital" type="hidden" value="2016" />
             <input id="open-profit" type="hidden" value="0" />
@@ -243,6 +243,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=simple-xtb-v8"></script>
+    <script src="/dashboard/app.js?v=simple-xtb-v9"></script>
   </body>
 </html>
