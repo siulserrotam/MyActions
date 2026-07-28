@@ -267,7 +267,7 @@ function operationStrategy(slot) {
       closeTime: "14:30",
       daySharePct: 20,
       stopPct: 1,
-      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente.",
+      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Receta inversa: si va a la baja, meta abajo y stop arriba; si va al alza, meta arriba y stop abajo.",
     },
   };
   return strategies[Number(slot)] || strategies[1];
@@ -1768,17 +1768,15 @@ function operationGate(slot) {
 
 function startOperation(slot) {
   const gate = operationGate(slot);
-  if (!gate.allowed) {
-    updatePostbackStatus(`No se inicio Op ${slot}: ${gate.reason}`, "error");
-    renderSimpleDashboard();
-    return;
-  }
   const started = startedOperations();
   started[String(slot)] = {
     at: new Date().toISOString(),
     symbol: document.getElementById("symbol")?.value || "",
+    gate_allowed: gate.allowed,
+    gate_reason: gate.reason,
   };
   localStorage.setItem("decision_engine_started_operations", JSON.stringify(started));
+  updatePostbackStatus(`Op ${slot} marcada como iniciada. Condicion: ${gate.reason}`, gate.allowed ? "ok" : "neutral");
   setControlValue("trade-slot", String(slot));
   calculate();
 }
@@ -1863,7 +1861,7 @@ function renderSimpleDashboard() {
     const badge = `${strategy.daySharePct}% dia / Neto ${money(netTargetAmount)}`;
     const stopLabel = strategy.stopPct ? `${strategy.stopPct}% (${isActive && lastResult?.stop_loss ? numberText(lastResult.stop_loss) : "calcular"})` : "Sin stop";
     return `
-      <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""} ${!gate.allowed && !isStarted ? "blocked" : ""}">
+      <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""}">
         <div class="simple-head">
           <h2>Operacion ${slot}</h2>
           <span class="simple-badge">${isStarted ? "Iniciada" : badge}</span>
@@ -1881,7 +1879,7 @@ function renderSimpleDashboard() {
           <input type="number" step="0.01" value="${result}" data-op-result="${slot}" placeholder="0.00" />
         </label>
         <div class="simple-actions">
-          <button type="button" data-simple-action="start-op-${slot}" ${!gate.allowed && !isStarted ? "disabled" : ""}>${isStarted ? "Operacion iniciada" : `Iniciar Op ${slot}`}</button>
+          <button type="button" data-simple-action="start-op-${slot}">${isStarted ? "Operacion iniciada" : `Iniciar Op ${slot}`}</button>
           <button type="button" class="secondary" data-simple-action="slot-${slot}">Ver receta</button>
           <button type="button" class="secondary" data-simple-action="submit-op-${slot}">Enviar resultado</button>
           ${isStarted ? `<button type="button" class="danger" data-simple-action="cancel-op-${slot}">Cancelar inicio</button>` : ""}
