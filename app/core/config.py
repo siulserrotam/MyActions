@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     whatsapp_to_phone: str = ""
     admin_username: str = "admin"
     admin_password: str = "Admin123*"
+    dashboard_users: str = ""
     dashboard_session_cookie: str = "myactions_session"
 
     model_config = SettingsConfigDict(

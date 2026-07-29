@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.auth import create_dashboard_session, sanitize_next_path, verify_dashboard_credentials
+from app.core.auth import create_dashboard_session, current_dashboard_user, sanitize_next_path, verify_dashboard_credentials
 from app.core.security import require_api_key
 from app.db.session import get_session, normalized_database_url
 from app.schemas.responses import (
@@ -123,18 +123,28 @@ def login(
     password: str = Form(...),
     next: str = Form("/dashboard/"),
 ) -> RedirectResponse:
-    if not verify_dashboard_credentials(username, password):
+    authenticated_user = verify_dashboard_credentials(username, password)
+    if not authenticated_user:
         return RedirectResponse(url="/login?error=1", status_code=303)
     response = RedirectResponse(url=sanitize_next_path(next), status_code=303)
     response.set_cookie(
         settings.dashboard_session_cookie,
-        create_dashboard_session(),
+        create_dashboard_session(authenticated_user),
         httponly=True,
         secure=settings.app_env == "production",
         samesite="lax",
         max_age=60 * 60 * 12,
     )
     return response
+
+
+@router.get("/auth/me")
+def auth_me(request: Request) -> dict[str, object]:
+    username = current_dashboard_user(request)
+    return {
+        "authenticated": bool(username),
+        "username": username,
+    }
 
 
 @router.get("/logout")
@@ -285,10 +295,11 @@ def orb_session(ticker: str = Query("NVDA")) -> dict[str, Any]:
 def orb_dashboard(
     ticker: str = Query("NVDA"),
     account_capital: float | None = Query(default=None, gt=0),
+    request: Request = None,
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        capital = CapitalService().latest(session)
+        capital = CapitalService().latest(session, user_id=current_dashboard_user(request) or "admin")
     except Exception:
         capital = None
     if account_capital:
@@ -378,14 +389,17 @@ def engine_calculate(payload: EngineCalculateRequest) -> dict[str, object]:
 
 @router.get("/capital/daily")
 def daily_capital(
+    request: Request,
     limit: int = Query(30, ge=1, le=120),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     service = CapitalService()
+    user_id = current_dashboard_user(request) or "admin"
     try:
         return {
-            "latest": service.latest(session),
-            "history": service.history(session, limit=limit),
+            "user_id": user_id,
+            "latest": service.latest(session, user_id=user_id),
+            "history": service.history(session, limit=limit, user_id=user_id),
         }
     except Exception as exc:
         raise HTTPException(
@@ -395,16 +409,18 @@ def daily_capital(
 
 
 @router.get("/capital/health")
-def capital_health(session: Session = Depends(get_session)) -> dict[str, object]:
+def capital_health(request: Request, session: Session = Depends(get_session)) -> dict[str, object]:
     database_url = normalized_database_url
     masked_database = database_url
     if "@" in masked_database:
         masked_database = f"{masked_database.split('://', 1)[0]}://***@{masked_database.rsplit('@', 1)[-1]}"
     try:
         session.execute(text("SELECT 1"))
-        latest = CapitalService().latest(session)
+        user_id = current_dashboard_user(request) or "admin"
+        latest = CapitalService().latest(session, user_id=user_id)
         return {
             "status": "ok",
+            "user_id": user_id,
             "database": masked_database,
             "is_sqlite": database_url.startswith("sqlite"),
             "looks_like_placeholder": "example.com" in database_url,
@@ -421,11 +437,13 @@ def capital_health(session: Session = Depends(get_session)) -> dict[str, object]
 @router.post("/capital/daily")
 def save_daily_capital(
     payload: DailyCapitalRequest,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     try:
         return CapitalService().save(
             session=session,
+            user_id=current_dashboard_user(request) or "admin",
             trade_date=payload.trade_date,
             balance=payload.balance,
             target_value=payload.target_value,

@@ -15,27 +15,55 @@ class CapitalService:
             except Exception:
                 session.rollback()
         try:
+            session.execute(text("ALTER TABLE daily_capital ADD COLUMN user_id VARCHAR(64) DEFAULT 'admin'"))
+            session.commit()
+        except Exception:
+            session.rollback()
+        try:
+            session.execute(text("UPDATE daily_capital SET user_id = 'admin' WHERE user_id IS NULL OR user_id = ''"))
+            session.commit()
+        except Exception:
+            session.rollback()
+        try:
+            session.execute(text("ALTER TABLE daily_capital DROP CONSTRAINT IF EXISTS daily_capital_trade_date_key"))
+            session.commit()
+        except Exception:
+            session.rollback()
+        try:
+            session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_daily_capital_user_date ON daily_capital (user_id, trade_date)"))
+            session.commit()
+        except Exception:
+            session.rollback()
+        try:
             session.execute(text("ALTER TABLE daily_capital ADD COLUMN daily_result_status VARCHAR(32) DEFAULT 'pending'"))
             session.commit()
         except Exception:
             session.rollback()
 
-    def latest(self, session: Session) -> dict[str, object] | None:
+    def latest(self, session: Session, user_id: str = "admin") -> dict[str, object] | None:
         self.ensure_schema(session)
         record = session.scalars(
-            select(DailyCapital).order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc()).limit(1)
+            select(DailyCapital)
+            .where(DailyCapital.user_id == user_id)
+            .order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc())
+            .limit(1)
         ).first()
         return self._serialize(record) if record else None
 
-    def by_date(self, session: Session, trade_date: date) -> dict[str, object] | None:
+    def by_date(self, session: Session, trade_date: date, user_id: str = "admin") -> dict[str, object] | None:
         self.ensure_schema(session)
-        record = session.scalars(select(DailyCapital).where(DailyCapital.trade_date == trade_date)).first()
+        record = session.scalars(
+            select(DailyCapital).where(DailyCapital.trade_date == trade_date, DailyCapital.user_id == user_id)
+        ).first()
         return self._serialize(record) if record else None
 
-    def history(self, session: Session, limit: int = 30) -> list[dict[str, object]]:
+    def history(self, session: Session, limit: int = 30, user_id: str = "admin") -> list[dict[str, object]]:
         self.ensure_schema(session)
         records = session.scalars(
-            select(DailyCapital).order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc()).limit(limit)
+            select(DailyCapital)
+            .where(DailyCapital.user_id == user_id)
+            .order_by(DailyCapital.trade_date.desc(), DailyCapital.id.desc())
+            .limit(limit)
         ).all()
         return [self._serialize(record) for record in records]
 
@@ -60,13 +88,17 @@ class CapitalService:
         daily_result_status: str = "pending",
         risk_pct: float = 1,
         notes: str = "",
+        user_id: str = "admin",
     ) -> dict[str, object]:
         self.ensure_schema(session)
         normalized_type = target_type if target_type in {"money", "percent"} else "money"
         now = datetime.now(UTC).replace(tzinfo=None)
-        record = session.scalars(select(DailyCapital).where(DailyCapital.trade_date == trade_date)).first()
+        record = session.scalars(
+            select(DailyCapital).where(DailyCapital.trade_date == trade_date, DailyCapital.user_id == user_id)
+        ).first()
         if record is None:
             record = DailyCapital(
+                user_id=user_id,
                 trade_date=trade_date,
                 balance=balance,
                 target_value=target_value,
@@ -123,6 +155,7 @@ class CapitalService:
         max_loss = target_profit / 2
         return {
             "id": record.id,
+            "user_id": record.user_id,
             "trade_date": record.trade_date.isoformat(),
             "balance": round(record.balance, 2),
             "target_value": round(record.target_value, 2),

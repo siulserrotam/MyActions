@@ -80,17 +80,45 @@ let liveQuotes = {};
 let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
+let currentDashboardUser = "default";
+
+function storageKey(key) {
+  return `${key}:${currentDashboardUser}`;
+}
+
+function getLocalValue(key) {
+  return localStorage.getItem(storageKey(key)) ?? localStorage.getItem(key);
+}
+
+function setLocalValue(key, value) {
+  localStorage.setItem(storageKey(key), value);
+}
+
+function removeLocalValue(key) {
+  localStorage.removeItem(storageKey(key));
+}
+
+async function loadCurrentDashboardUser() {
+  try {
+    const response = await fetch("/auth/me", { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    currentDashboardUser = payload.username || "default";
+  } catch {
+    currentDashboardUser = "default";
+  }
+}
 
 function favoriteSymbols() {
   try {
-    return JSON.parse(localStorage.getItem("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
+    return JSON.parse(getLocalValue("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
   } catch {
     return ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
   }
 }
 
 function setFavoriteSymbols(symbols) {
-  localStorage.setItem("decision_engine_favorites", JSON.stringify(Array.from(new Set(symbols))));
+  setLocalValue("decision_engine_favorites", JSON.stringify(Array.from(new Set(symbols))));
 }
 
 function getFavoriteAssets() {
@@ -1521,16 +1549,16 @@ function resetDailyResultInputs() {
     const input = document.getElementById(operationResultId(slot));
     if (input) input.value = 0;
   });
-  localStorage.removeItem("decision_engine_started_operations");
-  localStorage.setItem("decision_engine_active_trade_date", todayKey());
+  removeLocalValue("decision_engine_started_operations");
+  setLocalValue("decision_engine_active_trade_date", todayKey());
   renderDailyResultCard();
 }
 
 function resetDailyResultsIfNewDay() {
   const today = todayKey();
-  const activeDate = localStorage.getItem("decision_engine_active_trade_date");
+  const activeDate = getLocalValue("decision_engine_active_trade_date");
   if (!activeDate) {
-    localStorage.setItem("decision_engine_active_trade_date", today);
+    setLocalValue("decision_engine_active_trade_date", today);
     return;
   }
   if (activeDate !== today) {
@@ -1595,8 +1623,8 @@ function currentConfigPayload() {
 }
 
 function saveConfigLocal() {
-  localStorage.setItem("decision_engine_config", JSON.stringify(currentConfigPayload()));
-  localStorage.setItem("decision_engine_active_trade_date", todayKey());
+  setLocalValue("decision_engine_config", JSON.stringify(currentConfigPayload()));
+  setLocalValue("decision_engine_active_trade_date", todayKey());
 }
 
 function dailyCapitalPayload() {
@@ -1629,13 +1657,13 @@ function dailyCapitalPayload() {
 function loadConfigLocal() {
   try {
     ensureDefaultFavorites();
-    const config = JSON.parse(localStorage.getItem("decision_engine_config") || "null");
-    const alreadyMigrated = localStorage.getItem("decision_engine_defaults_version") === defaultsVersion;
+    const config = JSON.parse(getLocalValue("decision_engine_config") || "null");
+    const alreadyMigrated = getLocalValue("decision_engine_defaults_version") === defaultsVersion;
     if (!config) {
       document.getElementById("account-balance").value = defaultAccountBalance;
       document.getElementById("risk-pct").value = "dynamic";
-      localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
-      localStorage.setItem("decision_engine_active_trade_date", todayKey());
+      setLocalValue("decision_engine_defaults_version", defaultsVersion);
+      setLocalValue("decision_engine_active_trade_date", todayKey());
       return;
     }
     if (config.balance) document.getElementById("account-balance").value = config.balance;
@@ -1659,7 +1687,7 @@ function loadConfigLocal() {
     if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
       document.getElementById("risk-pct").value = "dynamic";
-      localStorage.setItem("decision_engine_defaults_version", defaultsVersion);
+      setLocalValue("decision_engine_defaults_version", defaultsVersion);
     }
     resetDailyResultsIfNewDay();
   } catch {
@@ -1753,7 +1781,7 @@ function totalOperationResult() {
 
 function startedOperations() {
   try {
-    return JSON.parse(localStorage.getItem("decision_engine_started_operations") || "{}") || {};
+    return JSON.parse(getLocalValue("decision_engine_started_operations") || "{}") || {};
   } catch {
     return {};
   }
@@ -1799,7 +1827,7 @@ function startOperation(slot) {
     gate_allowed: gate.allowed,
     gate_reason: gate.reason,
   };
-  localStorage.setItem("decision_engine_started_operations", JSON.stringify(started));
+  setLocalValue("decision_engine_started_operations", JSON.stringify(started));
   updatePostbackStatus(`Op ${slot} marcada como iniciada. Condicion: ${gate.reason}`, gate.allowed ? "ok" : "neutral");
   setControlValue("trade-slot", String(slot));
   calculate();
@@ -1808,7 +1836,7 @@ function startOperation(slot) {
 function cancelStartedOperation(slot) {
   const started = startedOperations();
   delete started[String(slot)];
-  localStorage.setItem("decision_engine_started_operations", JSON.stringify(started));
+  setLocalValue("decision_engine_started_operations", JSON.stringify(started));
   setOperationResult(slot, 0);
   syncOutcomeFromResults();
   saveConfigLocal();
@@ -1919,6 +1947,7 @@ function renderSimpleDashboard() {
           <h1>Plan diario XTB</h1>
           <p class="simple-subtitle">Itinerario: Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%). Stops y cierres siguen el horario definido.</p>
           <div class="simple-status">
+            <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">XTB sincronizado</span>
             <span class="simple-chip">Produccion permanente</span>
             <span class="simple-chip">${sourceLabel}</span>
@@ -2349,7 +2378,7 @@ async function saveDayClose() {
   resultInputs.forEach((input) => {
     if (input) input.value = 0;
   });
-  localStorage.removeItem("decision_engine_started_operations");
+  removeLocalValue("decision_engine_started_operations");
   saveConfigLocal();
   await postbackConfig();
   updatePostbackStatus(`Cierre guardado: ${money(total)} aplicado al capital. Capital nuevo: ${money(nextBalance)}.`, "ok");
@@ -2711,19 +2740,25 @@ function bindInputs() {
   window.addEventListener("xtb-ticket", (event) => applyXtbTicketValidation(event.detail || {}));
 }
 
-loadConfigLocal();
-renderTabs();
-renderAssets();
-bindInputs();
-bindSimpleDashboard();
-verifyDatabaseAndLoadLatest();
-loadLessonSummary();
-updateGoldenWindow();
-setInterval(updateGoldenWindow, 1000);
-selectedAsset = selectedAssetFromForm();
-resetOrderForCurrentMode(selectedAsset);
-refreshNotificationStatus();
-calculate();
-renderSimpleDashboard();
-refreshLivePrices({ resetSelected: true });
-scheduleAutoRefresh();
+async function initDashboard() {
+  await loadCurrentDashboardUser();
+  selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
+  loadConfigLocal();
+  renderTabs();
+  renderAssets();
+  bindInputs();
+  bindSimpleDashboard();
+  verifyDatabaseAndLoadLatest();
+  loadLessonSummary();
+  updateGoldenWindow();
+  setInterval(updateGoldenWindow, 1000);
+  selectedAsset = selectedAssetFromForm();
+  resetOrderForCurrentMode(selectedAsset);
+  refreshNotificationStatus();
+  calculate();
+  renderSimpleDashboard();
+  refreshLivePrices({ resetSelected: true });
+  scheduleAutoRefresh();
+}
+
+initDashboard();

@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +9,7 @@ from app.api.routes import get_session
 from app.core.auth import sanitize_next_path, verify_dashboard_credentials
 from app.db.session import Base
 from app.main import app
+from app.services.capital import CapitalService
 from app.services.live_market import LiveMarketService
 from app.services.orb import OrbService
 from app.services.orb_dashboard import OrbDashboardService
@@ -41,9 +44,9 @@ def test_health() -> None:
 
 
 def test_dashboard_credentials_are_sanitized() -> None:
-    assert verify_dashboard_credentials(" ADMIN ", "Admin123*") is True
-    assert verify_dashboard_credentials("admin\x00", "Admin123*") is True
-    assert verify_dashboard_credentials("admin", "admin123*") is False
+    assert verify_dashboard_credentials(" ADMIN ", "Admin123*") == "admin"
+    assert verify_dashboard_credentials("admin\x00", "Admin123*") == "admin"
+    assert verify_dashboard_credentials("admin", "admin123*") is None
 
 
 def test_login_next_path_rejects_external_redirects() -> None:
@@ -181,6 +184,24 @@ def test_save_daily_capital() -> None:
     assert payload["daily_realized_result"] == 16
     assert payload["daily_result_status"] == "partial"
     assert payload["risk_per_trade"] == 20.8
+
+
+def test_daily_capital_is_scoped_by_user() -> None:
+    session = TestingSessionLocal()
+    try:
+        service = CapitalService()
+        service.save(session, trade_date=date(2026, 7, 29), balance=1000, target_value=10, target_type="money", user_id="admin")
+        service.save(session, trade_date=date(2026, 7, 29), balance=2500, target_value=25, target_type="money", user_id="cliente2")
+
+        assert service.latest(session, user_id="admin")["balance"] == 1000
+        assert service.latest(session, user_id="cliente2")["balance"] == 2500
+        admin_history = service.history(session, user_id="admin")
+        client_history = service.history(session, user_id="cliente2")
+        assert any(item["balance"] == 1000 for item in admin_history)
+        assert all(item["user_id"] == "admin" for item in admin_history)
+        assert client_history == [service.latest(session, user_id="cliente2")]
+    finally:
+        session.close()
 
 
 def test_capital_health() -> None:

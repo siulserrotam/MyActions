@@ -39,7 +39,8 @@ class DailyCapital(Base):
     __tablename__ = "daily_capital"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    trade_date: Mapped[date] = mapped_column(Date, unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), default="admin", index=True)
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
     balance: Mapped[float] = mapped_column(Float)
     target_value: Mapped[float] = mapped_column(Float)
     target_type: Mapped[str] = mapped_column(String(16), default="money")
