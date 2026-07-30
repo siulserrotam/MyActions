@@ -1271,6 +1271,7 @@ function buildAiConfirmation() {
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
   const marketOpen = isMarketOpenNow();
   const timing = marketTimingProfile();
+  const trigger = triggerReadiness(asset, lastResult.entry_price, lastResult.take_profit);
   const reasons = [];
   let score = 50;
 
@@ -1287,6 +1288,14 @@ function buildAiConfirmation() {
 
   score -= 5;
   reasons.push(`Modo sin stop: la perdida no esta limitada por MyActions. Meta de la receta: ${money(lastResult.expected_profit)}.`);
+
+  if (!trigger.ready) {
+    score -= 30;
+    reasons.push(trigger.message);
+  } else {
+    score += 8;
+    reasons.push(trigger.message);
+  }
 
   if (availableCapital > 0 && marginRequired > availableCapital) {
     score -= 45;
@@ -1311,8 +1320,8 @@ function buildAiConfirmation() {
   }
 
   const confidence = Math.max(0, Math.min(95, Math.round(score)));
-  const hardBlock = (availableCapital > 0 && marginRequired > availableCapital) || timing.quality === "NO OPERAR" || timing.quality === "GESTION" || timing.quality === "SOLO CIERRE";
-  const status = hardBlock ? "NO OPERAR" : confidence >= 70 && marketOpen ? "OPERABLE" : "ESPERAR";
+  const noOperateBlock = (availableCapital > 0 && marginRequired > availableCapital) || timing.quality === "NO OPERAR" || timing.quality === "GESTION" || timing.quality === "SOLO CIERRE";
+  const status = noOperateBlock ? "NO OPERAR" : !trigger.ready || confidence < 70 || !marketOpen ? "ESPERAR" : "OPERABLE";
   const bias = driftDirection === "WAIT" ? selectedDirection : driftDirection;
   const toneClass = status === "NO OPERAR"
     ? "border-bear/60 bg-bear/15 text-bear"
@@ -1371,6 +1380,35 @@ function labelFromDirection(direction) {
   return "ESPERAR";
 }
 
+function triggerReadiness(asset, entry, takeProfit, currentPrice = activeMarketPriceFor(asset)) {
+  const price = Number(currentPrice || asset.marketPrice || 0);
+  const trigger = Number(entry || 0);
+  const target = Number(takeProfit || 0);
+  if (!price || !trigger || !target) {
+    return {
+      ready: false,
+      triggerDistancePct: 999,
+      fullPathPct: 999,
+      maxTriggerDistancePct: 0,
+      message: "No hay precio suficiente para validar cercania al gatillo.",
+    };
+  }
+  const triggerDistancePct = Math.abs(trigger - price) / price * 100;
+  const fullPathPct = Math.abs(target - price) / price * 100;
+  const targetFromEntryPct = Math.abs(target - trigger) / trigger * 100;
+  const maxTriggerDistancePct = Math.max(0.25, targetFromEntryPct * 0.55);
+  const ready = triggerDistancePct <= maxTriggerDistancePct;
+  return {
+    ready,
+    triggerDistancePct,
+    fullPathPct,
+    maxTriggerDistancePct,
+    message: ready
+      ? `Precio cerca del gatillo: falta ${numberText(triggerDistancePct)}% para activar.`
+      : `Esperar: falta ${numberText(triggerDistancePct)}% para activar y ${numberText(fullPathPct)}% hasta meta; no hay impulso suficiente ahora.`,
+  };
+}
+
 function inverseDirection(direction) {
   return direction === "LONG" ? "SHORT" : "LONG";
 }
@@ -1423,22 +1461,27 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
+  const takeProfit = direction === "SHORT" ? entry - targetDistance : entry + targetDistance;
+  const trigger = triggerReadiness(asset, entry, takeProfit, asset.marketPrice);
   const spreadCost = estimatedSpreadCost(asset, volume);
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
   const spreadOk = !spreadCost || spreadCost <= targetAmount;
-  const usable = hasVolume && hasMargin && spreadOk;
+  const impulseOk = trigger.ready;
+  const usable = hasVolume && hasMargin && spreadOk && impulseOk;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
   const volumePenalty = hasVolume ? 0 : -80;
   const spreadPenalty = spreadOk ? 0 : -120;
+  const impulsePenalty = impulseOk ? 0 : -100;
   const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
   const marginUseScore = usable ? marginUsePct / 5 : 0;
   const limitReason = !spreadOk
     ? `spread ${money(spreadCost)} supera meta ${money(targetAmount)}`
+    : !impulseOk ? trigger.message
     : volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
-  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty;
+  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty + impulsePenalty;
   return {
     asset,
     volume,
@@ -1451,11 +1494,13 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     marginRequired,
     spreadCost,
     targetMovePct,
+    triggerDistancePct: trigger.triggerDistancePct,
+    fullPathPct: trigger.fullPathPct,
     targetAmount,
     stopPct: 0,
     minimumStopPct: 0,
     reason: usable
-      ? `${numberText(changePct)}% ${movementLabelForAsset(asset)}. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${limitReason}.`
+      ? `${numberText(changePct)}% ${movementLabelForAsset(asset)}. ${driftDirection === "WAIT" ? "Esperar confirmacion." : `Preparar ${labelFromDirection(direction)}.`} Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}, meta ${money(targetAmount)} con ${numberText(targetMovePct)}%. ${trigger.message}. ${limitReason}.`
       : `Oculto: ${limitReason}.`,
   };
 }
@@ -1477,7 +1522,7 @@ function renderTopOpportunities() {
     <div class="rounded-xl border border-white/10 bg-ink p-3">
       <p class="text-xs font-black uppercase text-zinc-500">Top 3 sugerencias IA</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
-      <p class="mt-1 text-xs text-bear">Ranking por movimiento 5m/intradia y regla volumen/riesgo. Verifica en XTB antes de enviar.</p>
+      <p class="mt-1 text-xs text-bear">Ranking por movimiento, cercania al gatillo, volumen y riesgo. Si esta lejos de entrada, queda en espera.</p>
       <div class="mt-3 grid gap-2">
         ${opportunities.length ? opportunities.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
