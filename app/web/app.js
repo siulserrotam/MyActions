@@ -864,10 +864,12 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     const payload = await response.json();
     (payload.items || []).forEach(applyLiveQuote);
     if (resetSelected) {
-      const best = pickBestCfdOpportunity();
+      const operable = pickBestCfdOpportunity();
+      const watch = pickBestWatchlistOpportunity();
+      const best = operable || watch;
       if (best) {
         applySelectedOpportunity(best, "live");
-        updateLiveStatus(`Live prices: mejor CFD ${best.asset.symbol} elegido desde ${payload.count || 0} activos.`, "ok");
+        updateLiveStatus(`${operable ? "Live prices: CFD operable" : "Radar Yahoo: camino probable"} ${best.asset.symbol} ${best.directionLabel} desde ${payload.count || 0} activos.`, "ok");
         return;
       }
       if (liveQuotes[selectedAsset.symbol]) {
@@ -942,6 +944,83 @@ function pickBestCfdOpportunity(symbols = []) {
     .map((asset) => buildAssetOpportunity(asset, getEffectiveRiskPct()))
     .filter((item) => item.usable)
     .sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function buildWatchlistOpportunity(asset) {
+  const plan = buildDailyTradePlan();
+  const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const availableCapital = Number(document.getElementById("available-capital").value || accountBalance);
+  const price = Number(asset.marketPrice || providerPriceFor(asset.symbol) || 0);
+  const changePct = Number(asset.liveChangePct ?? 0);
+  const absMove = Math.abs(changePct);
+  const direction = aiDirectionForAsset(asset);
+  const directionLabel = labelFromDirection(direction);
+  const source = movementLabelForAsset(asset);
+  const freshQuote = hasFreshMarketQuote(asset);
+  const step = priceStepPct(asset);
+  const entry = price ? (direction === "SHORT" ? price * (1 - step) : price * (1 + step)) : 0;
+  const volume = entry ? targetContractVolume(asset, entry, accountBalance) : 0;
+  const positionValue = entry * asset.multiplier * volume;
+  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const marginOk = !availableCapital || marginRequired <= availableCapital;
+  const spreadCost = estimatedSpreadCost(asset, volume);
+  const spreadOk = !spreadCost || spreadCost <= plan.currentTradeRiskAmount;
+  const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
+  const gapPct = providerXtbGapPct(asset);
+  const gapOk = !gapPct || gapPct <= 2;
+  let score = 35 + Math.min(35, absMove * 8);
+  if (freshQuote) score += 15;
+  if (marginOk) score += 10;
+  if (spreadOk) score += 5;
+  if (!hasVolume) score -= 50;
+  if (!gapOk) score -= 60;
+  if (absMove < 0.35) score -= 20;
+  const confidence = Math.max(0, Math.min(92, Math.round(score)));
+  const status = !freshQuote || !hasVolume || !marginOk || !spreadOk || !gapOk
+    ? "DESCARTAR"
+    : confidence >= 65
+      ? "VIGILAR"
+      : "ESPERAR";
+  const action = status === "VIGILAR"
+    ? `${directionLabel} si rompe la primera vela ORB`
+    : status === "ESPERAR"
+      ? "Esperar mas fuerza antes de apertura"
+      : "No usar con tus datos actuales";
+  const reason = !freshQuote
+    ? "cotizacion no reciente"
+    : !hasVolume
+      ? "volumen XTB queda por debajo del minimo"
+      : !marginOk
+        ? `margen estimado ${money(marginRequired)} supera disponible ${money(availableCapital)}`
+        : !spreadOk
+          ? `spread estimado ${money(spreadCost)} consume la meta`
+          : !gapOk
+            ? `brecha Yahoo/XTB ${numberText(gapPct)}%`
+            : `${numberText(changePct)}% ${source}; ${action}. Vol ${formatVolumeForXtb(volume, asset)}, contrato ${money(positionValue)}.`;
+  return {
+    asset,
+    direction,
+    directionLabel,
+    status,
+    confidence,
+    score,
+    volume,
+    price,
+    marginRequired,
+    reason,
+  };
+}
+
+function buildOpeningWatchlist() {
+  return uniqueAssets()
+    .map(buildWatchlistOpportunity)
+    .filter((item) => item.status !== "DESCARTAR")
+    .sort((a, b) => b.confidence - a.confidence || Math.abs(Number(b.asset.liveChangePct || 0)) - Math.abs(Number(a.asset.liveChangePct || 0)))
+    .slice(0, 5);
+}
+
+function pickBestWatchlistOpportunity() {
+  return buildOpeningWatchlist().find((item) => item.confidence >= 65) || buildOpeningWatchlist()[0] || null;
 }
 
 function applySelectedOpportunity(opportunity, source = "auto") {
@@ -1546,18 +1625,24 @@ function renderTopOpportunities() {
   const target = document.getElementById("top-opportunities");
   if (!target) return;
   const opportunities = buildTopOpportunities();
+  const watchlist = buildOpeningWatchlist();
+  const rows = opportunities.length ? opportunities : watchlist.slice(0, 3);
+  const title = opportunities.length ? "Top 3 operables IA" : "Radar Yahoo para apertura";
+  const subtitle = opportunities.length
+    ? "Activos cerca del gatillo, con volumen/riesgo y margen validado."
+    : "Camino previo: activos con movimiento reciente. No ejecutar hasta que cierre la primera vela y suba a OPERABLE.";
   target.innerHTML = `
     <div class="rounded-xl border border-white/10 bg-ink p-3">
-      <p class="text-xs font-black uppercase text-zinc-500">Top 3 sugerencias IA</p>
+      <p class="text-xs font-black uppercase text-zinc-500">${title}</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
-      <p class="mt-1 text-xs text-bear">Ranking por movimiento, cercania al gatillo, volumen y riesgo. Si esta lejos de entrada, queda en espera.</p>
+      <p class="mt-1 text-xs ${opportunities.length ? "text-bear" : "text-gold"}">${subtitle}</p>
       <div class="mt-3 grid gap-2">
-        ${opportunities.length ? opportunities.map((item, index) => `
+        ${rows.length ? rows.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
             <span class="text-xs text-gold">#${index + 1}</span>
             <span class="block text-base font-black">${item.asset.symbol}</span>
             <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
-            <span class="mt-1 block text-xs text-zinc-500">${item.reason}</span>
+            <span class="mt-1 block text-xs text-zinc-500">${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</span>
           </button>
         `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay activos claros. Espera el proximo refresh.</div>`}
       </div>
@@ -1568,7 +1653,7 @@ function renderTopOpportunities() {
       selectedAsset = findAsset(button.dataset.topSymbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
       document.getElementById("xtb-price").value = "";
-      const picked = buildTopOpportunities().find((item) => item.asset.symbol === selectedAsset.symbol);
+      const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()].find((item) => item.asset.symbol === selectedAsset.symbol);
       resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       applyAiAggressiveTargets(selectedAsset);
       renderAssets();
@@ -1968,6 +2053,10 @@ function renderSimpleDashboard() {
   const started = startedOperations();
   const ai = buildAiConfirmation();
   const topOpportunities = buildTopOpportunities();
+  const openingWatchlist = buildOpeningWatchlist();
+  const displayedOpportunities = topOpportunities.length ? topOpportunities : openingWatchlist.slice(0, 3);
+  const watchMode = !topOpportunities.length;
+  const primaryDisplay = displayedOpportunities.find((item) => item.asset.symbol === symbol) || displayedOpportunities[0] || null;
   const selectedQuote = liveQuotes[String(symbol).toUpperCase()];
   const sourceLabel = selectedQuote?.source === "xtb" ? "Lectura directa XTB" : "Proveedor/ultimo precio";
   const primaryWarning = ai.status === "NO OPERAR"
@@ -2038,23 +2127,23 @@ function renderSimpleDashboard() {
       <section class="simple-panel simple-decision ${ai.status === "NO OPERAR" ? "danger" : ai.status === "OPERABLE" ? "ok" : "warn"}">
         <div class="simple-head">
           <div>
-            <span class="simple-label">Mejor alternativa CFD ahora</span>
+            <span class="simple-label">${watchMode ? "Radar Yahoo para apertura" : "Mejor alternativa CFD operable"}</span>
             <h2>${symbol} ${direction}</h2>
-            <p class="simple-subtitle">${primaryWarning}</p>
+            <p class="simple-subtitle">${watchMode ? "Preseleccion: usa Yahoo para darte camino antes de apertura. No ejecutes hasta cierre ORB y semaforo OPERABLE." : primaryWarning}</p>
           </div>
           <div class="simple-score">
-            <span>${ai.status}</span>
-            <strong>${ai.confidence}%</strong>
+            <span>${watchMode ? primaryDisplay?.status || "VIGILAR" : ai.status}</span>
+            <strong>${watchMode && primaryDisplay ? primaryDisplay.confidence : ai.confidence}%</strong>
           </div>
         </div>
         <div class="simple-top-list">
-          ${topOpportunities.length ? topOpportunities.map((item, index) => `
+          ${displayedOpportunities.length ? displayedOpportunities.map((item, index) => `
             <button type="button" class="simple-top-item ${item.asset.symbol === symbol ? "active" : ""}" data-simple-top-symbol="${item.asset.symbol}">
               <span>#${index + 1} ${item.asset.symbol}</span>
               <strong>${item.directionLabel}</strong>
-              <small>${item.reason}</small>
+              <small>${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</small>
             </button>
-          `).join("") : `<div class="simple-top-empty">No hay CFD suficientemente claro ahora. Espera nueva lectura de XTB.</div>`}
+          `).join("") : `<div class="simple-top-empty">No hay camino claro desde Yahoo. Espera nueva lectura.</div>`}
         </div>
       </section>
       <section class="simple-ops">
@@ -2143,7 +2232,8 @@ function bindSimpleDashboard() {
     }
     const topButton = event.target?.closest?.("[data-simple-top-symbol]");
     if (topButton) {
-      const picked = buildTopOpportunities().find((item) => item.asset.symbol === topButton.dataset.simpleTopSymbol);
+      const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()]
+        .find((item) => item.asset.symbol === topButton.dataset.simpleTopSymbol);
       if (picked) applySelectedOpportunity(picked, "manual");
       return;
     }
