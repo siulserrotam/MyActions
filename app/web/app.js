@@ -774,6 +774,17 @@ function applyLiveQuote(quote) {
   });
 }
 
+function quoteAgeMinutes(asset) {
+  const updatedAt = asset?.liveUpdatedAt ? new Date(asset.liveUpdatedAt).getTime() : 0;
+  if (!updatedAt || Number.isNaN(updatedAt)) return Infinity;
+  return Math.max(0, (Date.now() - updatedAt) / 60000);
+}
+
+function hasFreshMarketQuote(asset) {
+  const maxAge = isMarketOpenNow() ? 7 : 15;
+  return quoteAgeMinutes(asset) <= maxAge;
+}
+
 function providerPriceFor(symbol) {
   return Number(liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
 }
@@ -1110,30 +1121,26 @@ function updateGoldenWindow() {
 }
 
 function isMarketOpenNow() {
-  const now = new Date();
-  const nyParts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now).reduce((acc, part) => {
-    acc[part.type] = part.value;
-    return acc;
-  }, {});
-  const weekday = nyParts.weekday;
-  const hour = Number(nyParts.hour);
-  const minute = Number(nyParts.minute);
-  const total = hour * 60 + minute;
+  const { weekday, total } = nyMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   return isWeekday && total >= 9 * 60 + 30 && total < 16 * 60;
 }
 
+function marketRefreshProfile() {
+  const { weekday, total } = nyMarketMinutes();
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  if (isWeekday && total >= 9 * 60 + 30 && total < 16 * 60) {
+    return { ms: 5 * 60 * 1000, label: "mercado abierto, cada 5 min" };
+  }
+  if (isWeekday && total >= 4 * 60 && total < 20 * 60) {
+    return { ms: 60 * 1000, label: "pre/post-market Yahoo, cada 1 min" };
+  }
+  return { ms: 60 * 60 * 1000, label: "mercado cerrado profundo, cada 1 hora" };
+}
+
 function scheduleAutoRefresh() {
   window.clearTimeout(autoRefreshTimer);
-  const marketOpen = isMarketOpenNow();
-  const refreshMs = marketOpen ? 5 * 60 * 1000 : 60 * 60 * 1000;
-  const label = marketOpen ? "mercado abierto, cada 5 min" : "mercado cerrado, cada 1 hora";
+  const { ms: refreshMs, label } = marketRefreshProfile();
   document.getElementById("refresh-status").textContent = `Auto refresh: ${label}.`;
   autoRefreshTimer = window.setTimeout(() => {
     refreshLivePrices({ resetSelected: true });
@@ -1211,7 +1218,7 @@ function renderBestDecisionNote() {
       <strong>${suggestion.title}</strong>
       <span class="text-sm text-zinc-200">${suggestion.reason}</span>
       <span class="text-sm ${guardrail.toneClass}">${guardrail.message}</span>
-      <span class="text-xs text-zinc-400">IA local sin noticias externas: usa movimiento intradia, direccion elegida, horario, margen, stop y riesgo dinamico.</span>
+      <span class="text-xs text-zinc-400">IA local con precios Yahoo: usa movimiento reciente, horario, margen, gatillo y riesgo dinamico. Noticias externas aun no deciden la orden.</span>
     </div>
   `;
   renderAiConfirmation();
@@ -1468,20 +1475,24 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const hasMargin = !availableCapital || marginRequired <= availableCapital;
   const spreadOk = !spreadCost || spreadCost <= targetAmount;
   const impulseOk = trigger.ready;
-  const usable = hasVolume && hasMargin && spreadOk && impulseOk;
+  const freshQuote = hasFreshMarketQuote(asset);
+  const usable = freshQuote && hasVolume && hasMargin && spreadOk && impulseOk;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
   const volumePenalty = hasVolume ? 0 : -80;
   const spreadPenalty = spreadOk ? 0 : -120;
   const impulsePenalty = impulseOk ? 0 : -100;
+  const freshnessPenalty = freshQuote ? 0 : -150;
   const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
   const marginUseScore = usable ? marginUsePct / 5 : 0;
-  const limitReason = !spreadOk
+  const limitReason = !freshQuote
+    ? "cotizacion Yahoo no reciente; actualiza antes de confiar en la senal"
+    : !spreadOk
     ? `spread ${money(spreadCost)} supera meta ${money(targetAmount)}`
     : !impulseOk ? trigger.message
     : volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
-  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty + impulsePenalty;
+  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty + impulsePenalty + freshnessPenalty;
   return {
     asset,
     volume,
