@@ -1140,7 +1140,7 @@ function marketRefreshProfile() {
   const { weekday, total } = nyMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   if (isWeekday && total >= 9 * 60 + 30 && total < 16 * 60) {
-    return { ms: 5 * 60 * 1000, label: "mercado abierto, cada 5 min" };
+    return { ms: 60 * 1000, label: "mercado abierto, cada 1 min" };
   }
   if (isWeekday && total >= 4 * 60 && total < 20 * 60) {
     return { ms: 60 * 1000, label: "pre/post-market Yahoo, cada 1 min" };
