@@ -1719,7 +1719,7 @@ function buildChartCandles(zones, direction) {
 
 function realCandlesForItem(item) {
   const rows = marketBars[item.asset.symbol] || [];
-  return rows.slice(-30)
+  const candles = rows.slice(-30)
     .map((bar) => ({
       o: Number(bar.open || 0),
       h: Number(bar.high || 0),
@@ -1729,6 +1729,22 @@ function realCandlesForItem(item) {
       source: bar.source || "market_bars",
     }))
     .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
+  return candles.map((candle, index) => {
+    const previousClose = index > 0 ? candles[index - 1].c : candle.o;
+    const isPointQuote = candle.o === candle.h && candle.h === candle.l && candle.l === candle.c;
+    if (!isPointQuote) return candle;
+    const o = previousClose || candle.c;
+    const c = candle.c;
+    const bodyRange = Math.abs(c - o);
+    const wick = Math.max(bodyRange * 0.35, c * 0.00012, priceStepPct(item.asset) * c * 0.3, 0.00001);
+    return {
+      ...candle,
+      o,
+      h: Math.max(o, c) + wick,
+      l: Math.max(0.00001, Math.min(o, c) - wick),
+      c,
+    };
+  });
 }
 
 function renderTradeChart(item, variant = "mini") {
