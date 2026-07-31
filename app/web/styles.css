@@ -302,7 +302,7 @@ body {
 }
 
 .trade-chart-main svg {
-  height: 220px;
+  height: clamp(320px, 42vw, 430px);
 }
 
 .trade-chart-head {
@@ -336,9 +336,25 @@ body {
   fill: rgb(255 90 102 / 0.13);
 }
 
+.chart-plot-bg {
+  fill: rgb(18 25 28 / 0.72);
+  stroke: rgb(255 255 255 / 0.045);
+}
+
+.chart-grid-line line {
+  stroke: rgb(255 255 255 / 0.08);
+  stroke-width: 1;
+}
+
+.chart-grid-line text {
+  fill: #b9c5c9;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .chart-line {
-  stroke-width: 1.6;
-  stroke-dasharray: 5 4;
+  stroke-width: 2.2;
+  stroke-dasharray: 8 6;
 }
 
 .chart-line.take {
@@ -368,11 +384,11 @@ body {
 }
 
 .chart-candle line {
-  stroke-width: 1.5;
+  stroke-width: 2.3;
 }
 
 .chart-candle rect {
-  stroke-width: 1.2;
+  stroke-width: 1.6;
 }
 
 .chart-candle.up line,
@@ -394,9 +410,37 @@ body {
 }
 
 .chart-label {
-  font-size: 6px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.08em;
+}
+
+.chart-price-tag rect {
+  fill: rgb(18 24 26 / 0.95);
+  stroke-width: 1;
+}
+
+.chart-price-tag text {
+  fill: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.chart-price-tag.take rect {
+  stroke: rgb(57 255 136 / 0.75);
+}
+
+.chart-price-tag.ai-take rect {
+  stroke: rgb(56 189 248 / 0.75);
+}
+
+.chart-price-tag.entry rect {
+  stroke: rgb(246 196 83 / 0.8);
+}
+
+.chart-price-tag.stop rect {
+  stroke: rgb(255 90 102 / 0.8);
 }
 
 .chart-label.take {
@@ -425,7 +469,7 @@ body {
 
 .chart-time-label {
   fill: #9cb8af;
-  font-size: 5.5px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.05em;
 }

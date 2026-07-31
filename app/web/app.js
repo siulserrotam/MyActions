@@ -1755,13 +1755,30 @@ function renderTradeChart(item, variant = "mini") {
     ...candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]),
   ].filter((value) => Number.isFinite(value) && value > 0);
   if (!values.length) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const rawSpan = Math.max(rawMax - rawMin, rawMax * 0.002, 1);
+  const min = rawMin - rawSpan * 0.12;
+  const max = rawMax + rawSpan * 0.12;
   const span = Math.max(max - min, max * 0.002, 1);
-  const y = (value) => clamp(96 - ((value - min) / span) * 84, 8, 96);
-  const candleWidth = variant === "main" ? 4.4 : 3.4;
-  const candleGap = variant === "main" ? 7.1 : 6.6;
-  const startX = variant === "main" ? 16 : 14;
+  const chartWidth = variant === "main" ? 760 : 238;
+  const chartHeight = variant === "main" ? 300 : 112;
+  const plotLeft = variant === "main" ? 46 : 10;
+  const plotRight = variant === "main" ? chartWidth - 76 : 230;
+  const plotTop = variant === "main" ? 26 : 8;
+  const plotBottom = variant === "main" ? chartHeight - 46 : 96;
+  const plotHeight = plotBottom - plotTop;
+  const y = (value) => clamp(plotBottom - ((value - min) / span) * plotHeight, plotTop, plotBottom);
+  const candleWidth = variant === "main" ? 9 : 3.4;
+  const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
+  const startX = plotLeft;
+  const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
+  const levelTag = (label, value, className) => variant === "main" ? `
+    <g class="chart-price-tag ${className}">
+      <rect x="${plotRight + 8}" y="${clamp(y(value) - 11, plotTop, plotBottom - 18)}" width="58" height="20" rx="4" />
+      <text x="${plotRight + 37}" y="${clamp(y(value) + 3, plotTop + 14, plotBottom - 4)}">${label}</text>
+    </g>
+  ` : "";
   const candleMarkup = candles.map((candle, index) => {
     const x = startX + index * candleGap;
     const bodyTop = Math.min(y(candle.o), y(candle.c));
@@ -1776,6 +1793,12 @@ function renderTradeChart(item, variant = "mini") {
   }).join("");
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
+  const axisMarkup = variant === "main" ? priceTicks.map((tick) => `
+    <g class="chart-grid-line">
+      <line x1="${plotLeft}" x2="${plotRight}" y1="${y(tick)}" y2="${y(tick)}" />
+      <text x="${plotRight + 8}" y="${y(tick) + 4}">${numberText(tick)}</text>
+    </g>
+  `).join("") : "";
   return `
     <div class="trade-chart trade-chart-${variant}" aria-label="Mapa rapido de ${title}">
       ${variant === "main" ? `
@@ -1790,23 +1813,27 @@ function renderTradeChart(item, variant = "mini") {
           </div>
         </div>
       ` : ""}
-      <svg viewBox="0 0 238 112" role="img">
-        <rect x="8" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="222" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
-        <rect x="8" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="222" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
-        <line x1="8" x2="230" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
-        <line x1="8" x2="230" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />
-        <line x1="8" x2="230" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
-        <line x1="8" x2="230" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />
-        <line x1="8" x2="230" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
-        <line x1="8" x2="230" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
+      <svg viewBox="0 0 ${chartWidth} ${chartHeight}" role="img">
+        <rect x="${plotLeft}" y="${plotTop}" width="${plotRight - plotLeft}" height="${plotHeight}" rx="8" class="chart-plot-bg" />
+        ${axisMarkup}
+        <rect x="${plotLeft}" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="${plotRight - plotLeft}" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
+        <rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
         ${candleMarkup}
-        <text x="10" y="${clamp(y(zones.takeProfit) - 3, 10, 104)}" class="chart-label take">META DESEADA</text>
-        <text x="10" y="${clamp(y(strategyTarget.price) + 8, 10, 104)}" class="chart-label ai-take">META IA</text>
-        <text x="10" y="${clamp(y(proZones.resistance) - 3, 10, 104)}" class="chart-label resistance">RESISTENCIA</text>
-        <text x="10" y="${clamp(y(proZones.support) + 8, 10, 104)}" class="chart-label support">SOPORTE</text>
-        <text x="94" y="${clamp(y(zones.entry) - 3, 10, 104)}" class="chart-label entry">ENTRADA</text>
-        <text x="178" y="${clamp(y(zones.stopLoss) - 3, 10, 104)}" class="chart-label stop">STOP</text>
-        ${variant === "main" ? `<text x="10" y="108" class="chart-time-label">${usingRealCandles ? `${candles.length} velas reales de 1 minuto` : "Visual tactico hasta reunir velas reales"} / ventana 30m</text>` : ""}
+        ${levelTag("TP", zones.takeProfit, "take")}
+        ${levelTag("IA", strategyTarget.price, "ai-take")}
+        ${levelTag("Entrada", zones.entry, "entry")}
+        ${levelTag("SL", zones.stopLoss, "stop")}
+        ${variant === "main" ? `
+          <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
+          <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingRealCandles ? `${candles.length} velas reales de 1 minuto` : "Visual tactico hasta reunir velas reales"} / ventana 30m</text>
+        ` : ""}
       </svg>
       <div class="chart-legend">
         <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
