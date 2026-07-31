@@ -17,28 +17,29 @@ function quoteChangePct(text, index = 0) {
 
 function extractXtbQuotes(text) {
   const cleaned = normalize(text);
+  const activeOrList = (label) => new RegExp(`${label}\\s+CFD(?:\\s+VENTA\\s+([0-9.,]+(?:\\s+[0-9]+)?)\\s+.*?COMPRA\\s+([0-9.,]+(?:\\s+[0-9]+)?)|\\s+[-0-9.,%]+\\s+([0-9.,]+(?:\\s+[0-9]+)?)\\s+([0-9.,]+(?:\\s+[0-9]+)?))`, 'i');
   const instruments = [
-    ['AMD.US', /AMD CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
-    ['TSLA.US', /Tesla CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
-    ['AAPL.US', /Apple CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
-    ['NVDA.US', /Nvidia CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
-    ['TSM.US', /TSMC CFD(?:\s+VENTA\s+([0-9.,]+\s*[0-9]*)\s+.*?COMPRA\s+([0-9.,]+\s*[0-9]*)|\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+))/i],
-    ['BTCUSD', /BITCOIN CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['ETHUSD', /ETHEREUM CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['AVAX', /AVALANCHE CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['SOL', /SOLANA CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['XRP', /RIPPLE CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['DOGE', /DOGECOIN CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['ADA', /CARDANO CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['LINK', /CHAINLINK CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['DOT', /POLKADOT CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['EURUSD', /EURUSD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['GBPUSD', /GBPUSD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['GOLD', /GOLD CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['NATGAS', /NATGAS CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['OIL', /OIL CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['SILVER', /SILVER CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i],
-    ['US100', /US100 CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i]
+    ['AMD.US', activeOrList('AMD')],
+    ['TSLA.US', activeOrList('Tesla')],
+    ['AAPL.US', activeOrList('Apple')],
+    ['NVDA.US', activeOrList('Nvidia')],
+    ['TSM.US', activeOrList('TSMC')],
+    ['BTCUSD', activeOrList('BITCOIN')],
+    ['ETHUSD', activeOrList('ETHEREUM')],
+    ['AVAX', activeOrList('AVALANCHE')],
+    ['SOL', activeOrList('SOLANA')],
+    ['XRP', activeOrList('RIPPLE')],
+    ['DOGE', activeOrList('DOGECOIN')],
+    ['ADA', activeOrList('CARDANO')],
+    ['LINK', activeOrList('CHAINLINK')],
+    ['DOT', activeOrList('POLKADOT')],
+    ['EURUSD', activeOrList('EURUSD')],
+    ['GBPUSD', activeOrList('GBPUSD')],
+    ['GOLD', activeOrList('GOLD')],
+    ['NATGAS', activeOrList('NATGAS')],
+    ['OIL', activeOrList('OIL')],
+    ['SILVER', activeOrList('SILVER')],
+    ['US100', activeOrList('US100')]
   ];
 
   return Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
