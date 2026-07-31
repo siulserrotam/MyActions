@@ -1563,7 +1563,7 @@ function buildTradeZones(asset, direction, entry, volume, targetAmount = buildDa
   };
 }
 
-function renderMiniTradeChart(item) {
+function renderTradeChart(item, variant = "mini") {
   const zones = item.zones;
   if (!zones) return "";
   const values = [
@@ -1595,8 +1595,21 @@ function renderMiniTradeChart(item) {
   const points = rangePoints.map((value, index) => `${12 + index * 30},${y(value)}`).join(" ");
   const color = item.direction === "SHORT" ? "#ff5a66" : "#39ff88";
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
+  const title = `${item.asset.symbol} ${item.directionLabel}`;
   return `
-    <div class="mini-trade-chart" aria-label="Mapa rapido de ${item.asset.symbol}">
+    <div class="trade-chart trade-chart-${variant}" aria-label="Mapa rapido de ${title}">
+      ${variant === "main" ? `
+        <div class="trade-chart-head">
+          <div>
+            <span>Grafica uno a uno</span>
+            <strong>${title}</strong>
+          </div>
+          <div>
+            <span>Precio base</span>
+            <strong>${numberText(zones.price)}</strong>
+          </div>
+        </div>
+      ` : ""}
       <svg viewBox="0 0 238 112" role="img">
         <rect x="8" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="222" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
         <rect x="8" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="222" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
@@ -1611,8 +1624,19 @@ function renderMiniTradeChart(item) {
         <span class="entry">Entrada ${numberText(zones.entry)}</span>
         <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
       </div>
+      ${variant === "main" ? `
+        <div class="trade-zones">
+          <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
+          <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
+          <span>Riesgo aprox: ${money(zones.riskAmount)} | Objetivo aprox: ${money(zones.rewardAmount)}</span>
+        </div>
+      ` : ""}
     </div>
   `;
+}
+
+function renderMiniTradeChart(item) {
+  return renderTradeChart(item, "mini");
 }
 
 function inverseDirection(direction) {
@@ -1748,14 +1772,14 @@ function renderTopOpportunities() {
       <p class="text-xs font-black uppercase text-zinc-500">${title}</p>
       <p class="mt-1 text-xs text-zinc-400">${marketPhaseLabel()}</p>
       <p class="mt-1 text-xs ${opportunities.length ? "text-bear" : "text-gold"}">${subtitle}</p>
+      ${rows[0]?.zones ? renderTradeChart(rows[0], "main") : ""}
       <div class="mt-3 grid gap-2">
         ${rows.length ? rows.map((item, index) => `
           <button type="button" class="asset-card text-left" data-top-symbol="${item.asset.symbol}">
             <span class="text-xs text-gold">#${index + 1}</span>
             <span class="block text-base font-black">${item.asset.symbol}</span>
             <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
-            ${renderMiniTradeChart(item)}
-            <span class="mt-1 block text-xs text-zinc-500">Rebote ${numberText(item.zones.reboundLow)}-${numberText(item.zones.reboundHigh)} | Seguridad ${numberText(item.zones.securityLow)}-${numberText(item.zones.securityHigh)}</span>
+            <span class="mt-1 block text-xs text-zinc-500">Entrada ${numberText(item.zones.entry)} | Stop ${numberText(item.zones.stopLoss)} | Take ${numberText(item.zones.takeProfit)}</span>
             <span class="mt-1 block text-xs text-zinc-500">${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</span>
           </button>
         `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay activos claros. Espera el proximo refresh.</div>`}
@@ -2250,13 +2274,13 @@ function renderSimpleDashboard() {
             <strong>${watchMode && primaryDisplay ? primaryDisplay.confidence : ai.confidence}%</strong>
           </div>
         </div>
+        ${primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : ""}
         <div class="simple-top-list">
           ${displayedOpportunities.length ? displayedOpportunities.map((item, index) => `
             <button type="button" class="simple-top-item ${item.asset.symbol === symbol ? "active" : ""}" data-simple-top-symbol="${item.asset.symbol}">
               <span>#${index + 1} ${item.asset.symbol}</span>
               <strong>${item.directionLabel}</strong>
-              ${renderMiniTradeChart(item)}
-              <small>Rebote ${numberText(item.zones.reboundLow)}-${numberText(item.zones.reboundHigh)}. Seguridad ${numberText(item.zones.securityLow)}-${numberText(item.zones.securityHigh)}.</small>
+              <small>Entrada ${numberText(item.zones.entry)} | Stop ${numberText(item.zones.stopLoss)} | Take ${numberText(item.zones.takeProfit)}</small>
               <small>${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</small>
             </button>
           `).join("") : `<div class="simple-top-empty">No hay camino claro desde Yahoo. Espera nueva lectura.</div>`}

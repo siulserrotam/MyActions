@@ -278,7 +278,7 @@ body {
   line-height: 1.35;
 }
 
-.mini-trade-chart {
+.trade-chart {
   display: grid;
   gap: 7px;
   margin-top: 10px;
@@ -288,10 +288,44 @@ body {
   padding: 8px;
 }
 
-.mini-trade-chart svg {
+.trade-chart-main {
+  margin-top: 16px;
+  border-color: rgb(246 196 83 / 0.28);
+  background: linear-gradient(180deg, rgb(8 18 16 / 0.95), rgb(10 10 12 / 0.95));
+  padding: 12px;
+}
+
+.trade-chart svg {
   width: 100%;
   height: 112px;
   display: block;
+}
+
+.trade-chart-main svg {
+  height: 220px;
+}
+
+.trade-chart-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.trade-chart-head span {
+  display: block;
+  color: #9cb8af;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.trade-chart-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 22px;
 }
 
 .chart-zone.rebound {
@@ -346,6 +380,14 @@ body {
 
 .chart-legend .stop {
   color: #ff9da5;
+}
+
+.trade-zones {
+  display: grid;
+  gap: 6px;
+  color: #abc7bf;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .simple-head {
