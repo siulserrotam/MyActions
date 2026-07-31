@@ -62,8 +62,7 @@ const defaultRiskPct = 0.5;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
 const maxPlannedTrades = 4;
-const baseTradeTargetPct = 1;
-const baseTradeSharePct = 30;
+const operationTargetPct = { 1: 0.75, 2: 0.5, 3: 0.25, 4: 0.25 };
 const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
@@ -272,33 +271,33 @@ function operationStrategy(slot) {
       label: "Operacion 1",
       entryTime: "9:00",
       closeTime: "10:30",
-      daySharePct: 30,
+      targetPct: operationTargetPct[1],
       stopPct: 0,
-      condition: "Abrir a las 9:00 si hay semaforo OPERABLE. Sin stop; cierre manual 10:30 si no llega a meta.",
+      condition: "Abrir a las 9:00 si hay semaforo OPERABLE. Objetivo 0.75%. Sin stop; cierre manual 10:30 si no llega a meta.",
     },
     2: {
       label: "Operacion 2",
       entryTime: "9:30",
       closeTime: "12:30",
-      daySharePct: 30,
+      targetPct: operationTargetPct[2],
       stopPct: 0.5,
-      condition: "Abrir a las 9:30 solo si Op1 sigue abierta y va favorable.",
+      condition: "Abrir a las 9:30 solo si Op1 sigue abierta y va favorable. Objetivo 0.5%.",
     },
     3: {
       label: "Operacion 3",
       entryTime: "10:00",
       closeTime: "13:30",
-      daySharePct: 20,
+      targetPct: operationTargetPct[3],
       stopPct: 1,
-      condition: "Abrir a las 10:00 solo si Op1 cerro exitosamente.",
+      condition: "Abrir a las 10:00 solo si Op1 cerro exitosamente. Objetivo 0.25%.",
     },
     4: {
       label: "Operacion 4",
       entryTime: "10:30",
       closeTime: "14:30",
-      daySharePct: 20,
+      targetPct: operationTargetPct[4],
       stopPct: 1,
-      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Receta inversa: usa la direccion contraria a la senal base; si la base es LONG, Op4 sera SHORT, y si la base es SHORT, Op4 sera LONG.",
+      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Objetivo 0.25%. Receta inversa: usa la direccion contraria a la senal base; si la base es LONG, Op4 sera SHORT, y si la base es SHORT, Op4 sera LONG.",
     },
   };
   return strategies[Number(slot)] || strategies[1];
@@ -307,7 +306,6 @@ function operationStrategy(slot) {
 function buildDailyTradePlan() {
   const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
   const estimatedXtbCost = xtbCostPerOperation();
-  const baseTradeTargetAmount = accountBalance * baseTradeTargetPct / 100;
   const extensionEnabled = extensionTradesAllowed();
   const plannedTrades = maxPlannedTrades;
   const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
@@ -316,7 +314,7 @@ function buildDailyTradePlan() {
   const tradeTargets = Object.fromEntries(
     [1, 2, 3, 4].map((slot) => {
       const strategy = operationStrategy(slot);
-      return [slot, baseTradeTargetAmount * strategy.daySharePct / baseTradeSharePct];
+      return [slot, accountBalance * strategy.targetPct / 100];
     })
   );
   const baseTargetAmount = Object.values(tradeTargets).reduce((total, amount) => total + amount, 0);
@@ -356,7 +354,7 @@ function buildDailyTradePlan() {
     operationStrategies: [1, 2, 3, 4].map(operationStrategy),
     currentTradeRiskPct: Number(currentTradeRiskPct.toFixed(4)),
     contractTargetValue,
-    baseTradeTargetAmount,
+    baseTradeTargetAmount: tradeTargets[1],
     baseTargetAmount,
     grossBaseTargetAmount: baseTargetAmount + estimatedXtbCost * maxPlannedTrades,
     fullDayTargetAmount,
@@ -406,7 +404,7 @@ function renderAiDecisionSummary() {
       <div class="summary-row"><span>Fecha limite</span><strong>${management.deadline}</strong></div>
     </div>
     <p class="mt-2 text-xs text-zinc-300">${management.message}</p>
-    <p class="mt-2 text-xs text-zinc-400">Itinerario: Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%).</p>
+    <p class="mt-2 text-xs text-zinc-400">Itinerario: Op1 busca 0.75%, Op2 0.5%, Op3 0.25% y Op4 0.25% del capital operativo.</p>
   `;
 }
 
@@ -453,7 +451,7 @@ function tradeSchedulePlan() {
     return {
       title: "Op1 habilitada",
       now: "Op1 puede abrirse manualmente si esta OPERABLE y XTB valida contrato/spread.",
-      first: "Op1: 30% del plan del dia, contrato capital, objetivo 1%, sin stop.",
+      first: "Op1: contrato cercano al capital, objetivo 0.75%, sin stop.",
       second: `Op2: esperar ${formatMinutesUntil(op2Open, total)}; solo si Op1 esta favorable.`,
       stop: "Op1 sin stop: cierre manual 10:30 si no toca meta.",
       close: `Cierre Op1 si no llega a meta: ${formatMinutesUntil(op1Close, total)}.`,
@@ -465,7 +463,7 @@ function tradeSchedulePlan() {
       title: "Op2 condicionada",
       now: op1Started ? "Op2 puede abrirse si Op1 sigue abierta y favorable." : "Op2 bloqueada: marca Op1 iniciada y valida que vaya favorable.",
       first: "Op1: mantener hasta meta o cierre 10:30.",
-      second: "Op2: 30% del plan, contrato capital, objetivo 1%, stop 0.5%.",
+      second: "Op2: contrato cercano al capital, objetivo 0.5%, stop 0.5%.",
       stop: "Para SHORT el stop va arriba de entrada; para LONG va abajo.",
       close: `Cierre Op2 si no llega a meta: ${formatMinutesUntil(op2Close, total)}.`,
       tone: "warning",
@@ -475,7 +473,7 @@ function tradeSchedulePlan() {
     return {
       title: "Op3 condicionada",
       now: op1 > 0 ? "Op3 puede abrirse: Op1 cerro exitosa." : "Op3 bloqueada hasta que Op1 cierre con ganancia.",
-      first: "Op3: 20% del plan, contrato capital, objetivo 1%, stop 1%.",
+      first: "Op3: contrato cercano al capital, objetivo 0.25%, stop 1%.",
       second: op2Started ? "Op2: gestionar hasta meta o cierre 12:30." : "Op2: no abrir si no cumplio condicion.",
       stop: "Validar contrato real XTB antes de confirmar.",
       close: `Cierre Op3 si no llega a meta: ${formatMinutesUntil(op3Close, total)}.`,
@@ -486,7 +484,7 @@ function tradeSchedulePlan() {
     return {
       title: "Op4 condicionada / gestion",
       now: op1 > 0 && op2 > 0 ? "Op4 puede abrirse: Op1 y Op2 cerraron exitosas." : "Op4 bloqueada si Op1 y Op2 no estan ganadoras.",
-      first: "Op4: 20% del plan, contrato capital, objetivo 1%, stop 1%.",
+      first: "Op4: contrato cercano al capital, objetivo 0.25%, stop 1%.",
       second: "Gestionar cierres: Op2 12:30, Op3 13:30, Op4 14:30 si no tocaron meta.",
       stop: "No abrir si spread real supera la meta o contrato real supera capital * 1.2.",
       close: `Cierre final Op4: ${formatMinutesUntil(op4Close, total)}.`,
@@ -1966,7 +1964,7 @@ function renderSimpleDashboard() {
     const targetAmount = opTargets[slot] || 0;
     const netTargetAmount = opNetTargets[slot] || targetAmount;
     const result = opResults[slot] || "0";
-    const badge = `${strategy.daySharePct}% dia / Neto ${money(netTargetAmount)}`;
+    const badge = `${strategy.targetPct}% capital / Neto ${money(netTargetAmount)}`;
     const stopLabel = strategy.stopPct ? `${strategy.stopPct}% (${isActive && lastResult?.stop_loss ? numberText(lastResult.stop_loss) : "calcular"})` : "Sin stop";
     return `
       <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""}">
@@ -2001,7 +1999,7 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Itinerario: Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%). Stops y cierres siguen el horario definido.</p>
+          <p class="simple-subtitle">Itinerario: Op1 busca 0.75%, Op2 0.5%, Op3 0.25% y Op4 0.25% del capital operativo. Stops y cierres siguen el horario definido.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">XTB sincronizado</span>
