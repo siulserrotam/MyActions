@@ -47,6 +47,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    if os.getenv("VERCEL"):
+        if not settings.data_dir.is_absolute():
+            settings.data_dir = Path("/tmp") / settings.data_dir
+        if not settings.model_dir.is_absolute():
+            settings.model_dir = Path("/tmp") / settings.model_dir
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.model_dir.mkdir(parents=True, exist_ok=True)
     return settings
