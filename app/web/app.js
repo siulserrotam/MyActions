@@ -1565,6 +1565,7 @@ function buildTradeZones(asset, direction, entry, volume, targetAmount = buildDa
 
 function technicalDecisionText(item) {
   const zones = item.zones;
+  const strategyTarget = strategyTargetForItem(item);
   const changePct = Number(item.asset.liveChangePct ?? 0);
   const directionText = item.direction === "SHORT" ? "sesgo bajista" : "sesgo alcista";
   const orderText = item.direction === "SHORT"
@@ -1583,9 +1584,23 @@ function technicalDecisionText(item) {
       <span>Lectura tecnica: ${directionText}; movimiento observado ${numberText(changePct)}% y orden tipo ${orderText}.</span>
       <span>Zona rebote: area donde el precio puede devolverse antes de confirmar ruptura; no perseguir si esta dentro de esa zona.</span>
       <span>Zona seguridad: area entre entrada y stop. El ${stopText}; el ${takeText}.</span>
-      <span>Relacion estimada: 1:${numberText(rr || 0)}. Riesgo ${money(zones.riskAmount)} para objetivo ${money(zones.rewardAmount)}.</span>
+      <span>Meta deseada: ${money(zones.rewardAmount)} en ${numberText(zones.takeProfit)}. Meta IA: ${money(strategyTarget.amount)} en ${numberText(strategyTarget.price)}.</span>
+      <span>Relacion estimada deseada: 1:${numberText(rr || 0)}. Riesgo ${money(zones.riskAmount)} para objetivo ${money(zones.rewardAmount)}.</span>
     </div>
   `;
+}
+
+function strategyTargetForItem(item) {
+  const zones = item.zones;
+  const confidence = Number(item.confidence || 60);
+  const changePct = Math.abs(Number(item.asset.liveChangePct ?? 0));
+  const confidenceFactor = clamp(confidence / 78, 0.45, 1.15);
+  const momentumFactor = clamp(0.75 + changePct / 3, 0.65, 1.2);
+  const factor = clamp(confidenceFactor * momentumFactor, 0.45, 1.15);
+  const amount = zones.rewardAmount * factor;
+  const distance = zones.rewardAmount > 0 ? Math.abs(zones.takeProfit - zones.entry) * factor : 0;
+  const price = item.direction === "SHORT" ? zones.entry - distance : zones.entry + distance;
+  return { amount, price, factor };
 }
 
 function buildChartCandles(zones, direction) {
@@ -1595,12 +1610,17 @@ function buildChartCandles(zones, direction) {
   const low = Math.min(Number(zones.low || base), base, last, zones.entry);
   const drift = Math.max(Math.abs(high - low), Math.abs(zones.entry - base), base * 0.002, 0.01);
   const sign = direction === "SHORT" ? -1 : 1;
-  const candles = [
-    { o: base, h: Math.max(base, base + drift * 0.28), l: Math.min(base, base - drift * 0.18), c: base + sign * drift * 0.18 },
-    { o: base + sign * drift * 0.18, h: Math.max(base + sign * drift * 0.18, high), l: low, c: base - sign * drift * 0.25 },
-    { o: base - sign * drift * 0.25, h: Math.max(base, zones.entry, high - drift * 0.15), l: Math.min(low + drift * 0.15, base), c: zones.entry },
-    { o: zones.entry, h: Math.max(zones.entry, zones.price, high), l: Math.min(zones.entry, zones.price, low + drift * 0.2), c: zones.price },
-  ];
+  const candles = Array.from({ length: 30 }, (_, index) => {
+    const progress = index / 29;
+    const wave = Math.sin(index * 0.85) * drift * 0.16;
+    const pulse = Math.cos(index * 0.43) * drift * 0.08;
+    const trend = base + (last - base) * progress + sign * drift * (progress - 0.5) * 0.35;
+    const o = index === 0 ? base : trend - sign * drift * 0.04 + pulse;
+    const c = index === 29 ? last : trend + wave;
+    const h = Math.max(o, c) + drift * (0.08 + (index % 5 === 0 ? 0.18 : 0.04));
+    const l = Math.min(o, c) - drift * (0.08 + (index % 7 === 0 ? 0.16 : 0.04));
+    return { o, h: Math.max(h, high && index === 12 ? high : h), l: Math.min(l, low && index === 17 ? low : l), c };
+  });
   return candles.map((candle) => ({
     o: Number.isFinite(candle.o) ? candle.o : base,
     h: Number.isFinite(candle.h) ? candle.h : base,
@@ -1613,6 +1633,7 @@ function renderTradeChart(item, variant = "mini") {
   const zones = item.zones;
   if (!zones) return "";
   const candles = buildChartCandles(zones, item.direction);
+  const strategyTarget = strategyTargetForItem(item);
   const values = [
     zones.low,
     zones.high,
@@ -1623,6 +1644,7 @@ function renderTradeChart(item, variant = "mini") {
     zones.takeProfit,
     zones.reboundLow,
     zones.reboundHigh,
+    strategyTarget.price,
     ...candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]),
   ].filter((value) => Number.isFinite(value) && value > 0);
   if (!values.length) return "";
@@ -1630,9 +1652,9 @@ function renderTradeChart(item, variant = "mini") {
   const max = Math.max(...values);
   const span = Math.max(max - min, max * 0.002, 1);
   const y = (value) => clamp(96 - ((value - min) / span) * 84, 8, 96);
-  const candleWidth = variant === "main" ? 16 : 11;
-  const candleGap = variant === "main" ? 44 : 34;
-  const startX = variant === "main" ? 36 : 30;
+  const candleWidth = variant === "main" ? 4.4 : 3.4;
+  const candleGap = variant === "main" ? 7.1 : 6.6;
+  const startX = variant === "main" ? 16 : 14;
   const candleMarkup = candles.map((candle, index) => {
     const x = startX + index * candleGap;
     const bodyTop = Math.min(y(candle.o), y(candle.c));
@@ -1665,15 +1687,19 @@ function renderTradeChart(item, variant = "mini") {
         <rect x="8" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="222" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
         <rect x="8" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="222" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
         <line x1="8" x2="230" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
+        <line x1="8" x2="230" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />
         <line x1="8" x2="230" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
         <line x1="8" x2="230" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
         ${candleMarkup}
-        <text x="10" y="${clamp(y(zones.takeProfit) - 3, 10, 104)}" class="chart-label take">TAKE</text>
+        <text x="10" y="${clamp(y(zones.takeProfit) - 3, 10, 104)}" class="chart-label take">META DESEADA</text>
+        <text x="10" y="${clamp(y(strategyTarget.price) + 8, 10, 104)}" class="chart-label ai-take">META IA</text>
         <text x="94" y="${clamp(y(zones.entry) - 3, 10, 104)}" class="chart-label entry">ENTRADA</text>
         <text x="178" y="${clamp(y(zones.stopLoss) - 3, 10, 104)}" class="chart-label stop">STOP</text>
+        ${variant === "main" ? `<text x="10" y="108" class="chart-time-label">30 velas de 1 minuto / ventana 30m</text>` : ""}
       </svg>
       <div class="chart-legend">
-        <span class="take">Take ${numberText(zones.takeProfit)}</span>
+        <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
+        <span class="ai-take">IA ${numberText(strategyTarget.price)}</span>
         <span class="entry">Entrada ${numberText(zones.entry)}</span>
         <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
       </div>
@@ -1681,7 +1707,7 @@ function renderTradeChart(item, variant = "mini") {
         <div class="trade-zones">
           <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
-          <span>Riesgo aprox: ${money(zones.riskAmount)} | Objetivo aprox: ${money(zones.rewardAmount)}</span>
+          <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
         </div>
         ${technicalDecisionText(item)}
       ` : ""}

@@ -345,6 +345,10 @@ body {
   stroke: rgb(57 255 136 / 0.8);
 }
 
+.chart-line.ai-take {
+  stroke: rgb(56 189 248 / 0.85);
+}
+
 .chart-line.entry {
   stroke: rgb(246 196 83 / 0.85);
 }
@@ -393,13 +397,24 @@ body {
   fill: #ffe5a8;
 }
 
+.chart-label.ai-take {
+  fill: #bae6fd;
+}
+
 .chart-label.stop {
   fill: #ff9da5;
 }
 
+.chart-time-label {
+  fill: #9cb8af;
+  font-size: 5.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
 .chart-legend {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
   font-size: 10px;
   font-weight: 900;
@@ -416,6 +431,10 @@ body {
 
 .chart-legend .take {
   color: #9fffc4;
+}
+
+.chart-legend .ai-take {
+  color: #bae6fd;
 }
 
 .chart-legend .entry {
@@ -916,6 +935,10 @@ body {
   .simple-top-item,
   .simple-top-empty {
     padding: 12px;
+  }
+
+  .chart-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .simple-operation {
