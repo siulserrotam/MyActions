@@ -67,6 +67,11 @@ const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
+const chartFrameOptions = {
+  "1m": { key: "1m", label: "1m / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultima media hora, velas de 1 minuto." },
+  "5m": { key: "5m", label: "5m / 2h", interval: "5m", period: "1d", limit: 24, description: "Contexto corto, velas de 5 minutos." },
+  "1h": { key: "1h", label: "1h / 5d", interval: "1h", period: "5d", limit: 60, description: "Contexto amplio tipo XTB H1." },
+};
 
 let activeCategory = "favorites";
 let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
@@ -97,6 +102,20 @@ function setLocalValue(key, value) {
 
 function removeLocalValue(key) {
   localStorage.removeItem(storageKey(key));
+}
+
+function chartFrameKey() {
+  const stored = getLocalValue("chart-frame-key") || "1m";
+  return chartFrameOptions[stored] ? stored : "1m";
+}
+
+function chartFrameConfig() {
+  return chartFrameOptions[chartFrameKey()] || chartFrameOptions["1m"];
+}
+
+function setChartFrame(key) {
+  if (!chartFrameOptions[key]) return;
+  setLocalValue("chart-frame-key", key);
 }
 
 async function loadCurrentDashboardUser() {
@@ -803,10 +822,17 @@ async function saveQuoteBars(items = [], source = "dashboard") {
 }
 
 async function loadMarketBars(symbols = []) {
+  const frame = chartFrameConfig();
   const uniqueSymbols = Array.from(new Set(symbols.map((symbol) => String(symbol || "").trim().toUpperCase()).filter(Boolean)));
   await Promise.all(uniqueSymbols.slice(0, 6).map(async (symbol) => {
     try {
-      const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?limit=60&interval=1h&period=5d&ts=${Date.now()}`, { cache: "no-store" });
+      const params = new URLSearchParams({
+        limit: String(frame.limit),
+        interval: frame.interval,
+        period: frame.period,
+        ts: String(Date.now()),
+      });
+      const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
       marketBars[symbol] = payload.items || [];
@@ -814,8 +840,10 @@ async function loadMarketBars(symbols = []) {
         source: payload.source || "market_bars",
         isRealOhlc: Boolean(payload.is_real_ohlc),
         providerSymbol: payload.provider_symbol || "",
-        interval: payload.interval || "1h",
-        period: payload.period || "5d",
+        interval: payload.interval || frame.interval,
+        period: payload.period || frame.period,
+        label: frame.label,
+        description: frame.description,
         storedWasPointQuotes: Boolean(payload.stored_was_point_quotes),
       };
     } catch {
@@ -1810,18 +1838,17 @@ function renderTradeChart(item, variant = "mini") {
   const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
   const startX = plotLeft;
   const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
+  const chartInterval = String(barsMeta.interval || chartFrameConfig().interval || "1m").toUpperCase();
+  const chartPeriod = String(barsMeta.period || chartFrameConfig().period || "1d").toUpperCase();
+  const showDateOnAxis = chartPeriod !== "1D";
   const timeLabel = (timestamp) => {
     if (!timestamp) return "";
     const date = new Date(timestamp);
     if (Number.isNaN(date.getTime())) return "";
-    return new Intl.DateTimeFormat("es-CO", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: "America/New_York",
-    }).format(date);
+    const options = showDateOnAxis
+      ? { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" }
+      : { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" };
+    return new Intl.DateTimeFormat("es-CO", options).format(date);
   };
   const timeTicks = variant === "main" && candles.length
     ? [
@@ -1850,8 +1877,6 @@ function renderTradeChart(item, variant = "mini") {
   }).join("");
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
-  const chartInterval = String(barsMeta.interval || "1h").toUpperCase();
-  const chartPeriod = String(barsMeta.period || "5d").toUpperCase();
   const chartTitle = usingOhlcBars ? `Grafica ${chartInterval} OHLC` : "Mapa XTB de orden";
   const chartSourceText = usingOhlcBars
     ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}`
@@ -2489,6 +2514,7 @@ function renderSimpleDashboard() {
   const topOpportunities = buildTopOpportunities();
   const openingWatchlist = buildOpeningWatchlist();
   const displayedOpportunities = topOpportunities.length ? topOpportunities : openingWatchlist.slice(0, 3);
+  const selectedChartFrame = chartFrameConfig();
   const watchMode = !topOpportunities.length;
   const primaryDisplay = displayedOpportunities.find((item) => item.asset.symbol === symbol) || displayedOpportunities[0] || null;
   const selectedQuote = liveQuotes[String(symbol).toUpperCase()];
@@ -2568,6 +2594,17 @@ function renderSimpleDashboard() {
           <div class="simple-score">
             <span>${watchMode ? primaryDisplay?.status || "VIGILAR" : ai.status}</span>
             <strong>${watchMode && primaryDisplay ? primaryDisplay.confidence : ai.confidence}%</strong>
+          </div>
+        </div>
+        <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
+          <div>
+            <span class="simple-label">Temporalidad grafica</span>
+            <strong>${selectedChartFrame.description}</strong>
+          </div>
+          <div class="chart-frame-buttons">
+            ${Object.values(chartFrameOptions).map((frame) => `
+              <button type="button" class="${frame.key === selectedChartFrame.key ? "active" : ""}" data-chart-frame="${frame.key}">${frame.label}</button>
+            `).join("")}
           </div>
         </div>
         ${primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : ""}
@@ -2671,6 +2708,17 @@ function bindSimpleDashboard() {
       const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()]
         .find((item) => item.asset.symbol === topButton.dataset.simpleTopSymbol);
       if (picked) applySelectedOpportunity(picked, "manual");
+      return;
+    }
+    const chartFrameButton = event.target?.closest?.("[data-chart-frame]");
+    if (chartFrameButton) {
+      setChartFrame(chartFrameButton.dataset.chartFrame);
+      const symbols = [
+        selectedAsset.symbol,
+        ...buildTopOpportunities().map((item) => item.asset.symbol),
+        ...buildOpeningWatchlist().slice(0, 3).map((item) => item.asset.symbol),
+      ];
+      loadMarketBars(symbols).then(() => renderSimpleDashboard());
       return;
     }
     const action = event.target?.dataset?.simpleAction;
