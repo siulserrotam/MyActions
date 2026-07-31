@@ -357,6 +357,16 @@ body {
   stroke: rgb(255 90 102 / 0.8);
 }
 
+.chart-line.support {
+  stroke: rgb(56 189 248 / 0.62);
+  stroke-dasharray: 5 5;
+}
+
+.chart-line.resistance {
+  stroke: rgb(196 181 253 / 0.64);
+  stroke-dasharray: 5 5;
+}
+
 .chart-candle line {
   stroke-width: 1.5;
 }
@@ -403,6 +413,14 @@ body {
 
 .chart-label.stop {
   fill: #ff9da5;
+}
+
+.chart-label.support {
+  fill: #7dd3fc;
+}
+
+.chart-label.resistance {
+  fill: #ddd6fe;
 }
 
 .chart-time-label {

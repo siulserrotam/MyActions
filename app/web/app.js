@@ -1615,9 +1615,43 @@ function buildTradeZones(asset, direction, entry, volume, targetAmount = buildDa
   };
 }
 
-function technicalDecisionText(item) {
+function professionalZonesForItem(item, candles = []) {
+  const zones = item.zones;
+  const lows = candles.map((candle) => Number(candle.l)).filter((value) => Number.isFinite(value) && value > 0);
+  const highs = candles.map((candle) => Number(candle.h)).filter((value) => Number.isFinite(value) && value > 0);
+  const closes = candles.map((candle) => Number(candle.c)).filter((value) => Number.isFinite(value) && value > 0);
+  const support = lows.length ? Math.min(...lows) : Math.min(zones.low, zones.reboundLow, zones.takeProfit);
+  const resistance = highs.length ? Math.max(...highs) : Math.max(zones.high, zones.reboundHigh, zones.stopLoss);
+  const lastClose = closes.length ? closes[closes.length - 1] : zones.price;
+  const trigger = zones.entry;
+  const invalidation = zones.stopLoss;
+  const pullbackLow = Math.min(zones.reboundLow, zones.reboundHigh);
+  const pullbackHigh = Math.max(zones.reboundLow, zones.reboundHigh);
+  const breakoutZone = item.direction === "SHORT" ? "perder soporte/piso" : "romper resistencia/techo";
+  const invalidationText = item.direction === "SHORT"
+    ? "si recupera por encima del stop, la venta queda invalidada"
+    : "si cae por debajo del stop, la compra queda invalidada";
+  const actionText = item.confidence >= 70
+    ? "Esperar ruptura confirmada con cierre de vela 1m fuera del gatillo."
+    : "No perseguir precio: confianza baja, operar solo si mejora la confirmacion.";
+  return {
+    support,
+    resistance,
+    lastClose,
+    trigger,
+    invalidation,
+    pullbackLow,
+    pullbackHigh,
+    breakoutZone,
+    invalidationText,
+    actionText,
+  };
+}
+
+function technicalDecisionText(item, candles = []) {
   const zones = item.zones;
   const strategyTarget = strategyTargetForItem(item);
+  const proZones = professionalZonesForItem(item, candles);
   const changePct = Number(item.asset.liveChangePct ?? 0);
   const directionText = item.direction === "SHORT" ? "sesgo bajista" : "sesgo alcista";
   const orderText = item.direction === "SHORT"
@@ -1632,10 +1666,12 @@ function technicalDecisionText(item) {
   const rr = zones.riskAmount > 0 ? zones.rewardAmount / zones.riskAmount : 0;
   return `
     <div class="strategy-notes">
-      <strong>Estrategia usada: ORB 5m + momentum + control de margen.</strong>
-      <span>Lectura tecnica: ${directionText}; movimiento observado ${numberText(changePct)}% y orden tipo ${orderText}.</span>
-      <span>Zona rebote: area donde el precio puede devolverse antes de confirmar ruptura; no perseguir si esta dentro de esa zona.</span>
-      <span>Zona seguridad: area entre entrada y stop. El ${stopText}; el ${takeText}.</span>
+      <strong>Estrategia usada: ORB 5m + breakout/pullback + control de margen.</strong>
+      <span><b>Por que esta decision:</b> ${directionText}, movimiento observado ${numberText(changePct)}%, y orden tipo ${orderText}.</span>
+      <span><b>Techo/resistencia:</b> ${numberText(proZones.resistance)}. <b>Piso/soporte:</b> ${numberText(proZones.support)}. La operacion solo tiene sentido si el precio confirma ${proZones.breakoutZone}.</span>
+      <span><b>Zona rebote/pullback:</b> ${numberText(proZones.pullbackLow)} - ${numberText(proZones.pullbackHigh)}. Si el precio esta ahi, los profesionales esperan confirmacion y no persiguen.</span>
+      <span><b>Zona de invalidacion:</b> ${numberText(proZones.invalidation)}; ${proZones.invalidationText}. El ${stopText}; el ${takeText}.</span>
+      <span><b>Semaforo:</b> ${proZones.actionText}</span>
       <span>Meta deseada: ${money(zones.rewardAmount)} en ${numberText(zones.takeProfit)}. Meta IA: ${money(strategyTarget.amount)} en ${numberText(strategyTarget.price)}.</span>
       <span>Relacion estimada deseada: 1:${numberText(rr || 0)}. Riesgo ${money(zones.riskAmount)} para objetivo ${money(zones.rewardAmount)}.</span>
     </div>
@@ -1702,6 +1738,7 @@ function renderTradeChart(item, variant = "mini") {
   const usingRealCandles = realCandles.length >= 2;
   const candles = usingRealCandles ? realCandles : buildChartCandles(zones, item.direction);
   const strategyTarget = strategyTargetForItem(item);
+  const proZones = professionalZonesForItem(item, candles);
   const values = [
     zones.low,
     zones.high,
@@ -1713,6 +1750,8 @@ function renderTradeChart(item, variant = "mini") {
     zones.reboundLow,
     zones.reboundHigh,
     strategyTarget.price,
+    proZones.support,
+    proZones.resistance,
     ...candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]),
   ].filter((value) => Number.isFinite(value) && value > 0);
   if (!values.length) return "";
@@ -1754,6 +1793,8 @@ function renderTradeChart(item, variant = "mini") {
       <svg viewBox="0 0 238 112" role="img">
         <rect x="8" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="222" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
         <rect x="8" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="222" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
+        <line x1="8" x2="230" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
+        <line x1="8" x2="230" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />
         <line x1="8" x2="230" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
         <line x1="8" x2="230" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />
         <line x1="8" x2="230" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
@@ -1761,6 +1802,8 @@ function renderTradeChart(item, variant = "mini") {
         ${candleMarkup}
         <text x="10" y="${clamp(y(zones.takeProfit) - 3, 10, 104)}" class="chart-label take">META DESEADA</text>
         <text x="10" y="${clamp(y(strategyTarget.price) + 8, 10, 104)}" class="chart-label ai-take">META IA</text>
+        <text x="10" y="${clamp(y(proZones.resistance) - 3, 10, 104)}" class="chart-label resistance">RESISTENCIA</text>
+        <text x="10" y="${clamp(y(proZones.support) + 8, 10, 104)}" class="chart-label support">SOPORTE</text>
         <text x="94" y="${clamp(y(zones.entry) - 3, 10, 104)}" class="chart-label entry">ENTRADA</text>
         <text x="178" y="${clamp(y(zones.stopLoss) - 3, 10, 104)}" class="chart-label stop">STOP</text>
         ${variant === "main" ? `<text x="10" y="108" class="chart-time-label">${usingRealCandles ? `${candles.length} velas reales de 1 minuto` : "Visual tactico hasta reunir velas reales"} / ventana 30m</text>` : ""}
@@ -1775,10 +1818,11 @@ function renderTradeChart(item, variant = "mini") {
         <div class="trade-zones">
           <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
+          <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
           <span>Fuente grafica: ${usingRealCandles ? `velas reales guardadas (${candles.length}/30)` : "visual tactico; faltan lecturas minuto a minuto"}.</span>
         </div>
-        ${technicalDecisionText(item)}
+        ${technicalDecisionText(item, candles)}
       ` : ""}
     </div>
   `;
