@@ -86,10 +86,13 @@ class LiveMarketService:
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
-    def bars(self, symbol: str, limit: int = 30) -> dict[str, object]:
+    def bars(self, symbol: str, limit: int = 30, interval: str = "1m", period: str = "1d") -> dict[str, object]:
         normalized = symbol.upper().strip()
         yahoo_symbol = self.symbol_map.get(normalized, normalized.replace(".US", ""))
-        frame = self._download(yahoo_symbol, include_prepost=True, period="1d", interval="1m").tail(limit)
+        safe_interval = interval if interval in {"1m", "5m", "15m", "30m", "60m", "1h"} else "1m"
+        safe_period = period if period in {"1d", "5d", "1mo"} else "1d"
+        yahoo_interval = "60m" if safe_interval == "1h" else safe_interval
+        frame = self._download(yahoo_symbol, include_prepost=True, period=safe_period, interval=yahoo_interval).tail(limit)
         items: list[dict[str, object]] = []
         for index, row in frame.iterrows():
             timestamp = index
@@ -108,18 +111,19 @@ class LiveMarketService:
                     "high": round(float(row["high"]), 6),
                     "low": round(float(row["low"]), 6),
                     "close": round(float(row["close"]), 6),
-                    "source": "yfinance_ohlc_1m",
+                    "source": f"yfinance_ohlc_{safe_interval}",
                     "is_ohlc": True,
                 }
             )
         return {
             "symbol": normalized,
             "provider_symbol": yahoo_symbol,
-            "interval": "1m",
+            "interval": safe_interval,
+            "period": safe_period,
             "window_minutes": limit,
             "count": len(items),
             "items": items,
-            "source": "yfinance_ohlc_1m",
+            "source": f"yfinance_ohlc_{safe_interval}",
             "is_real": len(items) >= 2,
             "is_real_ohlc": len(items) >= 2,
             "updated_at": datetime.now(UTC).isoformat(),

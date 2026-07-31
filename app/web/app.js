@@ -806,7 +806,7 @@ async function loadMarketBars(symbols = []) {
   const uniqueSymbols = Array.from(new Set(symbols.map((symbol) => String(symbol || "").trim().toUpperCase()).filter(Boolean)));
   await Promise.all(uniqueSymbols.slice(0, 6).map(async (symbol) => {
     try {
-      const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?limit=30&ts=${Date.now()}`, { cache: "no-store" });
+      const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?limit=60&interval=1h&period=5d&ts=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
       marketBars[symbol] = payload.items || [];
@@ -814,6 +814,8 @@ async function loadMarketBars(symbols = []) {
         source: payload.source || "market_bars",
         isRealOhlc: Boolean(payload.is_real_ohlc),
         providerSymbol: payload.provider_symbol || "",
+        interval: payload.interval || "1h",
+        period: payload.period || "5d",
         storedWasPointQuotes: Boolean(payload.stored_was_point_quotes),
       };
     } catch {
@@ -1790,10 +1792,11 @@ function renderTradeChart(item, variant = "mini") {
   if (!values.length) return "";
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
-  const rawSpan = Math.max(rawMax - rawMin, rawMax * 0.002, 1);
+  const minChartSpan = Math.max(rawMax * 0.002, 0.0001);
+  const rawSpan = Math.max(rawMax - rawMin, minChartSpan);
   const min = rawMin - rawSpan * 0.12;
   const max = rawMax + rawSpan * 0.12;
-  const span = Math.max(max - min, max * 0.002, 1);
+  const span = Math.max(max - min, minChartSpan);
   const visibleLevel = (value) => Number(value) >= min && Number(value) <= max;
   const chartWidth = variant === "main" ? 760 : 238;
   const chartHeight = variant === "main" ? 300 : 112;
@@ -1812,6 +1815,8 @@ function renderTradeChart(item, variant = "mini") {
     const date = new Date(timestamp);
     if (Number.isNaN(date.getTime())) return "";
     return new Intl.DateTimeFormat("es-CO", {
+      day: "2-digit",
+      month: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
@@ -1834,7 +1839,7 @@ function renderTradeChart(item, variant = "mini") {
   const candleMarkup = candles.map((candle, index) => {
     const x = startX + index * candleGap;
     const bodyTop = Math.min(y(candle.o), y(candle.c));
-    const bodyHeight = Math.max(variant === "main" ? 2 : 3, Math.abs(y(candle.o) - y(candle.c)));
+    const bodyHeight = Math.max(variant === "main" ? 5 : 3, Math.abs(y(candle.o) - y(candle.c)));
     const up = candle.c >= candle.o;
     return `
       <g class="chart-candle ${up ? "up" : "down"}">
@@ -1845,9 +1850,11 @@ function renderTradeChart(item, variant = "mini") {
   }).join("");
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
-  const chartTitle = usingOhlcBars ? "Grafica 1m OHLC" : "Mapa XTB de orden";
+  const chartInterval = String(barsMeta.interval || "1h").toUpperCase();
+  const chartPeriod = String(barsMeta.period || "5d").toUpperCase();
+  const chartTitle = usingOhlcBars ? `Grafica ${chartInterval} OHLC` : "Mapa XTB de orden";
   const chartSourceText = usingOhlcBars
-    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo 1m`
+    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}`
     : pointQuoteMode
       ? "lecturas puntuales XTB/Yahoo; no es vela OHLC real"
       : "visual tactico; faltan OHLC completas";
@@ -1900,7 +1907,7 @@ function renderTradeChart(item, variant = "mini") {
         ${variant === "main" ? `
           <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
           <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
-          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales 1m` : usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / escala precio reciente</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / estilo XTB</text>
         ` : ""}
       </svg>
       <div class="chart-legend">
