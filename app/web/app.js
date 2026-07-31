@@ -139,6 +139,10 @@ function numberText(value) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function cfdMarginPct() {
   return 20;
 }
@@ -960,6 +964,7 @@ function buildWatchlistOpportunity(asset) {
   const step = priceStepPct(asset);
   const entry = price ? (direction === "SHORT" ? price * (1 - step) : price * (1 + step)) : 0;
   const volume = entry ? targetContractVolume(asset, entry, accountBalance) : 0;
+  const zones = buildTradeZones(asset, direction, entry, volume, plan.currentTradeRiskAmount);
   const positionValue = entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const marginOk = !availableCapital || marginRequired <= availableCapital;
@@ -1007,6 +1012,10 @@ function buildWatchlistOpportunity(asset) {
     volume,
     price,
     marginRequired,
+    entry,
+    stopLoss: zones.stopLoss,
+    takeProfit: zones.takeProfit,
+    zones,
     reason,
   };
 }
@@ -1507,6 +1516,105 @@ function triggerReadiness(asset, entry, takeProfit, currentPrice = activeMarketP
   };
 }
 
+function quoteRangeForAsset(asset) {
+  const quote = liveQuotes[asset.symbol] || {};
+  const price = Number(asset.marketPrice || quote.price || providerPriceFor(asset.symbol) || 0);
+  const open = Number(quote.open || price || 0);
+  const high = Number(quote.high || Math.max(price, open) || 0);
+  const low = Number(quote.low || Math.min(price, open) || 0);
+  return { price, open, high, low };
+}
+
+function buildTradeZones(asset, direction, entry, volume, targetAmount = buildDailyTradePlan().currentTradeRiskAmount) {
+  const range = quoteRangeForAsset(asset);
+  const price = Number(range.price || entry || 0);
+  const safeEntry = Number(entry || price || 0);
+  const safeVolume = Number(volume || 0);
+  const pctDistance = volatilityStopPct(asset) / 100;
+  const minStopDistance = safeEntry * pctDistance;
+  const moneyStopDistance = safeVolume > 0 ? buildDailyTradePlan().currentTradeStopAmount / (safeVolume * asset.multiplier) : 0;
+  const stopDistance = Math.max(minStopDistance, moneyStopDistance || 0);
+  const takeDistance = safeVolume > 0 ? targetAmount / (safeVolume * asset.multiplier) : safeEntry * priceStepPct(asset) * 2;
+  const stopLoss = direction === "LONG" ? safeEntry - stopDistance : safeEntry + stopDistance;
+  const takeProfit = direction === "LONG" ? safeEntry + takeDistance : safeEntry - takeDistance;
+  const reboundDistance = Math.max(minStopDistance * 0.45, safeEntry * priceStepPct(asset) * 0.5);
+  const reboundLow = direction === "LONG" ? price - reboundDistance : price;
+  const reboundHigh = direction === "LONG" ? price : price + reboundDistance;
+  const securityLow = Math.min(stopLoss, safeEntry);
+  const securityHigh = Math.max(stopLoss, safeEntry);
+  const riskAmount = Math.abs(safeEntry - stopLoss) * asset.multiplier * safeVolume;
+  const rewardAmount = Math.abs(takeProfit - safeEntry) * asset.multiplier * safeVolume;
+  return {
+    price,
+    open: range.open,
+    high: range.high,
+    low: range.low,
+    entry: safeEntry,
+    stopLoss,
+    takeProfit,
+    reboundLow,
+    reboundHigh,
+    securityLow,
+    securityHigh,
+    riskAmount,
+    rewardAmount,
+    stopPct: safeEntry > 0 ? Math.abs(safeEntry - stopLoss) / safeEntry * 100 : 0,
+    takePct: safeEntry > 0 ? Math.abs(takeProfit - safeEntry) / safeEntry * 100 : 0,
+  };
+}
+
+function renderMiniTradeChart(item) {
+  const zones = item.zones;
+  if (!zones) return "";
+  const values = [
+    zones.low,
+    zones.high,
+    zones.open,
+    zones.price,
+    zones.entry,
+    zones.stopLoss,
+    zones.takeProfit,
+    zones.reboundLow,
+    zones.reboundHigh,
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, max * 0.002, 1);
+  const y = (value) => clamp(96 - ((value - min) / span) * 84, 8, 96);
+  const rangePoints = [
+    zones.open || zones.price,
+    (zones.open + zones.low) / 2 || zones.price,
+    zones.low || zones.price,
+    (zones.low + zones.price) / 2 || zones.price,
+    zones.price,
+    (zones.price + zones.high) / 2 || zones.price,
+    zones.high || zones.price,
+    zones.price,
+  ];
+  const points = rangePoints.map((value, index) => `${12 + index * 30},${y(value)}`).join(" ");
+  const color = item.direction === "SHORT" ? "#ff5a66" : "#39ff88";
+  const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
+  return `
+    <div class="mini-trade-chart" aria-label="Mapa rapido de ${item.asset.symbol}">
+      <svg viewBox="0 0 238 112" role="img">
+        <rect x="8" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="222" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
+        <rect x="8" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="222" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
+        <line x1="8" x2="230" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
+        <line x1="8" x2="230" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
+        <line x1="8" x2="230" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
+        <polyline points="${points}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        <circle cx="222" cy="${y(zones.price)}" r="4" fill="${color}" />
+      </svg>
+      <div class="chart-legend">
+        <span class="take">Take ${numberText(zones.takeProfit)}</span>
+        <span class="entry">Entrada ${numberText(zones.entry)}</span>
+        <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function inverseDirection(direction) {
   return direction === "LONG" ? "SHORT" : "LONG";
 }
@@ -1560,6 +1668,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const marginRequired = positionValue * cfdMarginPct() / 100;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
   const takeProfit = direction === "SHORT" ? entry - targetDistance : entry + targetDistance;
+  const zones = buildTradeZones(asset, direction, entry, volume, targetAmount);
   const trigger = triggerReadiness(asset, entry, takeProfit, asset.marketPrice);
   const spreadCost = estimatedSpreadCost(asset, volume);
   const hasVolume = asset.category === "stocks" ? volume >= 1 : volume > 0;
@@ -1597,6 +1706,9 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
     directionLabel: labelFromDirection(direction),
     usable,
     entry,
+    stopLoss: zones.stopLoss,
+    takeProfit,
+    zones,
     stopDistance: 0,
     marginRequired,
     spreadCost,
@@ -1642,6 +1754,8 @@ function renderTopOpportunities() {
             <span class="text-xs text-gold">#${index + 1}</span>
             <span class="block text-base font-black">${item.asset.symbol}</span>
             <span class="block text-xs ${item.direction === "SHORT" ? "text-bear" : "text-bull"}">${item.directionLabel}</span>
+            ${renderMiniTradeChart(item)}
+            <span class="mt-1 block text-xs text-zinc-500">Rebote ${numberText(item.zones.reboundLow)}-${numberText(item.zones.reboundHigh)} | Seguridad ${numberText(item.zones.securityLow)}-${numberText(item.zones.securityHigh)}</span>
             <span class="mt-1 block text-xs text-zinc-500">${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</span>
           </button>
         `).join("") : `<div class="rounded-xl border border-white/10 bg-panel2 p-3 text-xs text-zinc-400">No hay activos claros. Espera el proximo refresh.</div>`}
@@ -2141,6 +2255,8 @@ function renderSimpleDashboard() {
             <button type="button" class="simple-top-item ${item.asset.symbol === symbol ? "active" : ""}" data-simple-top-symbol="${item.asset.symbol}">
               <span>#${index + 1} ${item.asset.symbol}</span>
               <strong>${item.directionLabel}</strong>
+              ${renderMiniTradeChart(item)}
+              <small>Rebote ${numberText(item.zones.reboundLow)}-${numberText(item.zones.reboundHigh)}. Seguridad ${numberText(item.zones.securityLow)}-${numberText(item.zones.securityHigh)}.</small>
               <small>${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</small>
             </button>
           `).join("") : `<div class="simple-top-empty">No hay camino claro desde Yahoo. Espera nueva lectura.</div>`}
