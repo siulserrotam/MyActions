@@ -1727,11 +1727,14 @@ function realCandlesForItem(item) {
       c: Number(bar.close || 0),
       timestamp: bar.timestamp,
       source: bar.source || "market_bars",
+      pointQuote: Number(bar.open || 0) === Number(bar.high || 0)
+        && Number(bar.high || 0) === Number(bar.low || 0)
+        && Number(bar.low || 0) === Number(bar.close || 0),
     }))
     .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
   return candles.map((candle, index) => {
     const previousClose = index > 0 ? candles[index - 1].c : candle.o;
-    const isPointQuote = candle.o === candle.h && candle.h === candle.l && candle.l === candle.c;
+    const isPointQuote = candle.pointQuote;
     if (!isPointQuote) return candle;
     const o = previousClose || candle.c;
     const c = candle.c;
@@ -1755,6 +1758,11 @@ function renderTradeChart(item, variant = "mini") {
   const candles = usingRealCandles ? realCandles : buildChartCandles(zones, item.direction);
   const strategyTarget = strategyTargetForItem(item);
   const proZones = professionalZonesForItem(item, candles);
+  const candleValues = candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]);
+  const candleMin = Math.min(...candleValues);
+  const candleMax = Math.max(...candleValues);
+  const candleSpan = Math.max(candleMax - candleMin, zones.price * 0.002, 0.0001);
+  const nearLevel = (value) => Math.abs(Number(value) - zones.price) <= candleSpan * 2.8;
   const values = [
     zones.low,
     zones.high,
@@ -1762,13 +1770,13 @@ function renderTradeChart(item, variant = "mini") {
     zones.price,
     zones.entry,
     zones.stopLoss,
-    zones.takeProfit,
     zones.reboundLow,
     zones.reboundHigh,
-    strategyTarget.price,
     proZones.support,
     proZones.resistance,
-    ...candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]),
+    ...candleValues,
+    ...(nearLevel(zones.takeProfit) ? [zones.takeProfit] : []),
+    ...(nearLevel(strategyTarget.price) ? [strategyTarget.price] : []),
   ].filter((value) => Number.isFinite(value) && value > 0);
   if (!values.length) return "";
   const rawMin = Math.min(...values);
@@ -1777,6 +1785,7 @@ function renderTradeChart(item, variant = "mini") {
   const min = rawMin - rawSpan * 0.12;
   const max = rawMax + rawSpan * 0.12;
   const span = Math.max(max - min, max * 0.002, 1);
+  const visibleLevel = (value) => Number(value) >= min && Number(value) <= max;
   const chartWidth = variant === "main" ? 760 : 238;
   const chartHeight = variant === "main" ? 300 : 112;
   const plotLeft = variant === "main" ? 46 : 10;
@@ -1809,6 +1818,8 @@ function renderTradeChart(item, variant = "mini") {
   }).join("");
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
+  const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
+  const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
   const axisMarkup = variant === "main" ? priceTicks.map((tick) => `
     <g class="chart-grid-line">
       <line x1="${plotLeft}" x2="${plotRight}" y1="${y(tick)}" y2="${y(tick)}" />
@@ -1820,7 +1831,7 @@ function renderTradeChart(item, variant = "mini") {
       ${variant === "main" ? `
         <div class="trade-chart-head">
           <div>
-            <span>Grafica uno a uno</span>
+            <span>Mapa XTB de orden</span>
             <strong>${title}</strong>
           </div>
           <div>
@@ -1836,19 +1847,19 @@ function renderTradeChart(item, variant = "mini") {
         <rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />
+        ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
+        ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
         ${candleMarkup}
-        ${levelTag("TP", zones.takeProfit, "take")}
-        ${levelTag("IA", strategyTarget.price, "ai-take")}
+        ${visibleLevel(zones.takeProfit) ? levelTag("TP", zones.takeProfit, "take") : ""}
+        ${visibleLevel(strategyTarget.price) ? levelTag("IA", strategyTarget.price, "ai-take") : ""}
         ${levelTag("Entrada", zones.entry, "entry")}
         ${levelTag("SL", zones.stopLoss, "stop")}
         ${variant === "main" ? `
           <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
           <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
-          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingRealCandles ? `${candles.length} velas reales de 1 minuto` : "Visual tactico hasta reunir velas reales"} / ventana 30m</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / escala precio reciente</text>
         ` : ""}
       </svg>
       <div class="chart-legend">
@@ -1863,7 +1874,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
           <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
-          <span>Fuente grafica: ${usingRealCandles ? `velas reales guardadas (${candles.length}/30)` : "visual tactico; faltan lecturas minuto a minuto"}.</span>
+          <span>Fuente grafica: ${usingRealCandles ? `lecturas guardadas (${candles.length}/30)` : "visual tactico; faltan lecturas minuto a minuto"}${pointQuoteMode ? "; muchas son precio puntual, no vela OHLC completa" : ""}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}
