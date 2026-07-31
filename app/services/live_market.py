@@ -86,6 +86,45 @@ class LiveMarketService:
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
+    def bars(self, symbol: str, limit: int = 30) -> dict[str, object]:
+        normalized = symbol.upper().strip()
+        yahoo_symbol = self.symbol_map.get(normalized, normalized.replace(".US", ""))
+        frame = self._download(yahoo_symbol, include_prepost=True, period="1d", interval="1m").tail(limit)
+        items: list[dict[str, object]] = []
+        for index, row in frame.iterrows():
+            timestamp = index
+            if isinstance(timestamp, pd.Timestamp):
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.tz_localize("UTC")
+                timestamp_text = timestamp.tz_convert("UTC").isoformat()
+            else:
+                timestamp_text = datetime.now(UTC).isoformat()
+            items.append(
+                {
+                    "symbol": normalized,
+                    "provider_symbol": yahoo_symbol,
+                    "timestamp": timestamp_text,
+                    "open": round(float(row["open"]), 6),
+                    "high": round(float(row["high"]), 6),
+                    "low": round(float(row["low"]), 6),
+                    "close": round(float(row["close"]), 6),
+                    "source": "yfinance_ohlc_1m",
+                    "is_ohlc": True,
+                }
+            )
+        return {
+            "symbol": normalized,
+            "provider_symbol": yahoo_symbol,
+            "interval": "1m",
+            "window_minutes": limit,
+            "count": len(items),
+            "items": items,
+            "source": "yfinance_ohlc_1m",
+            "is_real": len(items) >= 2,
+            "is_real_ohlc": len(items) >= 2,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
     def _download(self, yahoo_symbol: str, include_prepost: bool = False, period: str = "1d", interval: str = "1m"):
         import yfinance as yf
 

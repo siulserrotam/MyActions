@@ -384,7 +384,29 @@ def market_bars(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     try:
-        return MarketBarService().recent(session, symbol=symbol, limit=limit)
+        stored = MarketBarService().recent(session, symbol=symbol, limit=limit)
+        items = stored.get("items", [])
+        point_count = sum(
+            1
+            for item in items
+            if float(item.get("open") or 0)
+            == float(item.get("high") or 0)
+            == float(item.get("low") or 0)
+            == float(item.get("close") or 0)
+        )
+        mostly_point_quotes = bool(items) and point_count >= max(2, int(len(items) * 0.55))
+        if len(items) < 2 or mostly_point_quotes:
+            try:
+                live_bars = LiveMarketService().bars(symbol, limit=limit)
+                if live_bars.get("count", 0) >= 2:
+                    live_bars["stored_fallback_count"] = len(items)
+                    live_bars["stored_was_point_quotes"] = mostly_point_quotes
+                    return live_bars
+            except Exception:
+                pass
+        stored["is_real_ohlc"] = not mostly_point_quotes and len(items) >= 2
+        stored["stored_was_point_quotes"] = mostly_point_quotes
+        return stored
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

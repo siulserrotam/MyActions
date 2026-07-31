@@ -77,6 +77,7 @@ let autoRefreshTimer = null;
 let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
 let marketBars = {};
+let marketBarMeta = {};
 let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
@@ -809,8 +810,15 @@ async function loadMarketBars(symbols = []) {
       if (!response.ok) return;
       const payload = await response.json();
       marketBars[symbol] = payload.items || [];
+      marketBarMeta[symbol] = {
+        source: payload.source || "market_bars",
+        isRealOhlc: Boolean(payload.is_real_ohlc),
+        providerSymbol: payload.provider_symbol || "",
+        storedWasPointQuotes: Boolean(payload.stored_was_point_quotes),
+      };
     } catch {
       marketBars[symbol] = marketBars[symbol] || [];
+      marketBarMeta[symbol] = marketBarMeta[symbol] || {};
     }
   }));
 }
@@ -1727,7 +1735,7 @@ function realCandlesForItem(item) {
       c: Number(bar.close || 0),
       timestamp: bar.timestamp,
       source: bar.source || "market_bars",
-      pointQuote: Number(bar.open || 0) === Number(bar.high || 0)
+      pointQuote: bar.is_ohlc === true ? false : Number(bar.open || 0) === Number(bar.high || 0)
         && Number(bar.high || 0) === Number(bar.low || 0)
         && Number(bar.low || 0) === Number(bar.close || 0),
     }))
@@ -1820,6 +1828,14 @@ function renderTradeChart(item, variant = "mini") {
   const title = `${item.asset.symbol} ${item.directionLabel}`;
   const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
   const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
+  const barsMeta = marketBarMeta[item.asset.symbol] || {};
+  const usingOhlcBars = usingRealCandles && barsMeta.isRealOhlc && !pointQuoteMode;
+  const chartTitle = usingOhlcBars ? "Grafica 1m OHLC" : "Mapa XTB de orden";
+  const chartSourceText = usingOhlcBars
+    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo 1m`
+    : pointQuoteMode
+      ? "lecturas puntuales XTB/Yahoo; no es vela OHLC real"
+      : "visual tactico; faltan OHLC completas";
   const axisMarkup = variant === "main" ? priceTicks.map((tick) => `
     <g class="chart-grid-line">
       <line x1="${plotLeft}" x2="${plotRight}" y1="${y(tick)}" y2="${y(tick)}" />
@@ -1831,7 +1847,7 @@ function renderTradeChart(item, variant = "mini") {
       ${variant === "main" ? `
         <div class="trade-chart-head">
           <div>
-            <span>Mapa XTB de orden</span>
+            <span>${chartTitle}</span>
             <strong>${title}</strong>
           </div>
           <div>
@@ -1859,7 +1875,7 @@ function renderTradeChart(item, variant = "mini") {
         ${variant === "main" ? `
           <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
           <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
-          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / escala precio reciente</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales 1m` : usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / escala precio reciente</text>
         ` : ""}
       </svg>
       <div class="chart-legend">
@@ -1874,7 +1890,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
           <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
-          <span>Fuente grafica: ${usingRealCandles ? `lecturas guardadas (${candles.length}/30)` : "visual tactico; faltan lecturas minuto a minuto"}${pointQuoteMode ? "; muchas son precio puntual, no vela OHLC completa" : ""}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
+          <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}

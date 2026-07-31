@@ -67,6 +67,27 @@ function extractXtbQuotes(text) {
   }));
 }
 
+function pickMidPrice(quote) {
+  if (!quote) return null;
+  if (quote.bid && quote.ask) return Number(((quote.bid + quote.ask) / 2).toFixed(2));
+  return quote.bid || quote.ask || null;
+}
+
+async function sendQuoteBatchToDashboard(page, quotes) {
+  const items = Object.entries(quotes).map(([symbol, quote]) => ({
+    symbol,
+    bid: quote.bid,
+    ask: quote.ask,
+    price: pickMidPrice(quote),
+    change_pct: 0
+  })).filter((item) => item.price !== null);
+  if (!items.length) return false;
+  return page.evaluate((quoteItems) => {
+    window.dispatchEvent(new CustomEvent('xtb-quotes', { detail: { items: quoteItems } }));
+    return true;
+  }, items);
+}
+
 async function writeSnapshot(payload) {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const latestPath = path.join(DATA_DIR, 'latest.json');
@@ -111,6 +132,13 @@ async function once() {
   }
 
   if (snapshot.xtb && snapshot.dashboard) {
+    try {
+      await sendQuoteBatchToDashboard(dashboardPage, snapshot.xtb.quotes);
+      snapshot.dashboard.synced_quotes_to_page = true;
+    } catch (error) {
+      snapshot.dashboard.synced_quotes_to_page = false;
+      snapshot.dashboard.sync_error = error.message;
+    }
     snapshot.note = 'Lectura activa: compara el precio de mercado con quotes.*.bid/ask de XTB antes de operar.';
   }
 
