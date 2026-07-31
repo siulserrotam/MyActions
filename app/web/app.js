@@ -857,7 +857,9 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
   const symbols = uniqueAssets().map((asset) => asset.symbol).join(",");
   try {
     updateLiveStatus("Live prices: actualizando...");
-    const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}`);
+    const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}&ts=${Date.now()}`, {
+      cache: "no-store",
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     (payload.items || []).forEach(applyLiveQuote);
@@ -1140,12 +1142,12 @@ function marketRefreshProfile() {
   const { weekday, total } = nyMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   if (isWeekday && total >= 9 * 60 + 30 && total < 16 * 60) {
-    return { ms: 60 * 1000, label: "mercado abierto, cada 1 min" };
+    return { ms: 30 * 1000, label: "mercado abierto, cada 30 seg" };
   }
   if (isWeekday && total >= 4 * 60 && total < 20 * 60) {
-    return { ms: 60 * 1000, label: "pre/post-market Yahoo, cada 1 min" };
+    return { ms: 30 * 1000, label: "pre/post-market Yahoo, cada 30 seg" };
   }
-  return { ms: 60 * 60 * 1000, label: "mercado cerrado profundo, cada 1 hora" };
+  return { ms: 5 * 60 * 1000, label: "mercado cerrado profundo, cada 5 min" };
 }
 
 function scheduleAutoRefresh() {
