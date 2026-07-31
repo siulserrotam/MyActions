@@ -20,7 +20,7 @@ class LiveMarketService:
         "US500": "^GSPC",
         "DE40": "^GDAXI",
         "GOLD": "GC=F",
-        "OIL": "CL=F",
+        "OIL": "BZ=F",
         "NATGAS": "NG=F",
         "BTCUSD": "BTC-USD",
         "ETHUSD": "ETH-USD",

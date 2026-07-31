@@ -760,6 +760,9 @@ function applyLiveQuote(quote) {
   const price = Number(quote.price || 0);
   if (!price) return;
   liveQuotes[quote.symbol] = { ...(liveQuotes[quote.symbol] || {}), ...quote };
+  if (String(quote.source || "").startsWith("yfinance")) {
+    liveQuotes[quote.symbol].provider_price = price;
+  }
   Object.values(assetGroups).flat().forEach((asset) => {
     if (asset.symbol === quote.symbol) {
       asset.marketPrice = price;
@@ -784,7 +787,15 @@ function hasFreshMarketQuote(asset) {
 }
 
 function providerPriceFor(symbol) {
-  return Number(liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
+  return Number(liveQuotes[symbol]?.provider_price || liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
+}
+
+function providerXtbGapPct(asset) {
+  const quote = liveQuotes[asset.symbol] || {};
+  const providerPrice = Number(quote.provider_price || 0);
+  const xtbPrice = Number(quote.source === "xtb" ? quote.price : 0);
+  if (!providerPrice || !xtbPrice) return 0;
+  return Math.abs(xtbPrice - providerPrice) / providerPrice * 100;
 }
 
 function estimatedSpreadCost(asset, volume) {
@@ -880,14 +891,15 @@ function applyXtbQuoteBatch(items = []) {
       if (!symbol || !price) return null;
       const previousProviderQuote = liveQuotes[symbol] || {};
       const previousSignalSource = previousProviderQuote.signal_source || previousProviderQuote.source || "";
-      const shouldKeepProviderMove = symbol.endsWith(".US") && String(previousSignalSource).startsWith("yfinance");
-      const shouldIgnoreXtbMove = symbol.endsWith(".US") && !shouldKeepProviderMove;
+      const shouldKeepProviderMove = !isMarketOpenNow() && String(previousSignalSource).startsWith("yfinance");
+      const shouldIgnoreXtbMove = !isMarketOpenNow() && !shouldKeepProviderMove;
       const xtbChangePct = Number(item.change_pct || 0);
       return {
         symbol,
         price,
         bid: Number(item.bid || 0) || null,
         ask: Number(item.ask || 0) || null,
+        provider_price: previousProviderQuote.provider_price || (String(previousSignalSource).startsWith("yfinance") ? previousProviderQuote.price : null),
         xtb_change_pct: xtbChangePct,
         change_pct: shouldKeepProviderMove ? previousProviderQuote.change_pct : shouldIgnoreXtbMove ? 0 : xtbChangePct,
         premarket_change_pct: previousProviderQuote.premarket_change_pct,
@@ -1474,7 +1486,9 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const spreadOk = !spreadCost || spreadCost <= targetAmount;
   const impulseOk = trigger.ready;
   const freshQuote = hasFreshMarketQuote(asset);
-  const usable = freshQuote && hasVolume && hasMargin && spreadOk && impulseOk;
+  const gapPct = providerXtbGapPct(asset);
+  const gapOk = !gapPct || gapPct <= 2;
+  const usable = freshQuote && gapOk && hasVolume && hasMargin && spreadOk && impulseOk;
   const movementScore = Math.abs(changePct) * 20;
   const directionPenalty = driftDirection === "WAIT" ? -30 : 0;
   const marginPenalty = hasMargin ? 0 : -80;
@@ -1482,15 +1496,18 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const spreadPenalty = spreadOk ? 0 : -120;
   const impulsePenalty = impulseOk ? 0 : -100;
   const freshnessPenalty = freshQuote ? 0 : -150;
+  const gapPenalty = gapOk ? 0 : -200;
   const marginUsePct = marginBudget > 0 ? Math.min(100, marginRequired / marginBudget * 100) : 0;
   const marginUseScore = usable ? marginUsePct / 5 : 0;
   const limitReason = !freshQuote
     ? "cotizacion Yahoo no reciente; actualiza antes de confiar en la senal"
+    : !gapOk
+    ? `brecha Yahoo/XTB ${numberText(gapPct)}%; valida simbolo del contrato antes de operar`
     : !spreadOk
     ? `spread ${money(spreadCost)} supera meta ${money(targetAmount)}`
     : !impulseOk ? trigger.message
     : volume < contractVolume ? "limitado por margen" : "contrato cerca del capital operativo";
-  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty + impulsePenalty + freshnessPenalty;
+  const score = (usable ? 50 : -50) + movementScore + marginUseScore + directionPenalty + marginPenalty + volumePenalty + spreadPenalty + impulsePenalty + freshnessPenalty + gapPenalty;
   return {
     asset,
     volume,
