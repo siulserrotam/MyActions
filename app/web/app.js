@@ -76,6 +76,7 @@ let postbackTimer = null;
 let autoRefreshTimer = null;
 let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
+let marketBars = {};
 let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
@@ -779,6 +780,41 @@ function applyLiveQuote(quote) {
   });
 }
 
+async function saveQuoteBars(items = [], source = "dashboard") {
+  const payloadItems = items
+    .map((item) => ({
+      symbol: String(item.symbol || "").trim().toUpperCase(),
+      price: Number(item.price || 0),
+      source: item.source || source,
+    }))
+    .filter((item) => item.symbol && item.price > 0);
+  if (!payloadItems.length) return;
+  try {
+    await fetch("/market/bars", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, items: payloadItems }),
+      cache: "no-store",
+    });
+  } catch {
+    // La grafica puede seguir funcionando con la visualizacion tactica si la DB falla.
+  }
+}
+
+async function loadMarketBars(symbols = []) {
+  const uniqueSymbols = Array.from(new Set(symbols.map((symbol) => String(symbol || "").trim().toUpperCase()).filter(Boolean)));
+  await Promise.all(uniqueSymbols.slice(0, 6).map(async (symbol) => {
+    try {
+      const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?limit=30&ts=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      marketBars[symbol] = payload.items || [];
+    } catch {
+      marketBars[symbol] = marketBars[symbol] || [];
+    }
+  }));
+}
+
 function quoteAgeMinutes(asset) {
   const updatedAt = asset?.liveUpdatedAt ? new Date(asset.liveUpdatedAt).getTime() : 0;
   if (!updatedAt || Number.isNaN(updatedAt)) return Infinity;
@@ -866,7 +902,13 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
-    (payload.items || []).forEach(applyLiveQuote);
+    const liveItems = payload.items || [];
+    liveItems.forEach(applyLiveQuote);
+    await saveQuoteBars(liveItems, "yfinance_1m");
+    await loadMarketBars([
+      selectedAsset.symbol,
+      ...liveItems.slice(0, 6).map((item) => item.symbol),
+    ]);
     if (resetSelected) {
       const operable = pickBestCfdOpportunity();
       const watch = pickBestWatchlistOpportunity();
@@ -922,6 +964,11 @@ function applyXtbQuoteBatch(items = []) {
     .filter(Boolean);
 
   validQuotes.forEach(applyLiveQuote);
+  saveQuoteBars(validQuotes, "xtb_visible_text").then(() => {
+    loadMarketBars(validQuotes.map((item) => item.symbol)).then(() => {
+      renderSimpleDashboard();
+    });
+  });
   const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
   if (best && !isManualOpportunityLocked()) {
     applySelectedOpportunity(best, "xtb");
@@ -1045,6 +1092,7 @@ function applySelectedOpportunity(opportunity, source = "auto") {
   if (xtbInput && quotePrice) xtbInput.value = quotePrice.toFixed(2);
   resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
   applyAiAggressiveTargets(selectedAsset);
+  loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
   renderAssets();
   renderTopOpportunities();
   if (source === "xtb") saveConfigLocal();
@@ -1123,6 +1171,9 @@ function applyXtbPriceOverride() {
     return;
   }
   document.getElementById("market-price").value = formatPriceForAsset(xtbPrice, asset);
+  saveQuoteBars([{ symbol: asset.symbol, price: xtbPrice, source: "xtb_override" }], "xtb_override")
+    .then(() => loadMarketBars([asset.symbol]))
+    .then(() => renderSimpleDashboard());
   selectedAsset = { ...findAsset(asset.symbol), marketPrice: xtbPrice };
   resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
   renderPriceGapStatus();
@@ -1284,6 +1335,7 @@ function renderAssets() {
       document.getElementById("symbol").value = selectedAsset.symbol;
       document.getElementById("xtb-price").value = "";
       resetOrderForCurrentMode(selectedAsset);
+      loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
       renderAssets();
       calculate();
     });
@@ -1629,10 +1681,26 @@ function buildChartCandles(zones, direction) {
   }));
 }
 
+function realCandlesForItem(item) {
+  const rows = marketBars[item.asset.symbol] || [];
+  return rows.slice(-30)
+    .map((bar) => ({
+      o: Number(bar.open || 0),
+      h: Number(bar.high || 0),
+      l: Number(bar.low || 0),
+      c: Number(bar.close || 0),
+      timestamp: bar.timestamp,
+      source: bar.source || "market_bars",
+    }))
+    .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
+}
+
 function renderTradeChart(item, variant = "mini") {
   const zones = item.zones;
   if (!zones) return "";
-  const candles = buildChartCandles(zones, item.direction);
+  const realCandles = realCandlesForItem(item);
+  const usingRealCandles = realCandles.length >= 2;
+  const candles = usingRealCandles ? realCandles : buildChartCandles(zones, item.direction);
   const strategyTarget = strategyTargetForItem(item);
   const values = [
     zones.low,
@@ -1695,7 +1763,7 @@ function renderTradeChart(item, variant = "mini") {
         <text x="10" y="${clamp(y(strategyTarget.price) + 8, 10, 104)}" class="chart-label ai-take">META IA</text>
         <text x="94" y="${clamp(y(zones.entry) - 3, 10, 104)}" class="chart-label entry">ENTRADA</text>
         <text x="178" y="${clamp(y(zones.stopLoss) - 3, 10, 104)}" class="chart-label stop">STOP</text>
-        ${variant === "main" ? `<text x="10" y="108" class="chart-time-label">30 velas de 1 minuto / ventana 30m</text>` : ""}
+        ${variant === "main" ? `<text x="10" y="108" class="chart-time-label">${usingRealCandles ? `${candles.length} velas reales de 1 minuto` : "Visual tactico hasta reunir velas reales"} / ventana 30m</text>` : ""}
       </svg>
       <div class="chart-legend">
         <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
@@ -1708,6 +1776,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
+          <span>Fuente grafica: ${usingRealCandles ? `velas reales guardadas (${candles.length}/30)` : "visual tactico; faltan lecturas minuto a minuto"}.</span>
         </div>
         ${technicalDecisionText(item)}
       ` : ""}
@@ -1871,6 +1940,7 @@ function renderTopOpportunities() {
       selectedAsset = findAsset(button.dataset.topSymbol);
       document.getElementById("symbol").value = selectedAsset.symbol;
       document.getElementById("xtb-price").value = "";
+      loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
       const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()].find((item) => item.asset.symbol === selectedAsset.symbol);
       resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       applyAiAggressiveTargets(selectedAsset);
@@ -3086,6 +3156,7 @@ function bindInputs() {
     selectedAsset = findAsset(document.getElementById("symbol").value.trim().toUpperCase());
     document.getElementById("xtb-price").value = "";
     resetOrderForCurrentMode(selectedAsset);
+    loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
     renderAssets();
     calculate();
   });
@@ -3096,6 +3167,7 @@ function bindInputs() {
       selectedAsset = typedAsset;
       document.getElementById("xtb-price").value = "";
       resetOrderForCurrentMode(selectedAsset);
+      loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
       renderAssets();
       calculate();
     }
@@ -3138,6 +3210,7 @@ async function initDashboard() {
   selectedAsset = selectedAssetFromForm();
   resetOrderForCurrentMode(selectedAsset);
   refreshNotificationStatus();
+  await loadMarketBars([selectedAsset.symbol]);
   calculate();
   renderSimpleDashboard();
   refreshLivePrices({ resetSelected: true });

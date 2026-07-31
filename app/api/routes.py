@@ -38,6 +38,7 @@ from app.services.market_clock import MarketClockService
 from app.services.decision_engine import DecisionEngineService
 from app.services.live_market import LiveMarketService
 from app.services.lessons import TradeLessonService
+from app.services.market_bars import MarketBarService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -90,6 +91,17 @@ class TradeLessonRequest(BaseModel):
     confidence: float = Field(default=0, ge=0, le=100)
     market_phase: str = Field(default="", max_length=64)
     notes: str = Field(default="", max_length=1000)
+
+
+class MarketBarQuote(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    price: float = Field(gt=0)
+    source: str = Field(default="dashboard", max_length=64)
+
+
+class MarketBarsRequest(BaseModel):
+    source: str = Field(default="dashboard", max_length=64)
+    items: list[MarketBarQuote] = Field(default_factory=list, max_length=80)
 
 
 def validate_ticker(ticker: str) -> str:
@@ -362,6 +374,36 @@ def market_live_symbol(symbol: str) -> dict[str, object]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"No se pudo cargar precio live para {symbol}: {exc}",
+        ) from exc
+
+
+@router.get("/market/bars/{symbol}")
+def market_bars(
+    symbol: str,
+    limit: int = Query(30, ge=2, le=240),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return MarketBarService().recent(session, symbol=symbol, limit=limit)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudieron cargar velas para {symbol}: {exc}",
+        ) from exc
+
+
+@router.post("/market/bars")
+def save_market_bars(
+    payload: MarketBarsRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        items = [item.model_dump() for item in payload.items]
+        return MarketBarService().save_quotes(session, items=items, source=payload.source)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudieron guardar velas: {exc}",
         ) from exc
 
 
