@@ -353,6 +353,50 @@ body {
   stroke: rgb(255 90 102 / 0.8);
 }
 
+.chart-candle line {
+  stroke-width: 1.5;
+}
+
+.chart-candle rect {
+  stroke-width: 1.2;
+}
+
+.chart-candle.up line,
+.chart-candle.up rect {
+  stroke: rgb(57 255 136 / 0.9);
+}
+
+.chart-candle.up rect {
+  fill: rgb(57 255 136 / 0.55);
+}
+
+.chart-candle.down line,
+.chart-candle.down rect {
+  stroke: rgb(255 90 102 / 0.92);
+}
+
+.chart-candle.down rect {
+  fill: rgb(255 90 102 / 0.58);
+}
+
+.chart-label {
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.chart-label.take {
+  fill: #9fffc4;
+}
+
+.chart-label.entry {
+  fill: #ffe5a8;
+}
+
+.chart-label.stop {
+  fill: #ff9da5;
+}
+
 .chart-legend {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -388,6 +432,25 @@ body {
   color: #abc7bf;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.strategy-notes {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 10px;
+  color: #d7eee6;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.strategy-notes strong {
+  color: #fff4c2;
+  font-size: 13px;
+}
+
+.strategy-notes span {
+  display: block;
 }
 
 .simple-head {
