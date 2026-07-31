@@ -352,6 +352,18 @@ body {
   font-weight: 800;
 }
 
+.chart-time-tick line {
+  stroke: rgb(255 255 255 / 0.055);
+  stroke-width: 1;
+}
+
+.chart-time-tick text {
+  fill: #9cb8af;
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
 .chart-line {
   stroke-width: 2.2;
   stroke-dasharray: 8 6;
@@ -384,11 +396,11 @@ body {
 }
 
 .chart-candle line {
-  stroke-width: 2.3;
+  stroke-width: 2.8;
 }
 
 .chart-candle rect {
-  stroke-width: 1.6;
+  stroke-width: 2;
 }
 
 .chart-candle.up line,

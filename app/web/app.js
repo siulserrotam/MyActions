@@ -1766,23 +1766,24 @@ function renderTradeChart(item, variant = "mini") {
   const candles = usingRealCandles ? realCandles : buildChartCandles(zones, item.direction);
   const strategyTarget = strategyTargetForItem(item);
   const proZones = professionalZonesForItem(item, candles);
+  const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
+  const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
+  const barsMeta = marketBarMeta[item.asset.symbol] || {};
+  const usingOhlcBars = usingRealCandles && barsMeta.isRealOhlc && !pointQuoteMode;
   const candleValues = candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]);
   const candleMin = Math.min(...candleValues);
   const candleMax = Math.max(...candleValues);
   const candleSpan = Math.max(candleMax - candleMin, zones.price * 0.002, 0.0001);
-  const nearLevel = (value) => Math.abs(Number(value) - zones.price) <= candleSpan * 2.8;
+  const nearLevel = (value) => Math.abs(Number(value) - zones.price) <= candleSpan * (usingOhlcBars ? 1.2 : 2.8);
   const values = [
-    zones.low,
-    zones.high,
-    zones.open,
     zones.price,
-    zones.entry,
-    zones.stopLoss,
-    zones.reboundLow,
-    zones.reboundHigh,
-    proZones.support,
-    proZones.resistance,
     ...candleValues,
+    ...(nearLevel(zones.entry) ? [zones.entry] : []),
+    ...(nearLevel(zones.stopLoss) ? [zones.stopLoss] : []),
+    ...(nearLevel(zones.reboundLow) ? [zones.reboundLow] : []),
+    ...(nearLevel(zones.reboundHigh) ? [zones.reboundHigh] : []),
+    ...(nearLevel(proZones.support) ? [proZones.support] : []),
+    ...(nearLevel(proZones.resistance) ? [proZones.resistance] : []),
     ...(nearLevel(zones.takeProfit) ? [zones.takeProfit] : []),
     ...(nearLevel(strategyTarget.price) ? [strategyTarget.price] : []),
   ].filter((value) => Number.isFinite(value) && value > 0);
@@ -1802,10 +1803,28 @@ function renderTradeChart(item, variant = "mini") {
   const plotBottom = variant === "main" ? chartHeight - 46 : 96;
   const plotHeight = plotBottom - plotTop;
   const y = (value) => clamp(plotBottom - ((value - min) / span) * plotHeight, plotTop, plotBottom);
-  const candleWidth = variant === "main" ? 9 : 3.4;
+  const candleWidth = variant === "main" ? 12 : 3.8;
   const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
   const startX = plotLeft;
   const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
+  const timeLabel = (timestamp) => {
+    if (!timestamp) return "";
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("es-CO", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "America/New_York",
+    }).format(date);
+  };
+  const timeTicks = variant === "main" && candles.length
+    ? [
+      { index: 0, label: timeLabel(candles[0].timestamp) },
+      { index: Math.floor((candles.length - 1) / 2), label: timeLabel(candles[Math.floor((candles.length - 1) / 2)]?.timestamp) },
+      { index: candles.length - 1, label: timeLabel(candles[candles.length - 1].timestamp) },
+    ].filter((tick) => tick.label)
+    : [];
   const levelTag = (label, value, className) => variant === "main" ? `
     <g class="chart-price-tag ${className}">
       <rect x="${plotRight + 8}" y="${clamp(y(value) - 11, plotTop, plotBottom - 18)}" width="58" height="20" rx="4" />
@@ -1815,7 +1834,7 @@ function renderTradeChart(item, variant = "mini") {
   const candleMarkup = candles.map((candle, index) => {
     const x = startX + index * candleGap;
     const bodyTop = Math.min(y(candle.o), y(candle.c));
-    const bodyHeight = Math.max(4, Math.abs(y(candle.o) - y(candle.c)));
+    const bodyHeight = Math.max(variant === "main" ? 2 : 3, Math.abs(y(candle.o) - y(candle.c)));
     const up = candle.c >= candle.o;
     return `
       <g class="chart-candle ${up ? "up" : "down"}">
@@ -1826,10 +1845,6 @@ function renderTradeChart(item, variant = "mini") {
   }).join("");
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
-  const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
-  const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
-  const barsMeta = marketBarMeta[item.asset.symbol] || {};
-  const usingOhlcBars = usingRealCandles && barsMeta.isRealOhlc && !pointQuoteMode;
   const chartTitle = usingOhlcBars ? "Grafica 1m OHLC" : "Mapa XTB de orden";
   const chartSourceText = usingOhlcBars
     ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo 1m`
@@ -1842,6 +1857,15 @@ function renderTradeChart(item, variant = "mini") {
       <text x="${plotRight + 8}" y="${y(tick) + 4}">${numberText(tick)}</text>
     </g>
   `).join("") : "";
+  const timeAxisMarkup = timeTicks.map((tick) => {
+    const x = startX + tick.index * candleGap;
+    return `
+      <g class="chart-time-tick">
+        <line x1="${x}" x2="${x}" y1="${plotTop}" y2="${plotBottom}" />
+        <text x="${x}" y="${plotBottom + 34}">${tick.label}</text>
+      </g>
+    `;
+  }).join("");
   return `
     <div class="trade-chart trade-chart-${variant}" aria-label="Mapa rapido de ${title}">
       ${variant === "main" ? `
@@ -1859,6 +1883,7 @@ function renderTradeChart(item, variant = "mini") {
       <svg viewBox="0 0 ${chartWidth} ${chartHeight}" role="img">
         <rect x="${plotLeft}" y="${plotTop}" width="${plotRight - plotLeft}" height="${plotHeight}" rx="8" class="chart-plot-bg" />
         ${axisMarkup}
+        ${timeAxisMarkup}
         <rect x="${plotLeft}" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="${plotRight - plotLeft}" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
         <rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
