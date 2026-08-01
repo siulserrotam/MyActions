@@ -68,8 +68,8 @@ const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
 const chartFrameOptions = {
-  "1m": { key: "1m", label: "1m / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultima media hora, velas de 1 minuto." },
-  "5m": { key: "5m", label: "5m / 2h", interval: "5m", period: "1d", limit: 24, description: "Contexto corto, velas de 5 minutos." },
+  "1m": { key: "1m", label: "1m / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos desde la ultima vela disponible." },
+  "5m": { key: "5m", label: "5m / 2h", interval: "5m", period: "1d", limit: 24, description: "Ultimas 2 horas desde la ultima vela disponible." },
   "1h": { key: "1h", label: "1h / 5d", interval: "1h", period: "5d", limit: 60, description: "Contexto amplio tipo XTB H1." },
 };
 
@@ -830,6 +830,7 @@ async function loadMarketBars(symbols = []) {
         limit: String(frame.limit),
         interval: frame.interval,
         period: frame.period,
+        live: "true",
         ts: String(Date.now()),
       });
       const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?${params.toString()}`, { cache: "no-store" });
@@ -844,6 +845,9 @@ async function loadMarketBars(symbols = []) {
         period: payload.period || frame.period,
         label: frame.label,
         description: frame.description,
+        windowMinutes: Number(payload.window_minutes || frame.limit),
+        startAt: payload.start_at || "",
+        endAt: payload.end_at || "",
         storedWasPointQuotes: Boolean(payload.stored_was_point_quotes),
       };
     } catch {
@@ -1841,6 +1845,25 @@ function renderTradeChart(item, variant = "mini") {
   const chartInterval = String(barsMeta.interval || chartFrameConfig().interval || "1m").toUpperCase();
   const chartPeriod = String(barsMeta.period || chartFrameConfig().period || "1d").toUpperCase();
   const showDateOnAxis = chartPeriod !== "1D";
+  const dateFormatter = new Intl.DateTimeFormat("es-CO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "America/New_York",
+  });
+  const hourFormatter = new Intl.DateTimeFormat("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/New_York",
+  });
+  const chartRangeText = (() => {
+    const startDate = barsMeta.startAt ? new Date(barsMeta.startAt) : candles[0]?.timestamp ? new Date(candles[0].timestamp) : null;
+    const endDate = barsMeta.endAt ? new Date(barsMeta.endAt) : candles[candles.length - 1]?.timestamp ? new Date(candles[candles.length - 1].timestamp) : null;
+    if (!startDate || !endDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
+    const windowMinutes = Number(barsMeta.windowMinutes || 0);
+    return `Fecha NY ${dateFormatter.format(endDate)} · ${hourFormatter.format(startDate)}-${hourFormatter.format(endDate)}${windowMinutes ? ` · ventana ${windowMinutes}m` : ""}`;
+  })();
   const timeLabel = (timestamp) => {
     if (!timestamp) return "";
     const date = new Date(timestamp);
@@ -1932,7 +1955,7 @@ function renderTradeChart(item, variant = "mini") {
         ${variant === "main" ? `
           <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
           <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
-          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas de 1 minuto` : "Visual tactico hasta reunir lecturas"} / estilo XTB</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas` : "Visual tactico"}${chartRangeText ? ` · ${chartRangeText}` : ""}</text>
         ` : ""}
       </svg>
       <div class="chart-legend">
@@ -1947,6 +1970,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
           <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
+          ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
           <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
         </div>
         ${technicalDecisionText(item, candles)}

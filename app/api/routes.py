@@ -383,10 +383,11 @@ def market_bars(
     limit: int = Query(30, ge=2, le=240),
     interval: str = Query("1m", pattern="^(1m|5m|15m|30m|60m|1h)$"),
     period: str = Query("1d", pattern="^(1d|5d|1mo)$"),
+    live: bool = Query(False),
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     try:
-        wants_live_ohlc = interval != "1m" or period != "1d"
+        wants_live_ohlc = live or interval != "1m" or period != "1d"
         if wants_live_ohlc:
             return LiveMarketService().bars(symbol, limit=limit, interval=interval, period=period)
         stored = MarketBarService().recent(session, symbol=symbol, limit=limit)

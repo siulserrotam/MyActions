@@ -92,7 +92,9 @@ class LiveMarketService:
         safe_interval = interval if interval in {"1m", "5m", "15m", "30m", "60m", "1h"} else "1m"
         safe_period = period if period in {"1d", "5d", "1mo"} else "1d"
         yahoo_interval = "60m" if safe_interval == "1h" else safe_interval
-        frame = self._download(yahoo_symbol, include_prepost=True, period=safe_period, interval=yahoo_interval).tail(limit)
+        raw_frame = self._download(yahoo_symbol, include_prepost=True, period=safe_period, interval=yahoo_interval)
+        window_minutes = self._window_minutes(safe_interval, limit)
+        frame = self._window_frame(raw_frame, window_minutes).tail(limit)
         items: list[dict[str, object]] = []
         for index, row in frame.iterrows():
             timestamp = index
@@ -120,7 +122,9 @@ class LiveMarketService:
             "provider_symbol": yahoo_symbol,
             "interval": safe_interval,
             "period": safe_period,
-            "window_minutes": limit,
+            "window_minutes": window_minutes,
+            "start_at": self._timestamp_text(frame.index[0]) if not frame.empty else None,
+            "end_at": self._timestamp_text(frame.index[-1]) if not frame.empty else None,
             "count": len(items),
             "items": items,
             "source": f"yfinance_ohlc_{safe_interval}",
@@ -128,6 +132,35 @@ class LiveMarketService:
             "is_real_ohlc": len(items) >= 2,
             "updated_at": datetime.now(UTC).isoformat(),
         }
+
+    @staticmethod
+    def _window_minutes(interval: str, limit: int) -> int:
+        interval_minutes = {
+            "1m": 1,
+            "5m": 5,
+            "15m": 15,
+            "30m": 30,
+            "60m": 60,
+            "1h": 60,
+        }.get(interval, 1)
+        return max(interval_minutes, interval_minutes * max(2, limit))
+
+    @staticmethod
+    def _window_frame(frame: pd.DataFrame, window_minutes: int) -> pd.DataFrame:
+        if frame.empty or not isinstance(frame.index, pd.DatetimeIndex):
+            return frame
+        latest = frame.index[-1]
+        start = latest - pd.Timedelta(minutes=window_minutes)
+        window = frame[frame.index >= start]
+        return window if not window.empty else frame
+
+    @staticmethod
+    def _timestamp_text(timestamp) -> str:
+        if isinstance(timestamp, pd.Timestamp):
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.tz_localize("UTC")
+            return timestamp.tz_convert("UTC").isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _download(self, yahoo_symbol: str, include_prepost: bool = False, period: str = "1d", interval: str = "1m"):
         import yfinance as yf
