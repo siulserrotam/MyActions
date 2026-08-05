@@ -179,6 +179,19 @@ function numberText(value) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function normalizeDecimalInput(value) {
+  return String(value ?? "").trim().replace(/\s+/g, "").replace(",", ".");
+}
+
+function decimalNumber(value, fallback = 0) {
+  const parsed = Number(normalizeDecimalInput(value));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function decimalValueById(id, fallback = 0) {
+  return decimalNumber(document.getElementById(id)?.value, fallback);
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -192,12 +205,12 @@ function cfdLeverageRatio(asset = selectedAssetFromForm?.() || selectedAsset) {
 }
 
 function targetProfitUsd() {
-  const raw = Number(document.getElementById("target-profit-usd")?.value || defaultTargetProfitUsd);
+  const raw = decimalValueById("target-profit-usd", defaultTargetProfitUsd);
   return Number.isFinite(raw) && raw > 0 ? raw : defaultTargetProfitUsd;
 }
 
 function stopRiskUsd() {
-  const raw = Number(document.getElementById("stop-risk-usd")?.value || defaultStopRiskUsd);
+  const raw = decimalValueById("stop-risk-usd", defaultStopRiskUsd);
   return Number.isFinite(raw) && raw > 0 ? raw : defaultStopRiskUsd;
 }
 
@@ -2319,15 +2332,15 @@ function resetDailyResultsIfNewDay() {
 }
 
 function currentConfigPayload() {
-  const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
+  const accountBalance = decimalValueById("account-balance", defaultAccountBalance);
   const riskPct = getEffectiveRiskPct();
   const availableCapital = accountBalance;
-  const openProfit = Number(document.getElementById("open-profit").value || 0);
-  const marginLevelPct = Number(document.getElementById("margin-level-pct").value || 0);
-  const operation1Result = Number(document.getElementById("operation1-result")?.value || 0);
-  const operation2Result = Number(document.getElementById("operation2-result")?.value || 0);
-  const operation3Result = Number(document.getElementById("operation3-result")?.value || 0);
-  const operation4Result = Number(document.getElementById("operation4-result")?.value || 0);
+  const openProfit = decimalValueById("open-profit", 0);
+  const marginLevelPct = decimalValueById("margin-level-pct", 0);
+  const operation1Result = decimalValueById("operation1-result", 0);
+  const operation2Result = decimalValueById("operation2-result", 0);
+  const operation3Result = decimalValueById("operation3-result", 0);
+  const operation4Result = decimalValueById("operation4-result", 0);
   const xtbEstimatedCostPerOperation = xtbCostPerOperation();
   const realized = operation1Result + operation2Result + operation3Result + operation4Result;
   const plan = buildDailyTradePlan();
@@ -2343,11 +2356,11 @@ function currentConfigPayload() {
     balance: accountBalance,
     symbol: document.getElementById("symbol").value.trim().toUpperCase(),
     xtb_price: xtbPriceValue(),
-    market_price: Number(document.getElementById("market-price").value || 0),
-    entry_price: Number(document.getElementById("entry-price").value || 0),
-    stop_price: Number(document.getElementById("stop-price").value || 0),
-    take_profit_price: Number(document.getElementById("take-profit-price").value || 0),
-    requested_volume: Number(document.getElementById("requested-volume").value || 0) || null,
+    market_price: decimalValueById("market-price", 0),
+    entry_price: decimalValueById("entry-price", 0),
+    stop_price: decimalValueById("stop-price", 0),
+    take_profit_price: decimalValueById("take-profit-price", 0),
+    requested_volume: decimalValueById("requested-volume", 0) || null,
     direction: document.getElementById("direction").value,
     expiry_mode: document.getElementById("expiry-mode").value,
     risk_mode: riskModeValue(),
@@ -2508,7 +2521,26 @@ function renderDailyResultCard() {
 function setControlValue(id, value) {
   const element = document.getElementById(id);
   if (!element) return;
-  element.value = value;
+  const decimalTargets = new Set([
+    "account-balance",
+    "available-capital",
+    "open-profit",
+    "margin-level-pct",
+    "target-profit-usd",
+    "market-price",
+    "xtb-price",
+    "entry-price",
+    "stop-price",
+    "take-profit-price",
+    "requested-volume",
+    "capital-movement",
+    "lesson-result",
+    "operation1-result",
+    "operation2-result",
+    "operation3-result",
+    "operation4-result",
+  ]);
+  element.value = decimalTargets.has(id) ? normalizeDecimalInput(value) : value;
   element.dispatchEvent(new Event("input", { bubbles: true }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -2518,18 +2550,18 @@ function operationResultId(slot) {
 }
 
 function operationResultValue(slot) {
-  return Number(document.getElementById(operationResultId(slot))?.value || 0);
+  return decimalValueById(operationResultId(slot), 0);
 }
 
 function setOperationResult(slot, value) {
   const input = document.getElementById(operationResultId(slot));
-  if (input) input.value = value;
+  if (input) input.value = normalizeDecimalInput(value);
 }
 
 function us100StrategyProfile() {
   const asset = findAsset(focusSymbol);
   const quote = liveQuotes[focusSymbol] || {};
-  const price = Number(document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || quote.price || asset.marketPrice || 0);
+  const price = decimalValueById("xtb-price", 0) || decimalValueById("market-price", 0) || Number(quote.price || asset.marketPrice || 0);
   const bars = realCandlesForItem({ asset, zones: { price } }).slice(-30);
   const pattern = detectCandlePattern(bars);
   const imbalance = detectGapFvgBag(bars);
@@ -2957,10 +2989,10 @@ function renderSimpleDashboard() {
             <span class="simple-badge">editable</span>
           </div>
           <div class="simple-form-grid two">
-            <label class="simple-field"><span class="simple-label">Objetivo USD</span><input type="number" step="1" value="${profile.targetUsd}" data-sync-target="target-profit-usd" /></label>
+            <label class="simple-field"><span class="simple-label">Objetivo USD</span><input type="text" inputmode="decimal" value="${profile.targetUsd}" data-sync-target="target-profit-usd" /></label>
             <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
-            <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="number" step="0.01" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
-            <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="number" step="0.01" value="${capital}" data-sync-target="account-balance" /></label>
+            <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
+            <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
           </div>
           <p class="simple-tiny">Si XTB muestra precio distinto, pegalo aqui y la receta se recalcula con ese precio.</p>
         </article>
@@ -2975,7 +3007,7 @@ function renderSimpleDashboard() {
           <span class="simple-badge">${money(dayTotal)}</span>
         </div>
         <div class="simple-form-grid">
-          <label class="simple-field"><span class="simple-label">Resultado USD</span><input id="simple-active-result" type="number" step="0.01" value="${result}" data-sync-target="operation1-result" placeholder="-50 o 100" /></label>
+          <label class="simple-field"><span class="simple-label">Resultado USD</span><input id="simple-active-result" type="text" inputmode="decimal" value="${result}" data-sync-target="operation1-result" placeholder="-50 o 100" /></label>
           <div class="simple-field"><span class="simple-label">Estado</span><span class="simple-value">${dayTotal > 0 ? "Gano" : dayTotal < 0 ? "Perdio" : "Pendiente"}</span><span class="simple-tiny">Meta ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}.</span></div>
           <div class="simple-field"><span class="simple-label">Accion</span><button type="button" data-simple-action="save-close">Guardar cierre</button></div>
         </div>
@@ -2984,7 +3016,7 @@ function renderSimpleDashboard() {
       <section class="simple-panel">
         <div class="simple-head"><div><h2>Aprendizaje y capital</h2><p class="simple-subtitle">Retiro/deposito, nota del dia, alertas y exportacion.</p></div><span class="simple-badge">memoria</span></div>
         <div class="simple-form-grid">
-          <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
+          <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="text" inputmode="decimal" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
           <label class="simple-field"><span class="simple-label">Patron leido</span><input value="${profile.pattern.name}" readonly /></label>
           <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
           <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
@@ -3164,7 +3196,7 @@ async function saveTradeLesson() {
     take_profit_price: Number(lastResult.take_profit_price || 0),
     expected_loss: Number(lastResult.expected_loss || 0),
     expected_profit: Number(lastResult.expected_profit || 0),
-    actual_result: Number(document.getElementById("lesson-result")?.value || 0),
+    actual_result: decimalValueById("lesson-result", 0),
     outcome: document.getElementById("lesson-outcome")?.value || "pending",
     confidence: Number((buildAiConfirmation().confidence || 0)),
     market_phase: currentMarketPhaseLabel(),
@@ -3433,7 +3465,7 @@ async function saveDayClose() {
     return;
   }
 
-  const currentBalance = Number(balanceInput?.value || defaultAccountBalance);
+  const currentBalance = decimalNumber(balanceInput?.value, defaultAccountBalance);
   const nextBalance = Math.max(0, Number((currentBalance + total).toFixed(2)));
 
   if (lessonResultInput) lessonResultInput.value = total.toFixed(2);
@@ -3465,13 +3497,13 @@ function clearDayResults() {
 
 function applyCapitalMovement() {
   const movementInput = document.getElementById("capital-movement");
-  const movement = Number(movementInput.value || 0);
+  const movement = decimalNumber(movementInput.value, 0);
   if (!movement) {
     updatePostbackStatus("Movimiento de capital vacio. Usa negativo para retiro o positivo para deposito.", "error");
     return;
   }
   const balanceInput = document.getElementById("account-balance");
-  const current = Number(balanceInput.value || defaultAccountBalance);
+  const current = decimalNumber(balanceInput.value, defaultAccountBalance);
   const next = Math.max(0, current + movement);
   balanceInput.value = next.toFixed(2);
   movementInput.value = "";
