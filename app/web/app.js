@@ -214,25 +214,32 @@ function cfdLeverageRatio(asset = selectedAssetFromForm?.() || selectedAsset) {
 
 function targetProfitUsd() {
   const raw = decimalValueById("target-profit-usd", defaultTargetProfitUsd);
-  return Number.isFinite(raw) && raw > 0 ? raw : defaultTargetProfitUsd;
+  const allowed = [50, 100, 150, 200];
+  if (!Number.isFinite(raw) || raw <= 0) return defaultTargetProfitUsd;
+  return allowed.includes(raw) ? raw : 50;
 }
 
-function targetCapForVolume(volume) {
-  const normalized = Number(volume || 0);
-  if (normalized <= 0.2) return 50;
-  if (normalized >= 0.25) return 100;
-  const progress = (normalized - 0.2) / 0.05;
-  return 50 + progress * 50;
+function allowedTargetsForConfidence(confidence) {
+  const score = Number(confidence || 0);
+  const targets = [50];
+  if (score >= 65) targets.push(100);
+  if (score >= 78) targets.push(150);
+  if (score >= 88) targets.push(200);
+  return targets;
 }
 
-function volumeTargetPolicy(volume, requestedTarget) {
-  const cap = targetCapForVolume(volume);
-  const target = Math.min(Number(requestedTarget || defaultTargetProfitUsd), cap);
+function targetPolicyForOperability(requestedTarget, confidence) {
+  const requested = Number(requestedTarget || defaultTargetProfitUsd);
+  const allowedTargets = allowedTargetsForConfidence(confidence);
+  const cap = allowedTargets[allowedTargets.length - 1] || 50;
+  const target = Math.min(requested, cap);
   return {
-    cap: Number(cap.toFixed(2)),
-    target: Number(target.toFixed(2)),
-    capped: Number(requestedTarget || 0) > cap,
-    text: `Meta por volumen: ${formatVolumeForXtb(volume, findAsset(focusSymbol))} permite maximo ${money(cap)}.`,
+    allowedTargets,
+    cap,
+    target,
+    requested,
+    capped: requested > cap,
+    text: `Meta permitida por operabilidad ${Math.round(confidence)}%: maximo ${money(cap)}.`,
   };
 }
 
@@ -843,12 +850,16 @@ function targetContractVolume(asset, entry, balance) {
   return roundVolumeForXtb(rawVolume, asset);
 }
 
+function us100TargetVolume(targetUsd) {
+  const target = Number(targetUsd || 0);
+  if (target >= 200) return 0.35;
+  if (target >= 150) return 0.3;
+  if (target >= 100) return 0.25;
+  return 0.2;
+}
+
 function preferredUs100Volume(confidence, marginVolume, targetUsd, asset) {
-  const desired = targetUsd >= 100
-    ? 0.25
-    : targetUsd >= 75
-      ? 0.22
-      : 0.2;
+  const desired = us100TargetVolume(targetUsd);
   const confidenceCapped = confidence < 50 ? Math.min(desired, 0.2) : desired;
   const capped = Math.min(confidenceCapped, marginVolume || confidenceCapped);
   return roundVolumeForXtb(Math.max(0, capped), asset);
@@ -2689,9 +2700,9 @@ function us100StrategyProfile() {
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
-  const volume = preferredUs100Volume(baseConfidence, marginVolume, requestedTargetUsd, asset);
-  const targetPolicy = volumeTargetPolicy(volume, requestedTargetUsd);
+  const targetPolicy = targetPolicyForOperability(requestedTargetUsd, baseConfidence);
   const targetUsd = targetPolicy.target;
+  const volume = preferredUs100Volume(baseConfidence, marginVolume, targetUsd, asset);
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
@@ -2717,11 +2728,13 @@ function us100StrategyProfile() {
     chosen: volume,
     note: volume < 0.2
       ? "Bajo 0.20 solo si el margen disponible no deja abrir ese tamano."
-      : requestedTargetUsd >= 100
-        ? "Meta alta: usa 0.25 como volumen objetivo."
-        : requestedTargetUsd >= 75
-          ? "Meta media: usa 0.22 como volumen objetivo."
-          : "Meta conservadora: usa 0.20 como volumen objetivo.",
+      : targetUsd >= 200
+        ? "Meta extrema: usa 0.35 como volumen objetivo."
+        : targetUsd >= 150
+          ? "Meta fuerte: usa 0.30 como volumen objetivo."
+          : targetUsd >= 100
+            ? "Meta alta: usa 0.25 como volumen objetivo."
+            : "Meta conservadora: usa 0.20 como volumen objetivo.",
   };
   const agent = agentControlPlan({
     status,
@@ -3075,8 +3088,8 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
-          <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango deseado 0.20-0.25. ${profile.volumePolicy.note}</small></div>
-          <div><span class="simple-label">Meta por volumen</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
+          <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango por meta 0.20-0.35. ${profile.volumePolicy.note}</small></div>
+          <div><span class="simple-label">Meta IA</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
         </div>
         <div class="simple-agent-card">
           <div>
@@ -3131,7 +3144,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">Take profit</span><strong>${priceText(profile.takeProfit)}</strong></div>
             <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
           </div>
-          ${profile.targetPolicy.capped ? `<p class="simple-warning">Objetivo ajustado: pediste ${money(profile.requestedTargetUsd)}, pero con volumen ${formatVolumeForXtb(profile.volume, profile.asset)} el maximo recomendado es ${money(profile.targetPolicy.cap)}.</p>` : ""}
+          ${profile.targetPolicy.capped ? `<p class="simple-warning">Objetivo ajustado: pediste ${money(profile.requestedTargetUsd)}, pero con operabilidad ${profile.confidence}% el maximo permitido es ${money(profile.targetPolicy.cap)}.</p>` : ""}
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
         <article class="simple-operation">
@@ -3140,7 +3153,13 @@ function renderSimpleDashboard() {
             <span class="simple-badge">editable</span>
           </div>
           <div class="simple-form-grid two">
-            <label class="simple-field"><span class="simple-label">Objetivo maximo USD</span><input type="text" inputmode="decimal" value="${profile.requestedTargetUsd}" data-sync-target="target-profit-usd" /></label>
+            <label class="simple-field"><span class="simple-label">Objetivo maximo USD</span><select data-sync-target="target-profit-usd">
+              ${[50, 100, 150, 200].map((target) => {
+                const allowed = profile.targetPolicy.allowedTargets.includes(target);
+                const hint = target === 50 ? "" : target === 100 ? " 65%+" : target === 150 ? " 78%+" : " 88%+";
+                return `<option value="${target}" ${profile.requestedTargetUsd === target ? "selected" : ""} ${allowed ? "" : "disabled"}>$${target}${allowed ? "" : hint}</option>`;
+              }).join("")}
+            </select></label>
             <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
