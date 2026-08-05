@@ -63,11 +63,12 @@
               <input id="account-balance" class="field" type="number" step="0.01" value="2016" />
               <span class="text-xs font-normal text-zinc-500">Base para calcular margen, volumen y riesgo de US100.</span>
             </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Objetivo USD
-              <input id="target-profit-usd" class="field" type="number" step="1" value="100" />
-              <span class="text-xs font-normal text-zinc-500">Meta principal por operacion. Por defecto: $100.</span>
-            </label>
+            <input id="target-profit-usd" type="hidden" value="50" />
+            <div class="rounded-xl border border-white/10 bg-ink p-3 text-sm font-bold text-zinc-300">
+              Objetivo automatico USD
+              <p class="mt-1 text-xl font-black text-white">$50 - $200</p>
+              <span class="text-xs font-normal text-zinc-500">La IA lo asigna por operabilidad: $50, $100, $150 o $200.</span>
+            </div>
             <input id="stop-risk-usd" type="hidden" value="100" />
             <div class="rounded-xl border border-white/10 bg-ink p-3 text-sm font-bold text-zinc-300">
               Stop automatico USD

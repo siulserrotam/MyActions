@@ -229,8 +229,15 @@ function allowedTargetsForConfidence(confidence) {
   return targets;
 }
 
+function automaticTargetUsdForOperability(confidence) {
+  const allowedTargets = allowedTargetsForConfidence(confidence);
+  return allowedTargets[allowedTargets.length - 1] || 50;
+}
+
 function targetPolicyForOperability(requestedTarget, confidence) {
-  const requested = Number(requestedTarget || defaultTargetProfitUsd);
+  const requested = requestedTarget === undefined || requestedTarget === null
+    ? automaticTargetUsdForOperability(confidence)
+    : Number(requestedTarget || defaultTargetProfitUsd);
   const allowedTargets = allowedTargetsForConfidence(confidence);
   const cap = allowedTargets[allowedTargets.length - 1] || 50;
   const target = Math.min(requested, cap);
@@ -2843,14 +2850,19 @@ function us100StrategyProfile() {
   const trend = detectTrendProfile(bars, asset);
   const direction = decideUs100Direction(pattern, trend, asset);
   const level = us100OrderLevels(asset, direction, bars, price);
-  const requestedTargetUsd = targetProfitUsd();
-  const stopUsd = automaticStopUsdForTarget(requestedTargetUsd);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
-  const targetPolicy = targetPolicyForOperability(requestedTargetUsd, baseConfidence);
+  const cfdMovePct = cfdMovementFromQuote(focusSymbol, asset);
+  const cfdMove = cfdMovementScore(cfdMovePct, direction);
+  const learning = learningAdjustmentForProfile(focusSymbol);
+  const xtbContext = xtbContextAdjustment(asset, direction, price);
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + 10), 0, 95);
+  const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
+  const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
-  const volume = preferredUs100Volume(baseConfidence, marginVolume, targetUsd, asset);
+  const stopUsd = automaticStopUsdForTarget(targetUsd);
+  const volume = preferredUs100Volume(preliminaryConfidence, marginVolume, targetUsd, asset);
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
@@ -2859,10 +2871,6 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const cfdMovePct = cfdMovementFromQuote(focusSymbol, asset);
-  const cfdMove = cfdMovementScore(cfdMovePct, direction);
-  const learning = learningAdjustmentForProfile(focusSymbol);
-  const xtbContext = xtbContextAdjustment(asset, direction, price);
   const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score), 0, 95);
   const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
   const confidenceBreakdown = {
@@ -3195,6 +3203,10 @@ function renderSimpleDashboard() {
   if (!target) return;
   {
   const profile = us100StrategyProfile();
+  const hiddenTarget = document.getElementById("target-profit-usd");
+  const hiddenStop = document.getElementById("stop-risk-usd");
+  if (hiddenTarget) hiddenTarget.value = String(profile.targetUsd);
+  if (hiddenStop) hiddenStop.value = String(profile.stopUsd);
   const selectedChartFrame = chartFrameConfig();
   const primaryDisplay = buildAssetOpportunity(profile.asset);
   const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
@@ -3310,7 +3322,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">CFD hoy</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong></div>
             <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong></div>
           </div>
-          ${profile.targetPolicy.capped ? `<p class="simple-warning">Objetivo ajustado: pediste ${money(profile.requestedTargetUsd)}, pero con operabilidad ${profile.confidence}% el maximo permitido es ${money(profile.targetPolicy.cap)}.</p>` : ""}
+          <p class="simple-warning">Objetivo automatico: la IA asigno ${money(profile.targetUsd)} segun operabilidad ${profile.confidence}%.</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
@@ -3320,12 +3332,7 @@ function renderSimpleDashboard() {
             <span class="simple-badge">editable</span>
           </div>
           <div class="simple-form-grid two">
-            <label class="simple-field"><span class="simple-label">Objetivo maximo USD</span><select data-sync-target="target-profit-usd">
-              ${[50, 100, 150, 200].map((target) => {
-                const allowed = profile.targetPolicy.allowedTargets.includes(target);
-                return `<option value="${target}" ${profile.requestedTargetUsd === target ? "selected" : ""} ${allowed ? "" : "disabled"}>$${target}</option>`;
-              }).join("")}
-            </select></label>
+            <div class="simple-field"><span class="simple-label">Objetivo automatico USD</span><span class="simple-value">${money(profile.targetUsd)}</span><span class="simple-tiny">$50 base; $100 desde 65%; $150 desde 78%; $200 desde 88%.</span></div>
             <div class="simple-field"><span class="simple-label">Stop automatico USD</span><span class="simple-value">${money(profile.stopUsd)}</span><span class="simple-tiny">Se ajusta solo: meta $50 usa escudo $50; metas mayores usan escudo $100.</span></div>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
