@@ -179,6 +179,13 @@ function numberText(value) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function priceText(value) {
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function normalizeDecimalInput(value) {
   return String(value ?? "").trim().replace(/\s+/g, "").replace(",", ".");
 }
@@ -814,6 +821,19 @@ function targetContractVolume(asset, entry, balance) {
   const contractTarget = balance || defaultAccountBalance;
   const rawVolume = contractTarget / (entry * asset.multiplier);
   return roundVolumeForXtb(rawVolume, asset);
+}
+
+function preferredUs100Volume(confidence, marginVolume, stopUsd, asset) {
+  const minPreferred = 0.2;
+  const maxPreferred = 0.25;
+  const desired = confidence >= 85
+    ? maxPreferred
+    : confidence >= 72
+      ? 0.23
+      : minPreferred;
+  const riskCapped = stopUsd / (minimumStopPointsForAsset(asset) * asset.multiplier);
+  const capped = Math.min(desired, marginVolume || desired, riskCapped || desired);
+  return roundVolumeForXtb(Math.max(0, capped), asset);
 }
 
 function formatVolumeForXtb(volume, asset) {
@@ -2571,9 +2591,9 @@ function us100StrategyProfile() {
   const stopUsd = stopRiskUsd();
   const targetUsd = targetProfitUsd();
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
-  const rawVolume = stopUsd / (stopPoints * asset.multiplier);
   const marginVolume = maxVolumeByMargin(asset, level.entry);
-  const volume = roundVolumeForXtb(Math.min(rawVolume, marginVolume), asset);
+  const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
+  const volume = preferredUs100Volume(baseConfidence, marginVolume, stopUsd, asset);
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
@@ -2581,8 +2601,30 @@ function us100StrategyProfile() {
   const takeProfit = direction === "LONG" ? level.entry + takePoints : level.entry - takePoints;
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + (volume > 0 ? 10 : -30)), 0, 95);
+  const volumeScore = volume > 0 ? 10 : -30;
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore), 0, 95);
   const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
+  const confidenceBreakdown = {
+    pattern: Math.round(pattern.score),
+    trend: Math.round(trend.score),
+    gap: Math.round(imbalance.score),
+    volume: volumeScore,
+    total: confidence,
+    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + volumen ${volumeScore} = ${confidence}%`,
+  };
+  const volumePolicy = {
+    preferred_min: 0.2,
+    preferred_max: 0.25,
+    margin_max: marginVolume,
+    chosen: volume,
+    note: volume < 0.2
+      ? "Bajo 0.20 porque el stop o margen no permiten ese tamano sin violar el escudo."
+      : confidence >= 85
+        ? "Alta operabilidad: usa el extremo alto del rango preferido."
+        : confidence >= 72
+          ? "Operable: usa volumen medio-alto dentro del rango preferido."
+          : "Aun no operable: conserva volumen base, pero espera confirmacion.",
+  };
   const agent = agentControlPlan({
     status,
     confidence,
@@ -2617,6 +2659,8 @@ function us100StrategyProfile() {
     positionValue,
     marginRequired,
     confidence,
+    confidenceBreakdown,
+    volumePolicy,
     status,
     agent,
     explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
@@ -2930,6 +2974,8 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">GAP / FVG / BAG</span><strong>${profile.imbalance.type}</strong><small>${profile.imbalance.detail}</small></div>
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
+          <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
+          <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango deseado 0.20-0.25. ${profile.volumePolicy.note}</small></div>
         </div>
         <div class="simple-agent-card">
           <div>
@@ -2976,9 +3022,9 @@ function renderSimpleDashboard() {
           <div class="simple-numbers">
             <div class="simple-number"><span class="simple-label">Orden</span><strong>${profile.directionLabel}</strong></div>
             <div class="simple-number"><span class="simple-label">Volumen</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${numberText(profile.entry)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>${numberText(profile.stopLoss)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Take profit</span><strong>${numberText(profile.takeProfit)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${priceText(profile.entry)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>${priceText(profile.stopLoss)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Take profit</span><strong>${priceText(profile.takeProfit)}</strong></div>
             <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
           </div>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
@@ -3718,8 +3764,8 @@ function notifyIfNeeded() {
     return;
   }
   if (ai.status !== "OPERABLE") return;
-  const stopText = lastResult.stop_loss ? `stop ${numberText(lastResult.stop_loss)}` : "SIN STOP";
-  const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${numberText(lastResult.entry_price)}, ${stopText}, meta ${numberText(lastResult.take_profit)}, volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)}. Op ${buildDailyTradePlan().currentSlot}. ${timing.quality}.`;
+  const stopText = lastResult.stop_loss ? `stop ${priceText(lastResult.stop_loss)}` : "SIN STOP";
+  const body = `${lastResult.asset.symbol} ${lastResult.order_type}: entrada ${priceText(lastResult.entry_price)}, ${stopText}, meta ${priceText(lastResult.take_profit)}, volumen ${formatVolumeForXtb(lastResult.volume, lastResult.asset)}. Op ${buildDailyTradePlan().currentSlot}. ${timing.quality}.`;
   const key = `ai-operable:${lastResult.asset.symbol}:${lastResult.order_type}:${lastResult.entry_price}:${lastResult.stop_loss}:${lastResult.take_profit}:${lastResult.volume}:${lastResult.risk_pct}`;
   if (sessionStorage.getItem("lastDecisionNotification") === key) return;
   sessionStorage.setItem("lastDecisionNotification", key);
@@ -3739,9 +3785,9 @@ function renderTicket() {
     ["Activo", lastResult.asset.symbol, true],
     ["Operacion", `Operacion ${buildDailyTradePlan().currentSlot}`, false],
     ["Tipo de Orden", `${lastResult.order_type} - ${lastResult.simple_order_explanation}`, true],
-    ["Precio de Entrada", numberText(lastResult.entry_price), true],
-    ["Stop Loss", lastResult.stop_loss ? numberText(lastResult.stop_loss) : "SIN STOP - cierre manual", Boolean(lastResult.stop_loss)],
-    ["Take Profit (Meta)", numberText(lastResult.take_profit), true],
+    ["Precio de Entrada", priceText(lastResult.entry_price), true],
+    ["Stop Loss", lastResult.stop_loss ? priceText(lastResult.stop_loss) : "SIN STOP - cierre manual", Boolean(lastResult.stop_loss)],
+    ["Take Profit (Meta)", priceText(lastResult.take_profit), true],
     ["Vencimiento", expiryLabel, true],
     [volumeLabel, formatVolumeForXtb(lastResult.volume, lastResult.asset), true],
   ];
