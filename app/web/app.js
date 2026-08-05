@@ -244,9 +244,14 @@ function targetPolicyForOperability(requestedTarget, confidence) {
   };
 }
 
+function automaticStopUsdForTarget(targetUsd = targetProfitUsd()) {
+  const target = Number(targetUsd || defaultTargetProfitUsd);
+  if (target <= 50) return 50;
+  return 100;
+}
+
 function stopRiskUsd() {
-  const raw = decimalValueById("stop-risk-usd", defaultStopRiskUsd);
-  return Number.isFinite(raw) && raw > 0 ? raw : defaultStopRiskUsd;
+  return automaticStopUsdForTarget(targetProfitUsd());
 }
 
 function us100PointValue(volume) {
@@ -2838,8 +2843,8 @@ function us100StrategyProfile() {
   const trend = detectTrendProfile(bars, asset);
   const direction = decideUs100Direction(pattern, trend, asset);
   const level = us100OrderLevels(asset, direction, bars, price);
-  const stopUsd = stopRiskUsd();
   const requestedTargetUsd = targetProfitUsd();
+  const stopUsd = automaticStopUsdForTarget(requestedTargetUsd);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
@@ -3321,7 +3326,7 @@ function renderSimpleDashboard() {
                 return `<option value="${target}" ${profile.requestedTargetUsd === target ? "selected" : ""} ${allowed ? "" : "disabled"}>$${target}</option>`;
               }).join("")}
             </select></label>
-            <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
+            <div class="simple-field"><span class="simple-label">Stop automatico USD</span><span class="simple-value">${money(profile.stopUsd)}</span><span class="simple-tiny">Se ajusta solo: meta $50 usa escudo $50; metas mayores usan escudo $100.</span></div>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
           </div>

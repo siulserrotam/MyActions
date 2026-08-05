@@ -68,14 +68,12 @@
               <input id="target-profit-usd" class="field" type="number" step="1" value="100" />
               <span class="text-xs font-normal text-zinc-500">Meta principal por operacion. Por defecto: $100.</span>
             </label>
-            <label class="grid gap-1 text-sm font-bold text-zinc-300">
-              Stop maximo USD
-              <select id="stop-risk-usd" class="field">
-                <option value="50">Conservador: $50</option>
-                <option value="100" selected>Agresivo: $100</option>
-              </select>
-              <span class="text-xs font-normal text-zinc-500">La IA usa esto para calcular distancia al escudo y volumen.</span>
-            </label>
+            <input id="stop-risk-usd" type="hidden" value="100" />
+            <div class="rounded-xl border border-white/10 bg-ink p-3 text-sm font-bold text-zinc-300">
+              Stop automatico USD
+              <p class="mt-1 text-xl font-black text-white">$100</p>
+              <span class="text-xs font-normal text-zinc-500">La IA lo ajusta con la meta y la operabilidad.</span>
+            </div>
             <div class="rounded-xl border border-white/10 bg-ink p-3">
               <p class="text-xs font-bold uppercase text-zinc-500">Movimiento de capital</p>
               <input id="capital-movement" class="field mt-2" type="number" step="0.01" placeholder="Ej: -100 retiro / 100 deposito" />
