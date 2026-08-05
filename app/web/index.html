@@ -21,7 +21,7 @@
         },
       };
     </script>
-    <link rel="stylesheet" href="/dashboard/styles.css?v=real-time-window-v1" />
+    <link rel="stylesheet" href="/dashboard/styles.css?v=us100-desk-v1" />
   </head>
   <body class="bg-ink text-zinc-100">
     <section id="simple-dashboard" class="simple-dashboard" aria-label="Plan diario XTB simplificado"></section>
@@ -29,9 +29,9 @@
       <header class="rounded-2xl border border-white/10 bg-panel p-4 shadow-2xl shadow-black/30">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p class="text-xs font-bold uppercase tracking-[0.22em] text-bull">XTB CFD Decision Engine</p>
-            <h1 class="mt-1 text-2xl font-black tracking-tight md:text-4xl">Day Trading Decision Engine & Calculator</h1>
-            <p class="mt-2 max-w-2xl text-sm text-zinc-400">Calculadora manual para convertir tus datos en una receta exacta de orden para XTB. Sin Feed/API XTB.</p>
+            <p class="text-xs font-bold uppercase tracking-[0.22em] text-bull">US100 CFD Decision Desk</p>
+            <h1 class="mt-1 text-2xl font-black tracking-tight md:text-4xl">US100 Pattern Strategy</h1>
+            <p class="mt-2 max-w-2xl text-sm text-zinc-400">Un solo CFD, una receta clara: patron, direccion, volumen, entrada, escudo y meta.</p>
           </div>
           <div class="grid grid-cols-2 gap-2 text-right">
             <div class="rounded-xl border border-white/10 bg-ink px-4 py-3">
@@ -61,7 +61,20 @@
             <label class="grid gap-1 text-sm font-bold text-zinc-300">
               Capital operativo XTB USD
               <input id="account-balance" class="field" type="number" step="0.01" value="2016" />
-              <span class="text-xs font-normal text-zinc-500">Op1/Op2 buscan 1% del capital; Op3/Op4 buscan 20/30 de esa meta (~0.67%).</span>
+              <span class="text-xs font-normal text-zinc-500">Base para calcular margen, volumen y riesgo de US100.</span>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Objetivo USD
+              <input id="target-profit-usd" class="field" type="number" step="1" value="100" />
+              <span class="text-xs font-normal text-zinc-500">Meta principal por operacion. Por defecto: $100.</span>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-zinc-300">
+              Stop maximo USD
+              <select id="stop-risk-usd" class="field">
+                <option value="50">Conservador: $50</option>
+                <option value="100" selected>Agresivo: $100</option>
+              </select>
+              <span class="text-xs font-normal text-zinc-500">La IA usa esto para calcular distancia al escudo y volumen.</span>
             </label>
             <div class="rounded-xl border border-white/10 bg-ink p-3">
               <p class="text-xs font-bold uppercase text-zinc-500">Movimiento de capital</p>
@@ -198,7 +211,7 @@
               <div class="mt-4 grid gap-3">
                 <label class="grid gap-1 text-sm font-bold text-zinc-300">
                   Activo seleccionado
-                  <input id="symbol" class="field" value="TSM.US" />
+                  <input id="symbol" class="field" value="US100" readonly />
                 </label>
                 <label class="grid gap-1 text-sm font-bold text-zinc-300">
                   Precio mercado actual / cierre vela
@@ -243,6 +256,6 @@
         </section>
       </section>
     </main>
-    <script src="/dashboard/app.js?v=real-time-window-v1"></script>
+    <script src="/dashboard/app.js?v=us100-desk-v1"></script>
   </body>
 </html>

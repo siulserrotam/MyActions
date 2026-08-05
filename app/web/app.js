@@ -2,7 +2,7 @@ const assetGroups = {
   favorites: [
     { symbol: "TSM.US", name: "Taiwan Semiconductor CFD", category: "stocks", multiplier: 1, marketPrice: 420.5 },
     { symbol: "NVDA.US", name: "NVIDIA CFD", category: "stocks", multiplier: 1, marketPrice: 172.2 },
-    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1, marketPrice: 23000 },
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 20, marketPrice: 29500, marginPct: 0.5, volumeStep: 0.01 },
     { symbol: "GOLD", name: "Gold CFD", category: "commodities", multiplier: 100, marketPrice: 3400 },
     { symbol: "BTCUSD", name: "Bitcoin CFD", category: "crypto", multiplier: 1, marketPrice: 62000 },
     { symbol: "AVAX", name: "Avalanche CFD", category: "crypto", multiplier: 1, marketPrice: 6.5, volumeStep: 1 },
@@ -13,7 +13,7 @@ const assetGroups = {
     { symbol: "USDJPY", name: "US Dollar / Yen", category: "forex", multiplier: 100000, marketPrice: 148 },
   ],
   indices: [
-    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 1, marketPrice: 23000 },
+    { symbol: "US100", name: "Nasdaq 100 CFD", category: "indices", multiplier: 20, marketPrice: 29500, marginPct: 0.5, volumeStep: 0.01 },
     { symbol: "US500", name: "S&P 500 CFD", category: "indices", multiplier: 1, marketPrice: 6500 },
     { symbol: "DE40", name: "DAX 40 CFD", category: "indices", multiplier: 1, marketPrice: 24000 },
   ],
@@ -59,9 +59,12 @@ const categoryLabels = {
 
 const defaultAccountBalance = 2016;
 const defaultRiskPct = 0.5;
+const focusSymbol = "US100";
+const defaultTargetProfitUsd = 100;
+const defaultStopRiskUsd = 100;
 const minAiRiskPct = 0.25;
 const maxAiRiskPct = 1;
-const maxPlannedTrades = 4;
+const maxPlannedTrades = 1;
 const operationTargetPct = { 1: 0.75, 2: 0.5, 3: 0.25, 4: 0.25 };
 const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
@@ -74,7 +77,7 @@ const chartFrameOptions = {
 };
 
 let activeCategory = "favorites";
-let selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
+let selectedAsset = findAsset(focusSymbol);
 let lastResult = null;
 let notificationsEnabled = false;
 let postbackTimer = null;
@@ -130,11 +133,7 @@ async function loadCurrentDashboardUser() {
 }
 
 function favoriteSymbols() {
-  try {
-    return JSON.parse(getLocalValue("decision_engine_favorites") || "null") || ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
-  } catch {
-    return ["TSM.US", "NVDA.US", "US100", "GOLD", "BTCUSD", "AVAX"];
-  }
+  return [focusSymbol];
 }
 
 function setFavoriteSymbols(symbols) {
@@ -146,10 +145,7 @@ function getFavoriteAssets() {
 }
 
 function ensureDefaultFavorites() {
-  const symbols = favoriteSymbols();
-  const required = ["AVAX"];
-  const merged = [...symbols, ...required.filter((symbol) => !symbols.includes(symbol))];
-  if (merged.length !== symbols.length) setFavoriteSymbols(merged);
+  setFavoriteSymbols([focusSymbol]);
 }
 
 function money(value) {
@@ -164,12 +160,33 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function cfdMarginPct() {
-  return 20;
+function cfdMarginPct(asset = selectedAssetFromForm?.() || selectedAsset) {
+  return Number(asset?.marginPct || 20);
 }
 
-function cfdLeverageRatio() {
-  return 100 / cfdMarginPct();
+function cfdLeverageRatio(asset = selectedAssetFromForm?.() || selectedAsset) {
+  return 100 / cfdMarginPct(asset);
+}
+
+function targetProfitUsd() {
+  const raw = Number(document.getElementById("target-profit-usd")?.value || defaultTargetProfitUsd);
+  return Number.isFinite(raw) && raw > 0 ? raw : defaultTargetProfitUsd;
+}
+
+function stopRiskUsd() {
+  const raw = Number(document.getElementById("stop-risk-usd")?.value || defaultStopRiskUsd);
+  return Number.isFinite(raw) && raw > 0 ? raw : defaultStopRiskUsd;
+}
+
+function us100PointValue(volume) {
+  return Number(volume || 0) * findAsset(focusSymbol).multiplier;
+}
+
+function minimumStopPointsForAsset(asset) {
+  if (asset.symbol === "US100") return 20;
+  if (asset.category === "indices") return 15;
+  if (asset.category === "commodities") return asset.symbol === "NATGAS" ? 0.06 : 0.35;
+  return Math.max(Number(asset.marketPrice || 1) * volatilityStopPct(asset) / 100, 0.01);
 }
 
 function minStopPct(asset) {
@@ -291,14 +308,18 @@ function xtbCostPerOperation() {
 }
 
 function operationStrategy(slot) {
+  const target = targetProfitUsd();
+  const stop = stopRiskUsd();
   const strategies = {
     1: {
       label: "Operacion 1",
-      entryTime: "9:00",
-      closeTime: "10:30",
-      targetPct: operationTargetPct[1],
+      entryTime: "Despues de confirmacion",
+      closeTime: "Cierre manual si pierde patron",
+      targetPct: 0,
       stopPct: 0,
-      condition: "Abrir a las 9:00 si hay semaforo OPERABLE. Objetivo 0.75%. Sin stop; cierre manual 10:30 si no llega a meta.",
+      targetUsd: target,
+      stopUsd: stop,
+      condition: `US100 unico: objetivo ${money(target)} y escudo ${money(stop)}. Abrir solo con patron confirmado y spread razonable.`,
     },
     2: {
       label: "Operacion 2",
@@ -306,7 +327,9 @@ function operationStrategy(slot) {
       closeTime: "12:30",
       targetPct: operationTargetPct[2],
       stopPct: 0.5,
-      condition: "Abrir a las 9:30 solo si Op1 sigue abierta y va favorable. Objetivo 0.5%.",
+      targetUsd: target,
+      stopUsd: stop,
+      condition: "Operacion secundaria deshabilitada en modo US100. Usa una sola decision limpia.",
     },
     3: {
       label: "Operacion 3",
@@ -314,7 +337,9 @@ function operationStrategy(slot) {
       closeTime: "13:30",
       targetPct: operationTargetPct[3],
       stopPct: 1,
-      condition: "Abrir a las 10:00 solo si Op1 cerro exitosamente. Objetivo 0.25%.",
+      targetUsd: target,
+      stopUsd: stop,
+      condition: "Operacion secundaria deshabilitada en modo US100. Usa una sola decision limpia.",
     },
     4: {
       label: "Operacion 4",
@@ -322,7 +347,9 @@ function operationStrategy(slot) {
       closeTime: "14:30",
       targetPct: operationTargetPct[4],
       stopPct: 1,
-      condition: "Abrir a las 10:30 solo si Op1 y Op2 cerraron exitosamente. Objetivo 0.25%. Receta inversa: usa la direccion contraria a la senal base; si la base es LONG, Op4 sera SHORT, y si la base es SHORT, Op4 sera LONG.",
+      targetUsd: target,
+      stopUsd: stop,
+      condition: "Operacion secundaria deshabilitada en modo US100. Usa una sola decision limpia.",
     },
   };
   return strategies[Number(slot)] || strategies[1];
@@ -333,23 +360,24 @@ function buildDailyTradePlan() {
   const estimatedXtbCost = xtbCostPerOperation();
   const extensionEnabled = extensionTradesAllowed();
   const plannedTrades = maxPlannedTrades;
-  const currentSlot = String(document.getElementById("trade-slot")?.value || "1");
+  const currentSlot = "1";
   const contractTargetValue = accountBalance;
   const currentStrategy = operationStrategy(currentSlot);
+  const fixedTarget = targetProfitUsd();
+  const fixedStop = stopRiskUsd();
   const tradeTargets = Object.fromEntries(
     [1, 2, 3, 4].map((slot) => {
-      const strategy = operationStrategy(slot);
-      return [slot, accountBalance * strategy.targetPct / 100];
+      return [slot, slot === 1 ? fixedTarget : 0];
     })
   );
   const baseTargetAmount = Object.values(tradeTargets).reduce((total, amount) => total + amount, 0);
   const fullDayTargetAmount = baseTargetAmount;
   const extensionTargetAmount = tradeTargets[3] + tradeTargets[4];
   const stopTargets = {
-    1: 0,
-    2: accountBalance * operationStrategy(2).stopPct / 100,
-    3: accountBalance * operationStrategy(3).stopPct / 100,
-    4: accountBalance * operationStrategy(4).stopPct / 100,
+    1: fixedStop,
+    2: 0,
+    3: 0,
+    4: 0,
   };
   const grossTradeTargets = Object.fromEntries(
     Object.entries(tradeTargets).map(([slot, amount]) => [slot, amount + estimatedXtbCost])
@@ -374,7 +402,7 @@ function buildDailyTradePlan() {
     currentTradeRiskAmount,
     currentTradeNetTargetAmount,
     currentTradeStopAmount,
-    currentTradeStopPct: currentStrategy.stopPct,
+    currentTradeStopPct: accountBalance > 0 ? Number((fixedStop / accountBalance * 100).toFixed(4)) : 0,
     currentStrategy,
     operationStrategies: [1, 2, 3, 4].map(operationStrategy),
     currentTradeRiskPct: Number(currentTradeRiskPct.toFixed(4)),
@@ -936,7 +964,7 @@ function renderPriceGapStatus() {
 }
 
 async function refreshLivePrices({ resetSelected = false } = {}) {
-  const symbols = uniqueAssets().map((asset) => asset.symbol).join(",");
+  const symbols = focusSymbol;
   try {
     updateLiveStatus("Live prices: actualizando...");
     const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}&ts=${Date.now()}`, {
@@ -947,17 +975,14 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     const liveItems = payload.items || [];
     liveItems.forEach(applyLiveQuote);
     await saveQuoteBars(liveItems, "yfinance_1m");
-    await loadMarketBars([
-      selectedAsset.symbol,
-      ...liveItems.slice(0, 6).map((item) => item.symbol),
-    ]);
+    await loadMarketBars([focusSymbol]);
     if (resetSelected) {
       const operable = pickBestCfdOpportunity();
       const watch = pickBestWatchlistOpportunity();
       const best = operable || watch;
       if (best) {
         applySelectedOpportunity(best, "live");
-        updateLiveStatus(`${operable ? "Live prices: CFD operable" : "Radar Yahoo: camino probable"} ${best.asset.symbol} ${best.directionLabel} desde ${payload.count || 0} activos.`, "ok");
+        updateLiveStatus(`US100 actualizado: ${best.directionLabel} con ${payload.count || 0} lectura(s).`, "ok");
         return;
       }
       if (liveQuotes[selectedAsset.symbol]) {
@@ -965,7 +990,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
         resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       }
     }
-    updateLiveStatus(`Live prices: ${payload.count || 0} activos actualizados desde yfinance.`, "ok");
+    updateLiveStatus(`US100 actualizado desde yfinance.`, "ok");
     renderAssets();
     renderTopOpportunities();
     calculate();
@@ -977,6 +1002,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
 
 function applyXtbQuoteBatch(items = []) {
   const validQuotes = items
+    .filter((item) => String(item.symbol || "").trim().toUpperCase() === focusSymbol)
     .map((item) => {
       const symbol = String(item.symbol || "").trim().toUpperCase();
       const price = Number(item.price || 0);
@@ -1055,7 +1081,7 @@ function buildWatchlistOpportunity(asset) {
   const volume = entry ? targetContractVolume(asset, entry, accountBalance) : 0;
   const zones = buildTradeZones(asset, direction, entry, volume, plan.currentTradeRiskAmount);
   const positionValue = entry * asset.multiplier * volume;
-  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const marginOk = !availableCapital || marginRequired <= availableCapital;
   const spreadCost = estimatedSpreadCost(asset, volume);
   const spreadOk = !spreadCost || spreadCost <= plan.currentTradeRiskAmount;
@@ -1110,7 +1136,7 @@ function buildWatchlistOpportunity(asset) {
 }
 
 function buildOpeningWatchlist() {
-  return uniqueAssets()
+  return [findAsset(focusSymbol)]
     .map(buildWatchlistOpportunity)
     .filter((item) => item.status !== "DESCARTAR")
     .sort((a, b) => b.confidence - a.confidence || Math.abs(Number(b.asset.liveChangePct || 0)) - Math.abs(Number(a.asset.liveChangePct || 0)))
@@ -1124,12 +1150,12 @@ function pickBestWatchlistOpportunity() {
 function applySelectedOpportunity(opportunity, source = "auto") {
   if ((source === "live" || source === "xtb") && isManualOpportunityLocked()) return;
   if (source === "manual") lockManualOpportunitySelection();
-  selectedAsset = findAsset(opportunity.asset.symbol);
+  selectedAsset = findAsset(focusSymbol);
   const symbolInput = document.getElementById("symbol");
   const marketInput = document.getElementById("market-price");
   const xtbInput = document.getElementById("xtb-price");
   const quotePrice = Number(liveQuotes[selectedAsset.symbol]?.price || opportunity.asset.marketPrice || 0);
-  if (symbolInput) symbolInput.value = selectedAsset.symbol;
+  if (symbolInput) symbolInput.value = focusSymbol;
   if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
   if (xtbInput && quotePrice) xtbInput.value = quotePrice.toFixed(2);
   resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
@@ -1167,7 +1193,7 @@ function formatPriceForAsset(value, asset) {
 
 function priceStepPct(asset) {
   if (asset.category === "forex") return 0.0015;
-  if (asset.category === "indices") return 0.003;
+  if (asset.category === "indices") return 0.0005;
   if (asset.category === "commodities") return 0.004;
   if (asset.symbol === "AVAX") return 0.0045;
   if (asset.category === "crypto") return 0.006;
@@ -1175,20 +1201,23 @@ function priceStepPct(asset) {
 }
 
 function resetOrderFieldsForAsset(asset) {
-  const direction = document.getElementById("direction").value;
-  const market = activeMarketPriceFor(asset) || Number(asset.marketPrice || 100);
+  const profile = asset.symbol === focusSymbol ? us100StrategyProfile() : null;
+  const direction = profile?.direction || document.getElementById("direction").value;
+  const market = profile?.price || activeMarketPriceFor(asset) || Number(asset.marketPrice || 100);
   const step = priceStepPct(asset);
-  const entry = direction === "LONG" ? market * (1 + step) : market * (1 - step);
+  const entry = profile?.entry || (direction === "LONG" ? market * (1 + step) : market * (1 - step));
   const balance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
-  const volume = targetContractVolume(asset, entry, balance);
+  const volume = profile?.volume || targetContractVolume(asset, entry, balance);
   const plan = buildDailyTradePlan();
-  const targetAmount = plan.currentTradeRiskAmount;
+  const targetAmount = profile?.targetUsd || plan.currentTradeRiskAmount;
   const targetDistance = volume > 0 ? targetAmount / (volume * asset.multiplier) : 0;
   const stopDistance = volume > 0 && plan.currentTradeStopAmount > 0 ? plan.currentTradeStopAmount / (volume * asset.multiplier) : 0;
-  const takeProfit = direction === "LONG" ? entry + targetDistance : entry - targetDistance;
-  const stopLoss = stopDistance > 0 ? (direction === "LONG" ? entry - stopDistance : entry + stopDistance) : 0;
+  const takeProfit = profile?.takeProfit || (direction === "LONG" ? entry + targetDistance : entry - targetDistance);
+  const stopLoss = profile?.stopLoss || (stopDistance > 0 ? (direction === "LONG" ? entry - stopDistance : entry + stopDistance) : 0);
 
   document.getElementById("market-price").value = formatPriceForAsset(market, asset);
+  document.getElementById("direction").value = direction;
+  document.getElementById("requested-volume").value = formatVolumeForXtb(volume, asset);
   document.getElementById("entry-price").value = formatPriceForAsset(entry, asset);
   document.getElementById("stop-price").value = stopLoss ? formatPriceForAsset(stopLoss, asset) : "0";
   document.getElementById("take-profit-price").value = formatPriceForAsset(takeProfit, asset);
@@ -1247,6 +1276,16 @@ function resetOrderForCurrentMode(asset) {
 }
 
 function applyAiAggressiveTargets(asset) {
+  if (asset.symbol === focusSymbol) {
+    const profile = us100StrategyProfile();
+    document.getElementById("direction").value = profile.direction;
+    document.getElementById("requested-volume").value = formatVolumeForXtb(profile.volume, asset);
+    document.getElementById("market-price").value = formatPriceForAsset(profile.price, asset);
+    document.getElementById("entry-price").value = formatPriceForAsset(profile.entry, asset);
+    document.getElementById("stop-price").value = formatPriceForAsset(profile.stopLoss, asset);
+    document.getElementById("take-profit-price").value = formatPriceForAsset(profile.takeProfit, asset);
+    return;
+  }
   const plan = buildDailyTradePlan();
   const opportunity = buildAssetOpportunity(asset, plan.currentTradeRiskPct);
   const entry = Number(document.getElementById("entry-price").value || opportunity.entry || 0);
@@ -1263,7 +1302,8 @@ function applyAiAggressiveTargets(asset) {
 }
 
 function selectedAssetFromForm() {
-  const symbol = document.getElementById("symbol").value.trim().toUpperCase();
+  const symbol = focusSymbol;
+  if (document.getElementById("symbol")) document.getElementById("symbol").value = focusSymbol;
   const baseAsset = findAsset(symbol);
   const marketInput = Number(document.getElementById("market-price").value || 0);
   const xtbInput = xtbPriceValue();
@@ -1468,7 +1508,7 @@ function buildAiConfirmation() {
   const driftDirection = directionFromMove(driftPct);
   const selectedDirection = document.getElementById("direction").value;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
-  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
   const marketOpen = isMarketOpenNow();
   const timing = marketTimingProfile();
@@ -2017,6 +2057,40 @@ function marketPhaseLabel() {
 }
 
 function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
+  if (asset.symbol === focusSymbol) {
+    const profile = us100StrategyProfile();
+    const zones = buildTradeZones(asset, profile.direction, profile.entry, profile.volume, profile.targetUsd);
+    zones.stopLoss = profile.stopLoss;
+    zones.takeProfit = profile.takeProfit;
+    zones.riskAmount = profile.stopUsd;
+    zones.rewardAmount = profile.targetUsd;
+    zones.securityLow = Math.min(profile.entry, profile.stopLoss);
+    zones.securityHigh = Math.max(profile.entry, profile.stopLoss);
+    return {
+      asset,
+      volume: profile.volume,
+      score: profile.confidence,
+      direction: profile.direction,
+      directionLabel: profile.directionLabel,
+      usable: profile.status !== "NO OPERAR",
+      status: profile.status,
+      confidence: profile.confidence,
+      entry: profile.entry,
+      stopLoss: profile.stopLoss,
+      takeProfit: profile.takeProfit,
+      zones,
+      stopDistance: Math.abs(profile.entry - profile.stopLoss),
+      marginRequired: profile.marginRequired,
+      spreadCost: estimatedSpreadCost(asset, profile.volume),
+      targetMovePct: profile.entry ? Math.abs(profile.takeProfit - profile.entry) / profile.entry * 100 : 0,
+      triggerDistancePct: 0,
+      fullPathPct: 0,
+      targetAmount: profile.targetUsd,
+      stopPct: profile.entry ? Math.abs(profile.entry - profile.stopLoss) / profile.entry * 100 : 0,
+      minimumStopPct: minimumStopPointsForAsset(asset) / Math.max(profile.entry, 1) * 100,
+      reason: `${profile.pattern.name}. ${profile.explanation} Vol ${formatVolumeForXtb(profile.volume, asset)}, valor/punto ${money(profile.pointValue)}, margen aprox ${money(profile.marginRequired)}.`,
+    };
+  }
   const accountBalance = Number(document.getElementById("account-balance").value || defaultAccountBalance);
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
   const marginPool = availableCapital || accountBalance;
@@ -2027,13 +2101,13 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
   const step = priceStepPct(asset);
   const entry = direction === "SHORT" ? asset.marketPrice * (1 - step) : asset.marketPrice * (1 + step);
   const targetAmount = buildDailyTradePlan().currentTradeRiskAmount;
-  const nominalBudget = marginBudget / (cfdMarginPct() / 100);
+  const nominalBudget = marginBudget / (cfdMarginPct(asset) / 100);
   const contractVolume = targetContractVolume(asset, entry, accountBalance);
   const marginVolume = roundVolumeForXtb(nominalBudget / (entry * asset.multiplier), asset);
   const volume = roundVolumeForXtb(Math.min(contractVolume, marginVolume), asset);
   const targetDistance = volume > 0 ? targetAmount / (volume * asset.multiplier) : 0;
   const positionValue = entry * asset.multiplier * volume;
-  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const targetMovePct = positionValue > 0 ? targetAmount / positionValue * 100 : 0;
   const takeProfit = direction === "SHORT" ? entry - targetDistance : entry + targetDistance;
   const zones = buildTradeZones(asset, direction, entry, volume, targetAmount);
@@ -2094,7 +2168,7 @@ function buildAssetOpportunity(asset, riskPct = getEffectiveRiskPct()) {
 
 function buildTopOpportunities() {
   const riskPct = getEffectiveRiskPct();
-  return uniqueAssets()
+  return [findAsset(focusSymbol)]
     .map((asset) => buildAssetOpportunity(asset, riskPct))
     .filter((item) => item.usable)
     .sort((a, b) => b.score - a.score)
@@ -2146,12 +2220,12 @@ function renderTopOpportunities() {
 }
 
 async function calculate() {
-  const symbol = document.getElementById("symbol").value.trim().toUpperCase();
-  selectedAsset = selectedAssetFromForm();
+  const symbol = focusSymbol;
+  document.getElementById("symbol").value = focusSymbol;
+  selectedAsset = findAsset(focusSymbol);
   document.getElementById("available-capital").value = document.getElementById("account-balance").value || defaultAccountBalance;
   document.getElementById("risk-pct").value = "dynamic";
   document.getElementById("direction").value = effectiveDirectionForSlot(selectedAsset);
-  document.getElementById("requested-volume").value = "";
   applyAiAggressiveTargets(selectedAsset);
   const riskPct = getEffectiveRiskPct();
   const payload = {
@@ -2369,7 +2443,7 @@ function renderLeverageCapacity() {
     <p class="text-xs font-bold uppercase text-gold">Capacidad CFD 1:${numberText(leverage)}</p>
     <div class="mt-2 grid gap-2">
       <div class="summary-row"><span>Capital real</span><strong>${money(balance)}</strong></div>
-      <div class="summary-row"><span>Garantia estimada</span><strong>${cfdMarginPct()}%</strong></div>
+      <div class="summary-row"><span>Garantia estimada</span><strong>${cfdMarginPct(lastResult?.asset || selectedAsset)}%</strong></div>
       <div class="summary-row"><span>Nominal por capital</span><strong>${money(nominalByBalance)}</strong></div>
       <div class="summary-row"><span>Nominal por disponible</span><strong>${money(nominalByAvailable)}</strong></div>
       <div class="summary-row"><span>Meta receta</span><strong>${riskPct}% = bruto ${money(targetUsd)} / neto ${money(plan.currentTradeNetTargetAmount)}</strong></div>
@@ -2414,6 +2488,195 @@ function operationResultValue(slot) {
 function setOperationResult(slot, value) {
   const input = document.getElementById(operationResultId(slot));
   if (input) input.value = value;
+}
+
+function us100StrategyProfile() {
+  const asset = findAsset(focusSymbol);
+  const quote = liveQuotes[focusSymbol] || {};
+  const price = Number(document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || quote.price || asset.marketPrice || 0);
+  const bars = realCandlesForItem({ asset, zones: { price } }).slice(-30);
+  const pattern = detectCandlePattern(bars);
+  const imbalance = detectGapFvgBag(bars);
+  const trend = detectTrendProfile(bars, asset);
+  const direction = decideUs100Direction(pattern, trend, asset);
+  const level = us100OrderLevels(asset, direction, bars, price);
+  const stopUsd = stopRiskUsd();
+  const targetUsd = targetProfitUsd();
+  const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
+  const rawVolume = stopUsd / (stopPoints * asset.multiplier);
+  const marginVolume = maxVolumeByMargin(asset, level.entry);
+  const volume = roundVolumeForXtb(Math.min(rawVolume, marginVolume), asset);
+  const pointValue = volume * asset.multiplier;
+  const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
+  const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
+  const stopLoss = direction === "LONG" ? level.entry - finalStopPoints : level.entry + finalStopPoints;
+  const takeProfit = direction === "LONG" ? level.entry + takePoints : level.entry - takePoints;
+  const positionValue = level.entry * asset.multiplier * volume;
+  const marginRequired = positionValue * cfdMarginPct(asset) / 100;
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + (volume > 0 ? 10 : -30)), 0, 95);
+  const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
+  return {
+    asset,
+    price,
+    bars,
+    pattern,
+    imbalance,
+    trend,
+    direction,
+    directionLabel: labelFromDirection(direction),
+    entry: level.entry,
+    stopLoss,
+    takeProfit,
+    volume,
+    pointValue,
+    stopPoints: finalStopPoints,
+    takePoints,
+    targetUsd,
+    stopUsd,
+    positionValue,
+    marginRequired,
+    confidence,
+    status,
+    explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
+  };
+}
+
+function detectGapFvgBag(candles) {
+  if (candles.length < 3) {
+    return { type: "Sin lectura", bias: "WAIT", score: 0, detail: "Faltan velas para leer GAP/FVG/BAG." };
+  }
+  const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  const thirdBack = candles[candles.length - 3];
+  const lastRange = Math.max(last.h - last.l, 0.00001);
+  const gap = last.o - prev.c;
+  const gapPct = prev.c > 0 ? gap / prev.c * 100 : 0;
+  const bullishFvg = thirdBack.h < last.l;
+  const bearishFvg = thirdBack.l > last.h;
+  const breaksUp = last.c > Math.max(prev.h, thirdBack.h);
+  const breaksDown = last.c < Math.min(prev.l, thirdBack.l);
+  const strongBody = Math.abs(last.c - last.o) / lastRange > 0.58;
+
+  if (Math.abs(gapPct) >= 0.08 && strongBody && (breaksUp || breaksDown)) {
+    const bias = gapPct > 0 || breaksUp ? "LONG" : "SHORT";
+    return {
+      type: "BAG",
+      bias,
+      score: 22,
+      detail: `Breakaway/Acceleration Gap: salto con ruptura. Sesgo ${bias}.`,
+    };
+  }
+  if (bullishFvg || bearishFvg) {
+    const bias = bullishFvg ? "LONG" : "SHORT";
+    return {
+      type: "FVG",
+      bias,
+      score: 18,
+      detail: `Fair Value Gap: hueco de desequilibrio ${bias === "LONG" ? "alcista" : "bajista"} que puede atraer pullback.`,
+    };
+  }
+  if (Math.abs(gapPct) >= 0.05) {
+    const bias = gapPct > 0 ? "LONG" : "SHORT";
+    return {
+      type: "GAP",
+      bias,
+      score: 12,
+      detail: `Gap simple: apertura separada ${numberText(gapPct)}% del cierre previo.`,
+    };
+  }
+  return { type: "Sin GAP", bias: "WAIT", score: 0, detail: "No hay hueco relevante; manda mas la vela y tendencia." };
+}
+
+function detectTrendProfile(candles, asset) {
+  const closes = candles.map((candle) => Number(candle.c)).filter(Boolean);
+  const changePct = Number(asset.liveChangePct ?? 0);
+  if (closes.length < 6) {
+    const direction = changePct < -0.25 ? "SHORT" : changePct > 0.25 ? "LONG" : "WAIT";
+    return { direction, score: direction === "WAIT" ? 5 : 22, label: `Movimiento Yahoo/XTB ${numberText(changePct)}%` };
+  }
+  const first = closes.slice(0, Math.max(3, Math.floor(closes.length / 3))).reduce((a, b) => a + b, 0) / Math.max(1, Math.floor(closes.length / 3));
+  const lastSlice = closes.slice(-Math.max(3, Math.floor(closes.length / 3)));
+  const last = lastSlice.reduce((a, b) => a + b, 0) / lastSlice.length;
+  const slopePct = first > 0 ? (last - first) / first * 100 : changePct;
+  const direction = slopePct < -0.08 ? "SHORT" : slopePct > 0.08 ? "LONG" : "WAIT";
+  return {
+    direction,
+    score: direction === "WAIT" ? 8 : Math.min(35, Math.abs(slopePct) * 120),
+    label: `Tendencia 30m ${numberText(slopePct)}%`,
+  };
+}
+
+function detectCandlePattern(candles) {
+  if (candles.length < 3) return { bias: "WAIT", name: "Sin velas suficientes", score: 5, detail: "Faltan velas reales para leer patron." };
+  const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+  const third = candles[candles.length - 3];
+  const body = (c) => Math.abs(c.c - c.o);
+  const range = (c) => Math.max(c.h - c.l, 0.00001);
+  const upperWick = (c) => c.h - Math.max(c.o, c.c);
+  const lowerWick = (c) => Math.min(c.o, c.c) - c.l;
+  const bullish = last.c > last.o;
+  const bearish = last.c < last.o;
+  if (bullish && prev.c < prev.o && last.c > prev.o && last.o < prev.c) {
+    return { bias: "LONG", name: "Envolvente alcista", score: 38, detail: "Compradores absorbieron la vela roja anterior." };
+  }
+  if (bearish && prev.c > prev.o && last.c < prev.o && last.o > prev.c) {
+    return { bias: "SHORT", name: "Envolvente bajista", score: 38, detail: "Vendedores absorbieron la vela verde anterior." };
+  }
+  if (lowerWick(last) > body(last) * 2.2 && upperWick(last) < body(last) * 1.2) {
+    return { bias: "LONG", name: "Martillo / rechazo de bajos", score: 30, detail: "El precio rechazo zona baja y cerro recuperando." };
+  }
+  if (upperWick(last) > body(last) * 2.2 && lowerWick(last) < body(last) * 1.2) {
+    return { bias: "SHORT", name: "Estrella fugaz / rechazo de altos", score: 30, detail: "El precio rechazo zona alta y cerro perdiendo fuerza." };
+  }
+  if (body(last) / range(last) > 0.72) {
+    return bullish
+      ? { bias: "LONG", name: "Marubozu alcista", score: 32, detail: "Vela de control comprador casi sin rechazo." }
+      : { bias: "SHORT", name: "Marubozu bajista", score: 32, detail: "Vela de control vendedor casi sin rechazo." };
+  }
+  if (third.c < third.o && body(prev) < range(prev) * 0.35 && bullish && last.c > (third.o + third.c) / 2) {
+    return { bias: "LONG", name: "Estrella de la manana", score: 36, detail: "Indecision seguida de recuperacion alcista." };
+  }
+  if (third.c > third.o && body(prev) < range(prev) * 0.35 && bearish && last.c < (third.o + third.c) / 2) {
+    return { bias: "SHORT", name: "Estrella de la tarde", score: 36, detail: "Indecision seguida de giro bajista." };
+  }
+  return { bias: "WAIT", name: "Sin patron dominante", score: 10, detail: "No hay vela de confirmacion clara; esperar ruptura o pullback." };
+}
+
+function decideUs100Direction(pattern, trend, asset) {
+  if (pattern.bias !== "WAIT" && pattern.bias === trend.direction) return pattern.bias;
+  if (pattern.bias !== "WAIT" && trend.direction === "WAIT") return pattern.bias;
+  if (trend.direction !== "WAIT") return trend.direction;
+  return aiDirectionForAsset(asset);
+}
+
+function maxVolumeByMargin(asset, entry) {
+  const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const available = accountBalance;
+  const marginPct = cfdMarginPct(asset) / 100;
+  if (!entry || !marginPct) return 0;
+  const raw = (available * 0.9) / (entry * asset.multiplier * marginPct);
+  return roundVolumeForXtb(raw, asset);
+}
+
+function us100OrderLevels(asset, direction, candles, fallbackPrice) {
+  const highs = candles.map((candle) => Number(candle.h)).filter(Boolean);
+  const lows = candles.map((candle) => Number(candle.l)).filter(Boolean);
+  const recentHigh = highs.length ? Math.max(...highs.slice(-12)) : fallbackPrice;
+  const recentLow = lows.length ? Math.min(...lows.slice(-12)) : fallbackPrice;
+  const buffer = Math.max(Number(fallbackPrice || 0) * 0.00008, 2);
+  const entry = direction === "LONG" ? recentHigh + buffer : recentLow - buffer;
+  const opposite = direction === "LONG" ? recentLow : recentHigh;
+  const stopPoints = Math.abs(entry - opposite);
+  return { entry, stopPoints };
+}
+
+function buildUs100Explanation(pattern, trend, imbalance, direction, status) {
+  const side = direction === "LONG" ? "compra por ruptura alcista" : "venta en corto por ruptura bajista";
+  const model = `${pattern.name} + ${imbalance.type}`;
+  if (status === "NO OPERAR") return `No operar: ${model}. ${trend.label}. Falta confirmacion o volumen valido.`;
+  if (status === "ESPERAR") return `Esperar: ${model}. ${trend.label}. La idea seria ${side}, pero aun falta una vela clara.`;
+  return `Operable con confirmacion: ${model}. ${trend.label}. Estrategia: ${side}, entrada por stop, escudo inmediato y objetivo fijo.`;
 }
 
 function totalOperationResult() {
@@ -2497,128 +2760,57 @@ function syncOutcomeFromResults() {
 function renderSimpleDashboard() {
   const target = document.getElementById("simple-dashboard");
   if (!target) return;
-
-  const symbol = document.getElementById("symbol")?.value || "--";
-  const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || "--";
-  const entry = document.getElementById("entry-price")?.value || "--";
-  const takeProfit = document.getElementById("take-profit-price")?.value || "--";
-  const volume = document.getElementById("requested-volume")?.value || "--";
-  const capital = document.getElementById("account-balance")?.value || "--";
-  const op1 = document.getElementById("operation1-result")?.value || "0";
-  const op2 = document.getElementById("operation2-result")?.value || "0";
-  const op3 = document.getElementById("operation3-result")?.value || "0";
-  const op4 = document.getElementById("operation4-result")?.value || "0";
-  const movement = document.getElementById("capital-movement")?.value || "";
-  const lessonOutcome = document.getElementById("lesson-outcome")?.value || "pending";
-  const lessonNotes = document.getElementById("lesson-notes")?.value || "";
-  const tradeSlot = document.getElementById("trade-slot")?.value || "1";
-  const direction = document.getElementById("direction")?.value || "--";
-  const plan = buildDailyTradePlan();
-  const opResults = { 1: op1, 2: op2, 3: op3, 4: op4 };
-  const opTargets = {
-    1: plan.firstRiskAmount,
-    2: plan.secondRiskAmount,
-    3: plan.thirdRiskAmount,
-    4: plan.fourthRiskAmount,
-  };
-  const opNetTargets = {
-    1: plan.firstNetTargetAmount,
-    2: plan.secondNetTargetAmount,
-    3: plan.thirdNetTargetAmount,
-    4: plan.fourthNetTargetAmount,
-  };
-  const activeResultTarget = operationResultId(tradeSlot);
-  const activeResult = opResults[tradeSlot] || "0";
-  const dailyText = document.getElementById("daily-result-card")?.textContent || "Resultado cerrado: $0";
-  const resultText = dailyText.match(/Resultado cerrado:[^\.]+/)?.[0]?.replace("Resultado cerrado:", "").trim() || "$0";
-  const dayTotal = Number(totalOperationResult().toFixed(2));
-  const inferredOutcome = dayTotal > 0 ? "Gano / toco meta" : dayTotal < 0 ? "Perdio / toco stop" : "Pendiente";
-  const started = startedOperations();
-  const ai = buildAiConfirmation();
-  const topOpportunities = buildTopOpportunities();
-  const openingWatchlist = buildOpeningWatchlist();
-  const displayedOpportunities = topOpportunities.length ? topOpportunities : openingWatchlist.slice(0, 3);
+  {
+  const profile = us100StrategyProfile();
   const selectedChartFrame = chartFrameConfig();
-  const watchMode = !topOpportunities.length;
-  const primaryDisplay = displayedOpportunities.find((item) => item.asset.symbol === symbol) || displayedOpportunities[0] || null;
-  const selectedQuote = liveQuotes[String(symbol).toUpperCase()];
-  const sourceLabel = selectedQuote?.source === "xtb" ? "Lectura directa XTB" : "Proveedor/ultimo precio";
-  const primaryWarning = ai.status === "NO OPERAR"
-    ? ai.reasons[0] || "Hay bloqueo operativo: revisa margen, stop, volumen u horario."
-    : ai.status === "ESPERAR"
-      ? ai.reasons[0] || "Espera confirmacion antes de operar."
-      : "CFD operable solo si coincide con XTB, spread y pestana CFD.";
-  const opCard = (slot) => {
-    const isActive = tradeSlot === String(slot);
-    const isStarted = Boolean(started[String(slot)]);
-    const strategy = operationStrategy(slot);
-    const gate = operationGate(slot);
-    const targetAmount = opTargets[slot] || 0;
-    const netTargetAmount = opNetTargets[slot] || targetAmount;
-    const result = opResults[slot] || "0";
-    const badge = `${strategy.targetPct}% capital / Neto ${money(netTargetAmount)}`;
-    const stopLabel = strategy.stopPct ? `${strategy.stopPct}% (${isActive && lastResult?.stop_loss ? numberText(lastResult.stop_loss) : "calcular"})` : "Sin stop";
-    return `
-      <article class="simple-operation ${isActive ? "active" : ""} ${isStarted ? "started" : ""}">
-        <div class="simple-head">
-          <h2>Operacion ${slot}</h2>
-          <span class="simple-badge">${isStarted ? "Iniciada" : badge}</span>
-        </div>
-        <p class="simple-tiny">${strategy.entryTime} a ${strategy.closeTime}. ${strategy.condition}</p>
-        <p class="simple-tiny">Meta neta ${money(netTargetAmount)}${plan.estimatedXtbCost ? ` + costo XTB ${money(plan.estimatedXtbCost)} = bruto ${money(targetAmount)}` : ""}. Stop: ${stopLabel}. ${gate.reason}</p>
-        <div class="simple-numbers">
-          <div class="simple-number"><span class="simple-label">Direccion</span><strong>${isActive ? direction : "--"}</strong></div>
-          <div class="simple-number"><span class="simple-label">Volumen</span><strong>${isActive ? volume : "--"}</strong></div>
-          <div class="simple-number"><span class="simple-label">Entrada</span><strong>${isActive ? entry : "--"}</strong></div>
-          <div class="simple-number"><span class="simple-label">Meta</span><strong>${isActive ? takeProfit : "--"}</strong></div>
-        </div>
-        <label class="simple-result-entry">
-          <span class="simple-label">Resultado USD</span>
-          <input type="number" step="0.01" value="${result}" data-op-result="${slot}" placeholder="0.00" />
-        </label>
-        <div class="simple-actions">
-          <button type="button" data-simple-action="start-op-${slot}">${isStarted ? "Operacion iniciada" : `Iniciar Op ${slot}`}</button>
-          <button type="button" class="secondary" data-simple-action="slot-${slot}">Ver receta</button>
-          <button type="button" class="secondary" data-simple-action="submit-op-${slot}">Enviar resultado</button>
-          ${isStarted ? `<button type="button" class="danger" data-simple-action="cancel-op-${slot}">Cancelar inicio</button>` : ""}
-        </div>
-      </article>
-    `;
-  };
+  const primaryDisplay = buildAssetOpportunity(profile.asset);
+  const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
+  const dayTotal = Number(totalOperationResult().toFixed(2));
+  const result = document.getElementById("operation1-result")?.value || "0";
+  const movement = document.getElementById("capital-movement")?.value || "";
+  const lessonNotes = document.getElementById("lesson-notes")?.value || "";
+  const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
+  const sourceLabel = liveQuotes[focusSymbol]?.source === "xtb" ? "Lectura directa XTB" : "Yahoo / ultimo precio";
 
   target.innerHTML = `
-    <div class="simple-shell">
+    <div class="simple-shell us100-desk">
       <div class="simple-hero">
         <section class="simple-panel">
-          <h1>Plan diario XTB</h1>
-          <p class="simple-subtitle">Itinerario: Op1 busca 0.75%, Op2 0.5%, Op3 0.25% y Op4 0.25% del capital operativo. Stops y cierres siguen el horario definido.</p>
+          <h1>US100 Decision Desk</h1>
+          <p class="simple-subtitle">Un solo CFD. Objetivo ${money(profile.targetUsd)}. Escudo ${money(profile.stopUsd)}. La receta se calcula por patron, puntos, volumen y margen.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
-            <span class="simple-chip">XTB sincronizado</span>
-            <span class="simple-chip">Produccion permanente</span>
+            <span class="simple-chip">${focusSymbol}</span>
             <span class="simple-chip">${sourceLabel}</span>
-            <span class="simple-chip">Costo XTB/op ${money(plan.estimatedXtbCost)}</span>
-            <span class="simple-chip warn">Stops por itinerario: confirmar manual</span>
+            <span class="simple-chip">Valor/punto ${money(profile.pointValue)}</span>
+            <span class="simple-chip warn">Confirma CFD, spread y margen en XTB</span>
           </div>
         </section>
         <section class="simple-metrics">
-          <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${symbol}</span></div>
+          <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${focusSymbol}</span></div>
           <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span></div>
-          <div class="simple-metric"><span class="simple-label">Operacion activa</span><span class="simple-value">Operacion ${tradeSlot}</span></div>
+          <div class="simple-metric"><span class="simple-label">Decision</span><span class="simple-value">${profile.direction}</span></div>
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
         </section>
       </div>
-      <section class="simple-panel simple-decision ${ai.status === "NO OPERAR" ? "danger" : ai.status === "OPERABLE" ? "ok" : "warn"}">
+
+      <section class="simple-panel simple-decision ${profile.status === "NO OPERAR" ? "danger" : profile.status === "OPERABLE" ? "ok" : "warn"}">
         <div class="simple-head">
           <div>
-            <span class="simple-label">${watchMode ? "Radar Yahoo para apertura" : "Mejor alternativa CFD operable"}</span>
-            <h2>${symbol} ${direction}</h2>
-            <p class="simple-subtitle">${watchMode ? "Preseleccion: usa Yahoo para darte camino antes de apertura. No ejecutes hasta cierre ORB y semaforo OPERABLE." : primaryWarning}</p>
+            <span class="simple-label">Decision profesional</span>
+            <h2>${focusSymbol} ${profile.directionLabel}</h2>
+            <p class="simple-subtitle">${profile.explanation}</p>
           </div>
           <div class="simple-score">
-            <span>${watchMode ? primaryDisplay?.status || "VIGILAR" : ai.status}</span>
-            <strong>${watchMode && primaryDisplay ? primaryDisplay.confidence : ai.confidence}%</strong>
+            <span>${profile.status}</span>
+            <strong>${profile.confidence}%</strong>
           </div>
+        </div>
+        <div class="simple-pattern-grid">
+          <div><span class="simple-label">Patron de vela</span><strong>${profile.pattern.name}</strong><small>${profile.pattern.detail}</small></div>
+          <div><span class="simple-label">GAP / FVG / BAG</span><strong>${profile.imbalance.type}</strong><small>${profile.imbalance.detail}</small></div>
+          <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
+          <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
         </div>
         <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
           <div>
@@ -2632,62 +2824,80 @@ function renderSimpleDashboard() {
           </div>
         </div>
         ${primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : ""}
-        <div class="simple-top-list">
-          ${displayedOpportunities.length ? displayedOpportunities.map((item, index) => `
-            <button type="button" class="simple-top-item ${item.asset.symbol === symbol ? "active" : ""}" data-simple-top-symbol="${item.asset.symbol}">
-              <span>#${index + 1} ${item.asset.symbol}</span>
-              <strong>${item.directionLabel}</strong>
-              <small>Entrada ${numberText(item.zones.entry)} | Stop ${numberText(item.zones.stopLoss)} | Take ${numberText(item.zones.takeProfit)}</small>
-              <small>${item.status ? `${item.status} ${item.confidence}% - ` : ""}${item.reason}</small>
-            </button>
-          `).join("") : `<div class="simple-top-empty">No hay camino claro desde Yahoo. Espera nueva lectura.</div>`}
-        </div>
       </section>
-      <section class="simple-ops">
-        ${[1, 2, 3, 4].map(opCard).join("")}
+
+      <section class="simple-ops single">
+        <article class="simple-operation active">
+          <div class="simple-head">
+            <h2>Receta XTB</h2>
+            <span class="simple-badge">${profile.status}</span>
+          </div>
+          <div class="simple-numbers">
+            <div class="simple-number"><span class="simple-label">Orden</span><strong>${profile.directionLabel}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${numberText(profile.entry)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>${numberText(profile.stopLoss)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Take profit</span><strong>${numberText(profile.takeProfit)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
+          </div>
+          <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
+        </article>
+        <article class="simple-operation">
+          <div class="simple-head">
+            <h2>Parametros</h2>
+            <span class="simple-badge">editable</span>
+          </div>
+          <div class="simple-form-grid two">
+            <label class="simple-field"><span class="simple-label">Objetivo USD</span><input type="number" step="1" value="${profile.targetUsd}" data-sync-target="target-profit-usd" /></label>
+            <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
+            <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="number" step="0.01" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
+            <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="number" step="0.01" value="${capital}" data-sync-target="account-balance" /></label>
+          </div>
+          <p class="simple-tiny">Si XTB muestra precio distinto, pegalo aqui y la receta se recalcula con ese precio.</p>
+        </article>
       </section>
+
       <section class="simple-panel">
         <div class="simple-head">
           <div>
-            <h2>Cierre de operacion</h2>
-            <p class="simple-subtitle">Escribe el resultado de la operacion activa. Guardar cierre actualiza capital, guarda el dia y limpia el campo.</p>
+            <h2>Cierre del dia</h2>
+            <p class="simple-subtitle">Registra cuanto ganaste o perdiste. Se guarda en base de datos y queda listo para exportar.</p>
           </div>
-          <span class="simple-badge">${resultText}</span>
+          <span class="simple-badge">${money(dayTotal)}</span>
         </div>
         <div class="simple-form-grid">
-          <label class="simple-field">
-            <span class="simple-label">Resultado Operacion ${tradeSlot} USD</span>
-            <input id="simple-active-result" type="number" step="0.01" value="${activeResult}" data-sync-target="${activeResultTarget}" placeholder="-15.70 o 23.90" />
-          </label>
-          <div class="simple-field">
-            <span class="simple-label">Que paso</span>
-            <span class="simple-value">${inferredOutcome}</span>
-            <span class="simple-tiny">Se deduce automaticamente por el resultado guardado.</span>
-          </div>
-          <div class="simple-field">
-            <span class="simple-label">Accion</span>
-            <button type="button" data-simple-action="save-close">Guardar cierre</button>
-          </div>
+          <label class="simple-field"><span class="simple-label">Resultado USD</span><input id="simple-active-result" type="number" step="0.01" value="${result}" data-sync-target="operation1-result" placeholder="-50 o 100" /></label>
+          <div class="simple-field"><span class="simple-label">Estado</span><span class="simple-value">${dayTotal > 0 ? "Gano" : dayTotal < 0 ? "Perdio" : "Pendiente"}</span><span class="simple-tiny">Meta ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}.</span></div>
+          <div class="simple-field"><span class="simple-label">Accion</span><button type="button" data-simple-action="save-close">Guardar cierre</button></div>
         </div>
-        <p class="simple-tiny">Base guardada: Op1 ${money(Number(op1 || 0))}, Op2 ${money(Number(op2 || 0))}, Op3 ${money(Number(op3 || 0))}, Op4 ${money(Number(op4 || 0))}. Las condiciones se validan por horario y resultados previos.</p>
       </section>
+
       <section class="simple-panel">
-        <div class="simple-head"><div><h2>Ajustes y aprendizaje</h2><p class="simple-subtitle">Capital, memoria IA, notas, alertas y exportacion sin volver a la pantalla anterior.</p></div><span class="simple-badge">completo</span></div>
+        <div class="simple-head"><div><h2>Aprendizaje y capital</h2><p class="simple-subtitle">Retiro/deposito, nota del dia, alertas y exportacion.</p></div><span class="simple-badge">memoria</span></div>
         <div class="simple-form-grid">
           <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="number" step="0.01" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
-          <label class="simple-field"><span class="simple-label">Costo XTB estimado/op USD</span><input type="number" step="0.01" value="${plan.estimatedXtbCost}" placeholder="0.00" data-sync-target="xtb-cost-per-operation" /><span class="simple-tiny">Usa el costo real que veas en XTB. Se suma a la meta bruta, no cambia el neto buscado.</span></label>
+          <label class="simple-field"><span class="simple-label">Patron leido</span><input value="${profile.pattern.name}" readonly /></label>
           <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
           <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
-          <div class="simple-field"><span class="simple-label">Resultado para aprendizaje</span><span class="simple-value">${money(dayTotal)}</span><span class="simple-tiny">Se toma automaticamente de las operaciones enviadas.</span></div>
-          <div class="simple-field"><span class="simple-label">Que paso</span><span class="simple-value">${lessonOutcome === "win" ? "Gano" : lessonOutcome === "loss" ? "Perdio" : lessonOutcome === "manual" ? "Cierre manual" : lessonOutcome === "missed" ? "No entre" : inferredOutcome}</span><span class="simple-tiny">Se actualiza solo al guardar cierre.</span></div>
+          <div class="simple-field"><span class="simple-label">Resultado aprendizaje</span><span class="simple-value">${money(dayTotal)}</span></div>
           <div class="simple-field"><span class="simple-label">Aprendizaje</span><button type="button" class="secondary" data-simple-action="save-lesson">Guardar aprendizaje</button></div>
-          <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: spread alto, entre tarde, stop muy pegado, buena direccion...">${lessonNotes}</textarea></label>
+          <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: entre tarde, patron falso, rechazo en soporte...">${lessonNotes}</textarea></label>
         </div>
         <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
-      <section class="simple-panel"><div class="simple-guide"><div><strong>1. Inicio</strong>Abre XTB, deja visible el activo y confirma que el precio XTB cambie.</div><div><strong>2. Contrato</strong>Cada operacion usa contrato cercano al capital operativo y busca neto ${money(plan.firstNetTargetAmount)}.</div><div><strong>3. Validacion XTB</strong>No operar si contrato real supera capital * 1.2 o spread real supera meta.</div><div><strong>4. Cierre</strong>Respeta cierres: Op1 10:30, Op2 12:30, Op3 13:30, Op4 14:30.</div></div><p class="simple-tiny">Esta vista escribe sobre los mismos controles reales y conserva sincronizacion, aprendizaje, capital, cierre del dia y exportacion.</p></section>
+
+      <section class="simple-panel">
+        <div class="simple-guide">
+          <div><strong>GAP</strong>El precio salta y deja un hueco entre una vela y otra. Puede mostrar prisa, pero tambien puede devolverse a cerrar el hueco.</div>
+          <div><strong>FVG</strong>Hueco de desequilibrio: una zona donde el precio paso muy rapido. Los traders esperan pullback o continuacion.</div>
+          <div><strong>BAG</strong>Breakaway/Acceleration Gap: salto con ruptura de zona. Es mas fuerte si rompe soporte/resistencia y sigue con cuerpo grande.</div>
+          <div><strong>Regla</strong>Solo operar si patron + GAP/FVG/BAG + tendencia apuntan al mismo lado. Si no coinciden, esperar.</div>
+        </div>
+      </section>
     </div>
   `;
+  return;
+}
 }
 
 function bindSimpleDashboard() {
@@ -3153,7 +3363,7 @@ function renderWarnings() {
   const warnings = [...(lastResult?.warnings || [])];
   const positionValue = lastResult?.position_value ?? 0;
   const availableCapital = Number(document.getElementById("available-capital").value || 0);
-  const marginRequired = positionValue * cfdMarginPct() / 100;
+  const marginRequired = positionValue * cfdMarginPct(lastResult?.asset || selectedAsset) / 100;
   const timing = marketTimingProfile(lastResult?.asset);
   if (timing.quality === "NO OPERAR") {
     warnings.push({ level: "danger", message: `HORARIO NO CONFIABLE: ${timing.message}` });
@@ -3297,7 +3507,7 @@ function notifyIfNeeded() {
 function renderTicket() {
   if (!lastResult) return;
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
-  const estimatedMarginPct = cfdMarginPct();
+  const estimatedMarginPct = cfdMarginPct(lastResult?.asset || selectedAsset);
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   const volumeLabel = lastResult.asset.category === "stocks" ? "Volumen XTB (entero)" : "Volumen XTB (paso 0.01)";
   const marketPrice = Number(document.getElementById("market-price").value || 0);
@@ -3334,7 +3544,7 @@ function renderTicket() {
 function renderMath() {
   const plan = buildDailyTradePlan();
   const positionValue = lastResult.position_value ?? Number((lastResult.entry_price * lastResult.multiplier * lastResult.volume).toFixed(2));
-  const estimatedMarginPct = cfdMarginPct();
+  const estimatedMarginPct = cfdMarginPct(lastResult?.asset || selectedAsset);
   const estimatedMargin = positionValue * estimatedMarginPct / 100;
   const ticketMatches = xtbTicketValidation?.symbol === lastResult.asset.symbol;
   document.getElementById("math-summary").innerHTML = `
@@ -3360,7 +3570,7 @@ function bindInputs() {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
-  ["account-balance", "entry-price", "trade-slot"].forEach((id) => {
+  ["account-balance", "entry-price", "trade-slot", "target-profit-usd", "stop-risk-usd"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => {
       applyAiAggressiveTargets(selectedAssetFromForm());
       calculate();
@@ -3415,8 +3625,10 @@ function bindInputs() {
 
 async function initDashboard() {
   await loadCurrentDashboardUser();
-  selectedAsset = getFavoriteAssets()[0] || assetGroups.stocks[0];
+  selectedAsset = findAsset(focusSymbol);
   loadConfigLocal();
+  selectedAsset = findAsset(focusSymbol);
+  document.getElementById("symbol").value = focusSymbol;
   renderTabs();
   renderAssets();
   bindInputs();
@@ -3425,10 +3637,10 @@ async function initDashboard() {
   loadLessonSummary();
   updateGoldenWindow();
   setInterval(updateGoldenWindow, 1000);
-  selectedAsset = selectedAssetFromForm();
+  selectedAsset = findAsset(focusSymbol);
   resetOrderForCurrentMode(selectedAsset);
   refreshNotificationStatus();
-  await loadMarketBars([selectedAsset.symbol]);
+  await loadMarketBars([focusSymbol]);
   calculate();
   renderSimpleDashboard();
   refreshLivePrices({ resetSelected: true });
