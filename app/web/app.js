@@ -2705,7 +2705,8 @@ function setOperationResult(slot, value) {
 
 function cfdMovementFromQuote(symbol, asset) {
   const quote = liveQuotes[symbol] || {};
-  const manual = decimalValueById("xtb-change-pct", NaN);
+  const manualRaw = document.getElementById("xtb-change-pct")?.value;
+  const manual = manualRaw !== "" && manualRaw !== undefined ? decimalNumber(manualRaw, NaN) : NaN;
   const raw = Number.isFinite(manual) ? manual : quote.xtb_change_pct ?? quote.change_pct ?? asset.liveChangePct ?? 0;
   const value = Number(raw);
   return Number.isFinite(value) ? value : 0;
@@ -2769,9 +2770,12 @@ function learningAdjustmentForProfile(symbol) {
 
 function xtbContextAdjustment(asset, direction, price) {
   const quote = liveQuotes[asset.symbol] || {};
-  const low = decimalValueById("xtb-day-low", Number(quote.low || 0));
-  const high = decimalValueById("xtb-day-high", Number(quote.high || 0));
-  const buyers = decimalValueById("xtb-media-buyers", NaN);
+  const lowRaw = document.getElementById("xtb-day-low")?.value;
+  const highRaw = document.getElementById("xtb-day-high")?.value;
+  const buyersRaw = document.getElementById("xtb-media-buyers")?.value;
+  const low = lowRaw ? decimalNumber(lowRaw, 0) : Number(quote.low || 0);
+  const high = highRaw ? decimalNumber(highRaw, 0) : Number(quote.high || 0);
+  const buyers = buyersRaw ? decimalNumber(buyersRaw, NaN) : NaN;
   const hasRange = Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low && price > 0;
   const hasSentiment = Number.isFinite(buyers) && buyers >= 0 && buyers <= 100;
   let score = 0;
@@ -3308,12 +3312,8 @@ function renderSimpleDashboard() {
             <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
-            <label class="simple-field"><span class="simple-label">Movimiento CFD %</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-change-pct")?.value || numberText(profile.cfdMovePct)}" data-sync-target="xtb-change-pct" placeholder="Ej: -0.61" /></label>
-            <label class="simple-field"><span class="simple-label">Minimo diario</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-day-low")?.value || ""}" data-sync-target="xtb-day-low" placeholder="Ej: 29561.41" /></label>
-            <label class="simple-field"><span class="simple-label">Maximo diario</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-day-high")?.value || ""}" data-sync-target="xtb-day-high" placeholder="Ej: 29677.20" /></label>
-            <label class="simple-field"><span class="simple-label">Compradores medios %</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-media-buyers")?.value || ""}" data-sync-target="xtb-media-buyers" placeholder="Ej: 53.16" /></label>
           </div>
-          <p class="simple-tiny">Metas limpias: $50 base, $100 requiere 65%, $150 requiere 78%, $200 requiere 88%. El contexto XTB solo confirma o alerta, no opera solo.</p>
+          <p class="simple-tiny">Metas limpias: $50 base, $100 requiere 65%, $150 requiere 78%, $200 requiere 88%. El % CFD se toma automaticamente de XTB si el monitor esta activo.</p>
         </article>
       </section>
 
