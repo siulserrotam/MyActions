@@ -153,6 +153,7 @@ async function setDashboardPrice(page, symbol, value) {
 }
 
 async function sendQuoteBatchToDashboard(page, quotes) {
+  const updatedAt = new Date().toISOString();
   const items = Object.entries(quotes).map(([symbol, quote]) => {
     const price = pickPrice(quote);
     return {
@@ -160,7 +161,9 @@ async function sendQuoteBatchToDashboard(page, quotes) {
       bid: quote.bid,
       ask: quote.ask,
       price,
-      change_pct: quote.change_pct || 0
+      change_pct: quote.change_pct || 0,
+      source: 'xtb',
+      updated_at: updatedAt
     };
   }).filter((item) => item.price !== null);
 

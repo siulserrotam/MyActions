@@ -86,6 +86,7 @@ let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
 let marketBars = {};
 let marketBarMeta = {};
+let liveCandleBars = {};
 let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
@@ -865,10 +866,87 @@ function updateLiveStatus(text, tone = "muted") {
   else box.classList.add("border-white/10", "text-zinc-500");
 }
 
+function normalizeCandleTimestamp(value) {
+  const date = value ? new Date(value) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  safeDate.setSeconds(0, 0);
+  return safeDate.toISOString();
+}
+
+function mergeCandleRows(rows = []) {
+  const byMinute = new Map();
+  rows.forEach((row) => {
+    const timestamp = normalizeCandleTimestamp(row.timestamp);
+    const open = Number(row.open ?? row.o ?? row.close ?? row.c ?? row.price ?? 0);
+    const high = Number(row.high ?? row.h ?? open);
+    const low = Number(row.low ?? row.l ?? open);
+    const close = Number(row.close ?? row.c ?? row.price ?? open);
+    if (!open || !high || !low || !close) return;
+    const existing = byMinute.get(timestamp);
+    if (!existing) {
+      byMinute.set(timestamp, {
+        symbol: row.symbol,
+        timestamp,
+        open,
+        high,
+        low,
+        close,
+        source: row.source || "chart",
+      });
+      return;
+    }
+    existing.high = Math.max(existing.high, high);
+    existing.low = Math.min(existing.low, low);
+    existing.close = close;
+    existing.source = row.source || existing.source;
+  });
+  return Array.from(byMinute.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+function recordLiveQuoteCandle(quote) {
+  const symbol = String(quote.symbol || "").trim().toUpperCase();
+  const price = Number(quote.price || 0);
+  if (!symbol || !price || chartFrameConfig().interval !== "1m") return;
+  const timestamp = normalizeCandleTimestamp(quote.updated_at);
+  const previousRows = liveCandleBars[symbol] || [];
+  const existingIndex = previousRows.findIndex((row) => row.timestamp === timestamp);
+  let rows = previousRows;
+  if (existingIndex >= 0) {
+    rows = previousRows.map((row, index) => index === existingIndex ? {
+      ...row,
+      high: Math.max(Number(row.high || price), price),
+      low: Math.min(Number(row.low || price), price),
+      close: price,
+      source: quote.source || row.source || "xtb_live",
+    } : row);
+  } else {
+    const previousClose = previousRows[previousRows.length - 1]?.close || price;
+    rows = [
+      ...previousRows,
+      {
+        symbol,
+        timestamp,
+        open: previousClose,
+        high: Math.max(previousClose, price),
+        low: Math.min(previousClose, price),
+        close: price,
+        source: quote.source || "xtb_live",
+      },
+    ];
+  }
+  liveCandleBars[symbol] = mergeCandleRows(rows).slice(-240);
+}
+
+function mergedBarsForSymbol(symbol) {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  return mergeCandleRows([...(marketBars[normalized] || []), ...(liveCandleBars[normalized] || [])]);
+}
+
 function applyLiveQuote(quote) {
   const price = Number(quote.price || 0);
   if (!price) return;
   liveQuotes[quote.symbol] = { ...(liveQuotes[quote.symbol] || {}), ...quote };
+  recordLiveQuoteCandle({ ...quote, price });
   if (String(quote.source || "").startsWith("yfinance")) {
     liveQuotes[quote.symbol].provider_price = price;
   }
@@ -1082,17 +1160,14 @@ function applyXtbQuoteBatch(items = []) {
         market_phase: previousProviderQuote.market_phase || (shouldIgnoreXtbMove ? "awaiting_yahoo" : "xtb"),
         source: "xtb",
         signal_source: shouldKeepProviderMove ? previousSignalSource : shouldIgnoreXtbMove ? "awaiting_yahoo_premarket" : "xtb_visible_text",
-        updated_at: new Date().toISOString(),
+        updated_at: item.updated_at || new Date().toISOString(),
       };
     })
     .filter(Boolean);
 
   validQuotes.forEach(applyLiveQuote);
-  saveQuoteBars(validQuotes, "xtb_visible_text").then(() => {
-    loadMarketBars(validQuotes.map((item) => item.symbol)).then(() => {
-      renderSimpleDashboard();
-    });
-  });
+  saveQuoteBars(validQuotes, "xtb_visible_text");
+  renderSimpleDashboard();
   const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
   if (best && !isManualOpportunityLocked()) {
     applySelectedOpportunity(best, "xtb");
@@ -1856,7 +1931,7 @@ function buildChartCandles(zones, direction) {
 }
 
 function realCandlesForItem(item) {
-  const rows = marketBars[item.asset.symbol] || [];
+  const rows = mergedBarsForSymbol(item.asset.symbol);
   const frame = chartFrameConfig();
   const candles = rows.slice(-frame.limit)
     .map((bar) => ({
@@ -1965,8 +2040,8 @@ function renderTradeChart(item, variant = "mini") {
     timeZone: "America/New_York",
   });
   const chartRangeText = (() => {
-    const startDate = barsMeta.startAt ? new Date(barsMeta.startAt) : candles[0]?.timestamp ? new Date(candles[0].timestamp) : null;
-    const endDate = barsMeta.endAt ? new Date(barsMeta.endAt) : candles[candles.length - 1]?.timestamp ? new Date(candles[candles.length - 1].timestamp) : null;
+    const startDate = candles[0]?.timestamp ? new Date(candles[0].timestamp) : barsMeta.startAt ? new Date(barsMeta.startAt) : null;
+    const endDate = candles[candles.length - 1]?.timestamp ? new Date(candles[candles.length - 1].timestamp) : barsMeta.endAt ? new Date(barsMeta.endAt) : null;
     if (!startDate || !endDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
     const windowMinutes = Number(barsMeta.windowMinutes || 0);
     return `Fecha NY ${dateFormatter.format(endDate)} · ${hourFormatter.format(startDate)}-${hourFormatter.format(endDate)}${windowMinutes ? ` · ventana ${windowMinutes}m` : ""}`;
@@ -2010,8 +2085,12 @@ function renderTradeChart(item, variant = "mini") {
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
   const chartTitle = usingOhlcBars ? `Grafica ${chartInterval} OHLC` : "Mapa XTB de orden";
+  const liveCandleCount = (liveCandleBars[item.asset.symbol] || []).length;
+  const latestCandleTime = candles[candles.length - 1]?.timestamp ? hourFormatter.format(new Date(candles[candles.length - 1].timestamp)) : "";
   const chartSourceText = usingOhlcBars
-    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}; XTB sigue siendo referencia final de precio/spread`
+    ? liveCandleCount
+      ? `OHLC con lectura XTB en vivo (${liveCandleCount} vela(s) locales). Ultima vela NY ${latestCandleTime || "--:--"}`
+      : `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}; XTB sigue siendo referencia final de precio/spread`
     : pointQuoteMode
       ? "lecturas puntuales XTB/Yahoo; no es vela OHLC real"
       : "visual tactico; faltan OHLC completas";
@@ -2981,7 +3060,7 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Agente IA semiautomatico</span>
             <strong>${agentArmed ? profile.agent.action : "PAUSADO"}</strong>
-            <small>${agentArmed ? profile.agent.rule : "No guarda, no prepara y no alerta hasta que pulses Empezar bot."}</small>
+            <small>${agentArmed ? profile.agent.rule : "No guarda, no prepara y no alerta hasta que pulses Activar bot asistido."}</small>
           </div>
           <div>
             <span class="simple-label">Modo</span>
@@ -2993,10 +3072,12 @@ function renderSimpleDashboard() {
             <strong>${tradeAuthorized ? "Operacion asistida autorizada" : agentArmed ? "Bot armado sin operar" : "Bot apagado"}</strong>
             <small>${tradeAuthorized ? "Permiso activo solo en este navegador. No pulsa compra/venta final en XTB." : agentArmed ? "Auto-guarda lecturas; no prepara operaciones sin tu permiso." : "Activalo solo cuando quieras empezar a operar."}</small>
             <div class="simple-agent-actions">
-              <button type="button" data-simple-action="agent-start">${agentArmed ? "Rearmar" : "Empezar bot"}</button>
-              <button type="button" class="${tradeAuthorized ? "danger" : "permit"}" data-simple-action="agent-authorize">${tradeAuthorized ? "Quitar permiso" : "Autorizar operacion asistida"}</button>
-              <button type="button" class="permit" data-simple-action="queue-xtb-order">Preparar orden XTB</button>
-              <button type="button" class="secondary" data-simple-action="agent-stop">Pausar</button>
+              ${tradeAuthorized ? `
+                <button type="button" class="permit" data-simple-action="queue-xtb-order">Preparar orden XTB</button>
+                <button type="button" class="secondary" data-simple-action="agent-stop">Apagar bot</button>
+              ` : `
+                <button type="button" class="permit" data-simple-action="agent-authorize">Activar bot asistido</button>
+              `}
             </div>
           </div>
         </div>
