@@ -2995,6 +2995,7 @@ function renderSimpleDashboard() {
             <div class="simple-agent-actions">
               <button type="button" data-simple-action="agent-start">${agentArmed ? "Rearmar" : "Empezar bot"}</button>
               <button type="button" class="${tradeAuthorized ? "danger" : "permit"}" data-simple-action="agent-authorize">${tradeAuthorized ? "Quitar permiso" : "Autorizar operacion asistida"}</button>
+              <button type="button" class="permit" data-simple-action="queue-xtb-order">Preparar orden XTB</button>
               <button type="button" class="secondary" data-simple-action="agent-stop">Pausar</button>
             </div>
           </div>
@@ -3183,6 +3184,10 @@ function bindSimpleDashboard() {
       saveAutoLearningSnapshot(true);
       return;
     }
+    if (action === "queue-xtb-order") {
+      queueXtbPendingOrder();
+      return;
+    }
     if (action === "agent-stop") {
       setAgentArmed(false);
       return;
@@ -3204,6 +3209,40 @@ function updateLessonStatus(message, tone = "neutral") {
   };
   target.className = `mt-2 rounded-xl border bg-ink p-3 text-xs font-bold ${tones[tone] || tones.neutral}`;
   target.textContent = message;
+}
+
+function queueXtbPendingOrder() {
+  if (!isAgentTradeAuthorized()) {
+    updateLessonStatus("Primero pulsa Autorizar operacion asistida. Sin ese permiso no preparo orden en XTB.", "error");
+    return;
+  }
+  const profile = us100StrategyProfile();
+  if (profile.status !== "OPERABLE") {
+    updateLessonStatus(`No envio orden a XTB: estado ${profile.status} con operabilidad ${profile.confidence}%.`, "error");
+    return;
+  }
+  const payload = {
+    id: `xtb-order-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    status: "pending",
+    symbol: focusSymbol,
+    direction: profile.direction,
+    order_type: profile.direction === "LONG" ? "BUY STOP" : "SELL STOP",
+    entry_price: Number(profile.entry.toFixed(2)),
+    stop_loss: Number(profile.stopLoss.toFixed(2)),
+    take_profit: Number(profile.takeProfit.toFixed(2)),
+    volume: Number(formatVolumeForXtb(profile.volume, profile.asset)),
+    confidence: profile.confidence,
+    note: "MyActions preparo esta solicitud. Playwright llena XTB, confirmacion final manual.",
+  };
+  setLocalValue("decision_engine_xtb_order_request", JSON.stringify(payload));
+  updateLessonStatus(`Orden enviada al monitor: ${payload.symbol} ${payload.order_type} entrada ${priceText(payload.entry_price)} volumen ${formatVolumeForXtb(payload.volume, profile.asset)}.`, "ok");
+}
+
+function applyXtbOrderRequestStatus(payload) {
+  if (!payload) return;
+  const tone = payload.status === "prepared" ? "ok" : payload.status === "error" ? "error" : "neutral";
+  updateLessonStatus(`XTB orden asistida: ${payload.status}. ${payload.message || ""}`, tone);
 }
 
 function currentMarketPhaseLabel() {
@@ -3889,6 +3928,7 @@ function bindInputs() {
   document.getElementById("save-trade-lesson").addEventListener("click", saveTradeLesson);
   window.addEventListener("xtb-quotes", (event) => applyXtbQuoteBatch(event.detail?.items || []));
   window.addEventListener("xtb-ticket", (event) => applyXtbTicketValidation(event.detail || {}));
+  window.addEventListener("xtb-order-request-status", (event) => applyXtbOrderRequestStatus(event.detail || {}));
 }
 
 async function initDashboard() {

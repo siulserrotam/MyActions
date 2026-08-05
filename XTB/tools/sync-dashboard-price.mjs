@@ -190,6 +190,171 @@ async function sendTicketToDashboard(page, ticket, symbol) {
   }, { ticketPayload: ticket, ticketSymbol: symbol });
 }
 
+async function readDashboardOrderRequest(page) {
+  return page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('decision_engine_xtb_order_request') || 'null');
+    } catch {
+      return null;
+    }
+  });
+}
+
+async function updateDashboardOrderRequest(page, request, status, message) {
+  const next = {
+    ...request,
+    status,
+    message,
+    updated_at: new Date().toISOString()
+  };
+  await page.evaluate((payload) => {
+    localStorage.setItem('decision_engine_xtb_order_request', JSON.stringify(payload));
+    window.dispatchEvent(new CustomEvent('xtb-order-request-status', { detail: payload }));
+  }, next);
+}
+
+async function preparePendingOrderInXtb(page, request) {
+  await page.bringToFront().catch(() => {});
+  const result = await page.evaluate((order) => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const setValue = (input, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const text = String(value);
+      if (setter) setter.call(input, text);
+      else input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const text = normalize(document.body?.innerText || '');
+    if (!text.includes('US100')) {
+      return { ok: false, message: 'XTB no tiene US100 visible en la ventana actual.' };
+    }
+    if (!/Orden\s+Stop\/limitada/i.test(text)) {
+      return { ok: false, message: 'Abre la ventana de US100 en la pestana Orden Stop/limitada.' };
+    }
+
+    const inputs = [...document.querySelectorAll('input')]
+      .filter(visible)
+      .map((input, index) => {
+        const rect = input.getBoundingClientRect();
+        const parentText = normalize(input.closest('div, label, section, form')?.innerText || '');
+        return { input, index, x: rect.x, y: rect.y, w: rect.width, h: rect.height, parentText };
+      })
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+
+    const findByContext = (label) => inputs.find((item) => item.parentText.toLowerCase().includes(label.toLowerCase()))?.input;
+    const visibleNumberInputs = inputs
+      .filter((item) => ['text', 'number', 'tel', ''].includes((item.input.getAttribute('type') || '').toLowerCase()))
+      .map((item) => item.input);
+
+    const priceInput = findByContext('Precio') || visibleNumberInputs[0];
+    const volumeInput = findByContext('Volumen') || visibleNumberInputs.find((input) => input !== priceInput);
+    if (!priceInput || !volumeInput) {
+      return {
+        ok: false,
+        message: `No pude ubicar campos de Precio/Volumen. Inputs visibles: ${inputs.length}.`
+      };
+    }
+
+    setValue(priceInput, Number(order.entry_price).toFixed(2));
+    setValue(volumeInput, String(order.volume));
+
+    const clickLabel = (label) => {
+      const nodes = [...document.querySelectorAll('label, span, div, p')]
+        .filter(visible)
+        .filter((node) => normalize(node.innerText).toLowerCase() === label.toLowerCase());
+      const node = nodes[0];
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const candidates = [...document.querySelectorAll('input[type="checkbox"], [role="checkbox"]')]
+        .filter(visible)
+        .map((candidate) => {
+          const box = candidate.getBoundingClientRect();
+          return { candidate, distance: Math.abs(box.y - rect.y) + Math.abs(box.x - rect.x) };
+        })
+        .sort((a, b) => a.distance - b.distance);
+      const target = candidates[0]?.candidate || node;
+      target.click();
+      return true;
+    };
+
+    const stopClicked = order.stop_loss ? clickLabel('Stop loss') : false;
+    const takeClicked = order.take_profit ? clickLabel('Take Profit') : false;
+
+    return {
+      ok: true,
+      message: `Orden preparada en XTB sin confirmar boton final. Precio ${Number(order.entry_price).toFixed(2)}, volumen ${order.volume}. ${stopClicked ? 'SL activado.' : 'SL no activado automaticamente.'} ${takeClicked ? 'TP activado.' : 'TP no activado automaticamente.'}`,
+    };
+  }, request);
+
+  if (!result.ok) return result;
+  await page.waitForTimeout(700);
+  const secondPass = await page.evaluate((order) => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const setValue = (input, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const text = String(value);
+      if (setter) setter.call(input, text);
+      else input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const inputs = [...document.querySelectorAll('input')]
+      .filter(visible)
+      .map((input) => ({
+        input,
+        text: normalize(input.closest('div, label, section, form')?.innerText || ''),
+        y: input.getBoundingClientRect().y,
+        x: input.getBoundingClientRect().x
+      }))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    const setContext = (label, value) => {
+      const item = inputs.find((candidate) => candidate.text.toLowerCase().includes(label.toLowerCase()));
+      if (!item) return false;
+      setValue(item.input, value);
+      return true;
+    };
+    const stopSet = order.stop_loss ? setContext('Stop loss', Number(order.stop_loss).toFixed(2)) : false;
+    const takeSet = order.take_profit ? setContext('Take Profit', Number(order.take_profit).toFixed(2)) : false;
+    return { stopSet, takeSet };
+  }, request);
+
+  return {
+    ok: true,
+    message: `${result.message} Stop llenado: ${secondPass.stopSet ? 'si' : 'revisar manual'}. Take llenado: ${secondPass.takeSet ? 'si' : 'revisar manual'}.`
+  };
+}
+
+async function processDashboardOrderRequest(dashboardPage, xtbPage) {
+  const request = await readDashboardOrderRequest(dashboardPage);
+  if (!request || request.status !== 'pending') return null;
+  if (request.symbol !== 'US100') {
+    await updateDashboardOrderRequest(dashboardPage, request, 'error', 'Por seguridad esta automatizacion solo prepara US100.');
+    return null;
+  }
+  try {
+    await updateDashboardOrderRequest(dashboardPage, request, 'processing', 'Preparando ventana XTB...');
+    const result = await preparePendingOrderInXtb(xtbPage, request);
+    await updateDashboardOrderRequest(dashboardPage, request, result.ok ? 'prepared' : 'error', result.message);
+    return result;
+  } catch (error) {
+    await updateDashboardOrderRequest(dashboardPage, request, 'error', error.message);
+    return { ok: false, message: error.message };
+  }
+}
+
 async function syncOnce() {
   const browser = await connectChrome();
   try {
@@ -223,6 +388,7 @@ async function syncOnce() {
     const quote = quotes[syncSymbol];
     const price = pickPrice(quote);
     const ticketApplied = await sendTicketToDashboard(dashboardPage, ticket, syncSymbol);
+    const orderPreparation = await processDashboardOrderRequest(dashboardPage, xtbPage);
 
     if (!quoteBatch.items.length && !syncSymbol) {
       throw new Error('No encontre un activo sincronizable. Selecciona o deja visible el activo en XTB.');
@@ -245,6 +411,7 @@ async function syncOnce() {
       side: SIDE,
       xtb: quote || null,
       xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
+      order_preparation: orderPreparation,
       applied_xtb_price: applied,
       dashboard_market_price_before: dashboardState.marketPrice,
       dashboard_xtb_price_before: dashboardState.xtbPrice,
