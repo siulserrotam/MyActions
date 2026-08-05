@@ -93,6 +93,7 @@ const manualOpportunityLockMs = 3 * 60 * 1000;
 let currentDashboardUser = "default";
 let autoLearningTimer = null;
 let lastAutoLessonKey = "";
+let lessonMemorySummary = null;
 
 function storageKey(key) {
   return `${key}:${currentDashboardUser}`;
@@ -2685,6 +2686,69 @@ function setOperationResult(slot, value) {
   if (input) input.value = normalizeDecimalInput(value);
 }
 
+function cfdMovementFromQuote(symbol, asset) {
+  const quote = liveQuotes[symbol] || {};
+  const raw = quote.xtb_change_pct ?? quote.change_pct ?? asset.liveChangePct ?? 0;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function cfdMovementScore(changePct, direction) {
+  const moveDirection = directionFromMove(changePct);
+  if (moveDirection === "WAIT" || direction === "WAIT") {
+    return {
+      score: 0,
+      direction: moveDirection,
+      label: `CFD ${numberText(changePct)}% sin fuerza clara`,
+      detail: "El movimiento no alcanza ventaja suficiente para sumar o restar.",
+    };
+  }
+  const score = Math.min(8, Math.max(2, Math.round(Math.abs(changePct) * 5)));
+  const signedScore = moveDirection === direction ? score : -score;
+  return {
+    score: signedScore,
+    direction: moveDirection,
+    label: `CFD ${numberText(changePct)}% favorece ${labelFromDirection(moveDirection)}`,
+    detail: signedScore > 0
+      ? "El porcentaje visible en XTB coincide con la direccion propuesta."
+      : "El porcentaje visible en XTB va contra la direccion propuesta.",
+  };
+}
+
+function learningAdjustmentForProfile(symbol) {
+  const summary = lessonMemorySummary || {};
+  const closed = Number(summary.closed || 0);
+  if (closed < 3) {
+    return {
+      score: 0,
+      label: "Aprendizaje neutro",
+      detail: "Necesita al menos 3 operaciones cerradas para pesar en la decision.",
+    };
+  }
+  const winRate = Number(summary.win_rate || 0);
+  const totalResult = Number(summary.total_result || 0);
+  const symbolStats = (summary.best_symbols || []).find((item) => item.symbol === symbol) || null;
+  let score = 0;
+  if (winRate >= 65) score += 4;
+  else if (winRate <= 40) score -= 4;
+  if (totalResult > 0) score += 2;
+  else if (totalResult < 0) score -= 2;
+  if (symbolStats) {
+    const count = Number(symbolStats.count || 0);
+    const wins = Number(symbolStats.wins || 0);
+    const result = Number(symbolStats.result || 0);
+    const symbolWinRate = count > 0 ? wins / count * 100 : 0;
+    if (count >= 2 && symbolWinRate >= 60) score += 2;
+    if (count >= 2 && result < 0) score -= 2;
+  }
+  score = clamp(Math.round(score), -8, 8);
+  return {
+    score,
+    label: score > 0 ? `Aprendizaje +${score}` : score < 0 ? `Aprendizaje ${score}` : "Aprendizaje neutro",
+    detail: `${closed} cierres, acierto ${numberText(winRate)}%, resultado ${money(totalResult)}.`,
+  };
+}
+
 function us100StrategyProfile() {
   const asset = findAsset(focusSymbol);
   const quote = liveQuotes[focusSymbol] || {};
@@ -2711,15 +2775,20 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore), 0, 95);
+  const cfdMovePct = cfdMovementFromQuote(focusSymbol, asset);
+  const cfdMove = cfdMovementScore(cfdMovePct, direction);
+  const learning = learningAdjustmentForProfile(focusSymbol);
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score), 0, 95);
   const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
   const confidenceBreakdown = {
     pattern: Math.round(pattern.score),
     trend: Math.round(trend.score),
     gap: Math.round(imbalance.score),
     volume: volumeScore,
+    cfd: cfdMove.score,
+    learning: learning.score,
     total: confidence,
-    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + CFD ${cfdMove.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -2772,6 +2841,9 @@ function us100StrategyProfile() {
     marginRequired,
     confidence,
     confidenceBreakdown,
+    cfdMovePct,
+    cfdMove,
+    learning,
     volumePolicy,
     targetPolicy,
     status,
@@ -3047,6 +3119,7 @@ function renderSimpleDashboard() {
   const sourceLabel = liveQuotes[focusSymbol]?.source === "xtb" ? "Lectura directa XTB" : "Yahoo / ultimo precio";
   const agentArmed = isAgentArmed();
   const tradeAuthorized = isAgentTradeAuthorized();
+  const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -3064,7 +3137,7 @@ function renderSimpleDashboard() {
         </section>
         <section class="simple-metrics">
           <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${focusSymbol}</span></div>
-          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span></div>
+          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">Movimiento CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
           <div class="simple-metric"><span class="simple-label">Decision</span><span class="simple-value">${profile.direction}</span></div>
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
         </section>
@@ -3087,7 +3160,9 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">GAP / FVG / BAG</span><strong>${profile.imbalance.type}</strong><small>${profile.imbalance.detail}</small></div>
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
+          <div><span class="simple-label">Movimiento CFD</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong><small>${profile.cfdMove.detail}</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
+          <div><span class="simple-label">Aprendizaje</span><strong>${profile.learning.label}</strong><small>${profile.learning.detail}</small></div>
           <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango por meta 0.20-0.35. ${profile.volumePolicy.note}</small></div>
           <div><span class="simple-label">Meta IA</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
         </div>
@@ -3497,6 +3572,8 @@ async function loadLessonSummary() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const summary = payload.summary || {};
+    const previousMemory = JSON.stringify(lessonMemorySummary || {});
+    lessonMemorySummary = summary;
     const best = (summary.best_symbols || []).slice(0, 3).map((item) => `${item.symbol}: ${money(item.result)} (${item.wins}/${item.count})`).join(" | ");
     target.innerHTML = `
       <div class="grid gap-1">
@@ -3506,7 +3583,9 @@ async function loadLessonSummary() {
         <div><strong>Mejores:</strong> ${best || "sin historial suficiente"}</div>
       </div>
     `;
+    if (JSON.stringify(summary) !== previousMemory) renderSimpleDashboard();
   } catch (error) {
+    lessonMemorySummary = null;
     target.textContent = "Memoria: sin conexion a base de datos.";
   }
 }
