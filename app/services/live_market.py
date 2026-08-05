@@ -16,7 +16,7 @@ class LiveMarketService:
         "TSLA.US": "TSLA",
         "SPY.US": "SPY",
         "QQQ.US": "QQQ",
-        "US100": "^NDX",
+        "US100": "NQ=F",
         "US500": "^GSPC",
         "DE40": "^GDAXI",
         "GOLD": "GC=F",

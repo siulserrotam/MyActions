@@ -71,9 +71,9 @@ const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
 const chartFrameOptions = {
-  "1m": { key: "1m", label: "1m / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos desde la ultima vela disponible." },
-  "5m": { key: "5m", label: "5m / 2h", interval: "5m", period: "1d", limit: 24, description: "Ultimas 2 horas desde la ultima vela disponible." },
-  "1h": { key: "1h", label: "1h / 5d", interval: "1h", period: "5d", limit: 60, description: "Contexto amplio tipo XTB H1." },
+  "1m": { key: "1m", label: "1M / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos, velas de 1 minuto." },
+  "5m": { key: "5m", label: "5M / 2h", interval: "5m", period: "1d", limit: 24, description: "Ultimas 2 horas, velas de 5 minutos." },
+  "1h": { key: "1h", label: "1H / 5d", interval: "1h", period: "5d", limit: 60, description: "Contexto amplio, velas de 1 hora." },
 };
 
 let activeCategory = "favorites";
@@ -1801,7 +1801,8 @@ function buildChartCandles(zones, direction) {
 
 function realCandlesForItem(item) {
   const rows = marketBars[item.asset.symbol] || [];
-  const candles = rows.slice(-30)
+  const frame = chartFrameConfig();
+  const candles = rows.slice(-frame.limit)
     .map((bar) => ({
       o: Number(bar.open || 0),
       h: Number(bar.high || 0),
@@ -1849,18 +1850,28 @@ function renderTradeChart(item, variant = "mini") {
   const candleMax = Math.max(...candleValues);
   const candleSpan = Math.max(candleMax - candleMin, zones.price * 0.002, 0.0001);
   const nearLevel = (value) => Math.abs(Number(value) - zones.price) <= candleSpan * (usingOhlcBars ? 1.2 : 2.8);
-  const values = [
-    zones.price,
+  const mainZoomValues = [
     ...candleValues,
+    zones.price,
     ...(nearLevel(zones.entry) ? [zones.entry] : []),
     ...(nearLevel(zones.stopLoss) ? [zones.stopLoss] : []),
-    ...(nearLevel(zones.reboundLow) ? [zones.reboundLow] : []),
-    ...(nearLevel(zones.reboundHigh) ? [zones.reboundHigh] : []),
     ...(nearLevel(proZones.support) ? [proZones.support] : []),
     ...(nearLevel(proZones.resistance) ? [proZones.resistance] : []),
-    ...(nearLevel(zones.takeProfit) ? [zones.takeProfit] : []),
-    ...(nearLevel(strategyTarget.price) ? [strategyTarget.price] : []),
-  ].filter((value) => Number.isFinite(value) && value > 0);
+  ];
+  const miniValues = [
+    zones.price,
+    ...candleValues,
+    zones.entry,
+    zones.stopLoss,
+    zones.takeProfit,
+    strategyTarget.price,
+    zones.reboundLow,
+    zones.reboundHigh,
+    proZones.support,
+    proZones.resistance,
+  ];
+  const values = (variant === "main" ? mainZoomValues : miniValues)
+    .filter((value) => Number.isFinite(value) && value > 0);
   if (!values.length) return "";
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
@@ -1870,15 +1881,15 @@ function renderTradeChart(item, variant = "mini") {
   const max = rawMax + rawSpan * 0.12;
   const span = Math.max(max - min, minChartSpan);
   const visibleLevel = (value) => Number(value) >= min && Number(value) <= max;
-  const chartWidth = variant === "main" ? 760 : 238;
-  const chartHeight = variant === "main" ? 300 : 112;
-  const plotLeft = variant === "main" ? 46 : 10;
-  const plotRight = variant === "main" ? chartWidth - 76 : 230;
-  const plotTop = variant === "main" ? 26 : 8;
-  const plotBottom = variant === "main" ? chartHeight - 46 : 96;
+  const chartWidth = variant === "main" ? 980 : 238;
+  const chartHeight = variant === "main" ? 430 : 112;
+  const plotLeft = variant === "main" ? 54 : 10;
+  const plotRight = variant === "main" ? chartWidth - 96 : 230;
+  const plotTop = variant === "main" ? 34 : 8;
+  const plotBottom = variant === "main" ? chartHeight - 72 : 96;
   const plotHeight = plotBottom - plotTop;
   const y = (value) => clamp(plotBottom - ((value - min) / span) * plotHeight, plotTop, plotBottom);
-  const candleWidth = variant === "main" ? 12 : 3.8;
+  const candleWidth = variant === "main" ? clamp((plotRight - plotLeft) / Math.max(candles.length, 1) * 0.54, 8, 18) : 3.8;
   const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
   const startX = plotLeft;
   const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
@@ -1929,7 +1940,7 @@ function renderTradeChart(item, variant = "mini") {
   const candleMarkup = candles.map((candle, index) => {
     const x = startX + index * candleGap;
     const bodyTop = Math.min(y(candle.o), y(candle.c));
-    const bodyHeight = Math.max(variant === "main" ? 5 : 3, Math.abs(y(candle.o) - y(candle.c)));
+    const bodyHeight = Math.max(variant === "main" ? 9 : 3, Math.abs(y(candle.o) - y(candle.c)));
     const up = candle.c >= candle.o;
     return `
       <g class="chart-candle ${up ? "up" : "down"}">
@@ -1938,11 +1949,13 @@ function renderTradeChart(item, variant = "mini") {
       </g>
     `;
   }).join("");
+  const zoneVisible = visibleLevel(zones.reboundLow) || visibleLevel(zones.reboundHigh);
+  const safetyVisible = visibleLevel(zones.securityLow) || visibleLevel(zones.securityHigh);
   const zoneHeight = Math.max(6, Math.abs(y(zones.reboundLow) - y(zones.reboundHigh)));
   const title = `${item.asset.symbol} ${item.directionLabel}`;
   const chartTitle = usingOhlcBars ? `Grafica ${chartInterval} OHLC` : "Mapa XTB de orden";
   const chartSourceText = usingOhlcBars
-    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}`
+    ? `OHLC real ${barsMeta.providerSymbol || item.asset.symbol} via Yahoo ${chartInterval}/${chartPeriod}; XTB sigue siendo referencia final de precio/spread`
     : pointQuoteMode
       ? "lecturas puntuales XTB/Yahoo; no es vela OHLC real"
       : "visual tactico; faltan OHLC completas";
@@ -1979,22 +1992,22 @@ function renderTradeChart(item, variant = "mini") {
         <rect x="${plotLeft}" y="${plotTop}" width="${plotRight - plotLeft}" height="${plotHeight}" rx="8" class="chart-plot-bg" />
         ${axisMarkup}
         ${timeAxisMarkup}
-        <rect x="${plotLeft}" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="${plotRight - plotLeft}" height="${zoneHeight}" rx="6" class="chart-zone rebound" />
-        <rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />
+        ${zoneVisible ? `<rect x="${plotLeft}" y="${Math.min(y(zones.reboundLow), y(zones.reboundHigh))}" width="${plotRight - plotLeft}" height="${zoneHeight}" rx="6" class="chart-zone rebound" />` : ""}
+        ${safetyVisible ? `<rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />` : ""}
+        ${visibleLevel(proZones.resistance) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />` : ""}
+        ${visibleLevel(proZones.support) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />` : ""}
         ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
         ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />
+        ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}
+        ${visibleLevel(zones.stopLoss) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />` : ""}
         ${candleMarkup}
         ${visibleLevel(zones.takeProfit) ? levelTag("TP", zones.takeProfit, "take") : ""}
         ${visibleLevel(strategyTarget.price) ? levelTag("IA", strategyTarget.price, "ai-take") : ""}
-        ${levelTag("Entrada", zones.entry, "entry")}
-        ${levelTag("SL", zones.stopLoss, "stop")}
+        ${visibleLevel(zones.entry) ? levelTag("Entrada", zones.entry, "entry") : ""}
+        ${visibleLevel(zones.stopLoss) ? levelTag("SL", zones.stopLoss, "stop") : ""}
         ${variant === "main" ? `
-          <text x="${plotLeft}" y="${plotTop - 8}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
-          <text x="${plotLeft}" y="${plotBottom + 22}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
+          <text x="${plotLeft}" y="${plotTop - 10}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
+          <text x="${plotLeft}" y="${plotBottom + 28}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
           <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas` : "Visual tactico"}${chartRangeText ? ` · ${chartRangeText}` : ""}</text>
         ` : ""}
       </svg>
@@ -2515,6 +2528,19 @@ function us100StrategyProfile() {
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + (volume > 0 ? 10 : -30)), 0, 95);
   const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
+  const agent = agentControlPlan({
+    status,
+    confidence,
+    direction,
+    pattern,
+    trend,
+    imbalance,
+    volume,
+    price,
+    entry: level.entry,
+    stopLoss,
+    takeProfit,
+  });
   return {
     asset,
     price,
@@ -2537,7 +2563,36 @@ function us100StrategyProfile() {
     marginRequired,
     confidence,
     status,
+    agent,
     explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
+  };
+}
+
+function agentControlPlan(profile) {
+  const marketOpen = isMarketOpenNow();
+  const hardOk = profile.status === "OPERABLE"
+    && profile.confidence >= 78
+    && profile.volume > 0
+    && profile.pattern.bias !== "WAIT"
+    && (profile.pattern.bias === profile.direction || profile.trend.direction === profile.direction);
+  const nearTrigger = profile.direction === "LONG"
+    ? profile.price >= profile.entry * 0.999 && profile.price <= profile.entry * 1.002
+    : profile.price <= profile.entry * 1.001 && profile.price >= profile.entry * 0.998;
+  const action = !marketOpen
+    ? "PREPARAR"
+    : hardOk && nearTrigger
+      ? "PREPARAR ORDEN"
+      : profile.status === "OPERABLE"
+        ? "VIGILAR GATILLO"
+        : "ESPERAR";
+  const canAutoOpen = hardOk && nearTrigger && marketOpen;
+  return {
+    action,
+    mode: canAutoOpen ? "asistido-confirmacion" : "lectura-alerta",
+    canAutoOpen,
+    rule: canAutoOpen
+      ? "El agente puede preparar la orden, pero requiere confirmacion manual final."
+      : "El agente solo lee, aprende y alerta hasta que haya patron fuerte cerca del gatillo.",
   };
 }
 
@@ -2812,6 +2867,23 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
         </div>
+        <div class="simple-agent-card">
+          <div>
+            <span class="simple-label">Agente IA semiautomatico</span>
+            <strong>${profile.agent.action}</strong>
+            <small>${profile.agent.rule}</small>
+          </div>
+          <div>
+            <span class="simple-label">Modo</span>
+            <strong>${profile.agent.mode}</strong>
+            <small>${profile.agent.canAutoOpen ? "Prepararia la orden en XTB, sin pulsar compra/venta final." : "Solo lectura, aprendizaje y alerta."}</small>
+          </div>
+          <div>
+            <span class="simple-label">Fuente final</span>
+            <strong>XTB ejecuta</strong>
+            <small>Yahoo/NQ=F ayuda al contexto; XTB manda precio, spread y margen.</small>
+          </div>
+        </div>
         <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
           <div>
             <span class="simple-label">Temporalidad grafica</span>
@@ -2892,6 +2964,8 @@ function renderSimpleDashboard() {
           <div><strong>FVG</strong>Hueco de desequilibrio: una zona donde el precio paso muy rapido. Los traders esperan pullback o continuacion.</div>
           <div><strong>BAG</strong>Breakaway/Acceleration Gap: salto con ruptura de zona. Es mas fuerte si rompe soporte/resistencia y sigue con cuerpo grande.</div>
           <div><strong>Regla</strong>Solo operar si patron + GAP/FVG/BAG + tendencia apuntan al mismo lado. Si no coinciden, esperar.</div>
+          <div><strong>US100 fuera de bolsa</strong>El CFD sigue una referencia tipo futuro Nasdaq. Por eso puede moverse antes/despues de 9:30-16:00 NY; el precio ejecutable siempre es XTB.</div>
+          <div><strong>TradingView</strong>Usa CME_MINI:NQ1! como referencia general. SKILLING:US100 es otro broker CFD y no tiene que coincidir con XTB.</div>
         </div>
       </section>
     </div>

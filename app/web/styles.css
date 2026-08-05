@@ -198,6 +198,36 @@ body {
   line-height: 1.35;
 }
 
+.simple-agent-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.simple-agent-card > div {
+  border: 1px solid rgb(90 160 255 / 0.22);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgb(16 35 46 / 0.78), rgb(12 15 18 / 0.95));
+  padding: 12px;
+}
+
+.simple-agent-card strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.simple-agent-card small {
+  display: block;
+  margin-top: 6px;
+  color: #aed3df;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .simple-form-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -328,7 +358,7 @@ body {
 .trade-chart-main {
   margin-top: 16px;
   border-color: rgb(246 196 83 / 0.28);
-  background: linear-gradient(180deg, rgb(8 18 16 / 0.95), rgb(10 10 12 / 0.95));
+  background: #11191d;
   padding: 12px;
 }
 
@@ -339,7 +369,7 @@ body {
 }
 
 .trade-chart-main svg {
-  height: clamp(320px, 42vw, 430px);
+  height: clamp(360px, 46vw, 520px);
 }
 
 .trade-chart-head {
@@ -374,7 +404,7 @@ body {
 }
 
 .chart-plot-bg {
-  fill: rgb(18 25 28 / 0.72);
+  fill: #172126;
   stroke: rgb(255 255 255 / 0.045);
 }
 
@@ -433,29 +463,29 @@ body {
 }
 
 .chart-candle line {
-  stroke-width: 2.8;
+  stroke-width: 2.4;
 }
 
 .chart-candle rect {
-  stroke-width: 2;
+  stroke-width: 1.6;
 }
 
 .chart-candle.up line,
 .chart-candle.up rect {
-  stroke: rgb(57 255 136 / 0.9);
+  stroke: #8ee6a5;
 }
 
 .chart-candle.up rect {
-  fill: rgb(57 255 136 / 0.55);
+  fill: rgb(91 184 118 / 0.92);
 }
 
 .chart-candle.down line,
 .chart-candle.down rect {
-  stroke: rgb(255 90 102 / 0.92);
+  stroke: #ff6f79;
 }
 
 .chart-candle.down rect {
-  fill: rgb(255 90 102 / 0.58);
+  fill: rgb(204 70 78 / 0.94);
 }
 
 .chart-label {
@@ -978,6 +1008,7 @@ body {
   .simple-form-grid,
   .simple-form-grid.two,
   .simple-pattern-grid,
+  .simple-agent-card,
   .simple-top-list,
   .simple-guide {
     grid-template-columns: 1fr;
