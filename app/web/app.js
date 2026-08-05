@@ -843,16 +843,14 @@ function targetContractVolume(asset, entry, balance) {
   return roundVolumeForXtb(rawVolume, asset);
 }
 
-function preferredUs100Volume(confidence, marginVolume, stopUsd, asset) {
-  const minPreferred = 0.2;
-  const maxPreferred = 0.25;
-  const desired = confidence >= 85
-    ? maxPreferred
-    : confidence >= 72
-      ? 0.23
-      : minPreferred;
-  const riskCapped = stopUsd / (minimumStopPointsForAsset(asset) * asset.multiplier);
-  const capped = Math.min(desired, marginVolume || desired, riskCapped || desired);
+function preferredUs100Volume(confidence, marginVolume, targetUsd, asset) {
+  const desired = targetUsd >= 100
+    ? 0.23
+    : targetUsd >= 75
+      ? 0.22
+      : 0.2;
+  const confidenceCapped = confidence < 50 ? Math.min(desired, 0.2) : desired;
+  const capped = Math.min(confidenceCapped, marginVolume || confidenceCapped);
   return roundVolumeForXtb(Math.max(0, capped), asset);
 }
 
@@ -2691,7 +2689,7 @@ function us100StrategyProfile() {
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
-  const volume = preferredUs100Volume(baseConfidence, marginVolume, stopUsd, asset);
+  const volume = preferredUs100Volume(baseConfidence, marginVolume, requestedTargetUsd, asset);
   const targetPolicy = volumeTargetPolicy(volume, requestedTargetUsd);
   const targetUsd = targetPolicy.target;
   const pointValue = volume * asset.multiplier;
@@ -2718,12 +2716,12 @@ function us100StrategyProfile() {
     margin_max: marginVolume,
     chosen: volume,
     note: volume < 0.2
-      ? "Bajo 0.20 porque el stop o margen no permiten ese tamano sin violar el escudo."
-      : confidence >= 85
-        ? "Alta operabilidad: usa el extremo alto del rango preferido."
-        : confidence >= 72
-          ? "Operable: usa volumen medio-alto dentro del rango preferido."
-          : "Aun no operable: conserva volumen base, pero espera confirmacion.",
+      ? "Bajo 0.20 solo si el margen disponible no deja abrir ese tamano."
+      : requestedTargetUsd >= 100
+        ? "Meta alta: usa 0.23 como volumen objetivo."
+        : requestedTargetUsd >= 75
+          ? "Meta media: usa 0.22 como volumen objetivo."
+          : "Meta conservadora: usa 0.20 como volumen objetivo.",
   };
   const agent = agentControlPlan({
     status,
