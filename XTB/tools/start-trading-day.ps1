@@ -21,11 +21,11 @@ try {
     '-ExecutionPolicy', 'Bypass',
     '-NoProfile',
     '-Command',
-    "`$env:XTB_SYNC_INTERVAL_MS='5000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
+    "`$env:XTB_SYNC_INTERVAL_MS='1000'; Set-Location '$escapedRoot'; npm.cmd run sync:watch"
   ) -WindowStyle Hidden
 
   Write-Host ''
-  Write-Host 'Dia iniciado: sync XTB cada 5 segundos. El dashboard usa la vista simple nativa de produccion.'
+  Write-Host 'Dia iniciado: sync XTB cada 1 segundo. El dashboard usa la vista simple nativa de produccion.'
 } finally {
   Pop-Location
 }

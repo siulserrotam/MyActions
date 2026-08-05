@@ -1,7 +1,7 @@
 import { connectChrome, pickBrowserContext, classifyPage, normalize, parseMoney } from './chrome-debug.mjs';
 
 const SIDE = (process.env.XTB_SYNC_SIDE || 'mid').toLowerCase();
-const INTERVAL_MS = Number.parseInt(process.env.XTB_SYNC_INTERVAL_MS || '5000', 10);
+const INTERVAL_MS = Number.parseInt(process.env.XTB_SYNC_INTERVAL_MS || '1000', 10);
 const RUN_ONCE = process.argv.includes('--once');
 
 function quotePrice(value) {
@@ -380,7 +380,7 @@ async function syncOnce() {
     const quotes = extractXtbQuotes(xtbText);
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
     const ticket = extractXtbTicket(xtbText);
-    await dashboardPage.waitForTimeout(500);
+    await dashboardPage.waitForTimeout(100);
     const afterBatchState = await dashboardPage.evaluate(() => ({
       symbol: document.querySelector('#symbol')?.value || '',
       marketPrice: document.querySelector('#market-price')?.value || '',

@@ -1101,6 +1101,15 @@ function applyXtbTicketValidation(ticket = {}) {
   renderSimpleDashboard();
 }
 
+function xtbExecutablePriceFromQuote(item, direction) {
+  const bid = Number(item.bid || 0);
+  const ask = Number(item.ask || 0);
+  const mid = Number(item.price || 0);
+  if (direction === "LONG" && ask > 0) return ask;
+  if (direction === "SHORT" && bid > 0) return bid;
+  return mid || bid || ask || 0;
+}
+
 function xtbPriceValue() {
   return Number(document.getElementById("xtb-price")?.value || 0);
 }
@@ -1168,7 +1177,8 @@ function applyXtbQuoteBatch(items = []) {
     .filter((item) => String(item.symbol || "").trim().toUpperCase() === focusSymbol)
     .map((item) => {
       const symbol = String(item.symbol || "").trim().toUpperCase();
-      const price = Number(item.price || 0);
+      const direction = effectiveDirectionForSlot(findAsset(symbol));
+      const price = xtbExecutablePriceFromQuote(item, direction);
       if (!symbol || !price) return null;
       const previousProviderQuote = liveQuotes[symbol] || {};
       const previousSignalSource = previousProviderQuote.signal_source || previousProviderQuote.source || "";
@@ -1180,6 +1190,7 @@ function applyXtbQuoteBatch(items = []) {
         price,
         bid: Number(item.bid || 0) || null,
         ask: Number(item.ask || 0) || null,
+        executable_side: direction === "LONG" ? "ask" : "bid",
         provider_price: previousProviderQuote.provider_price || (String(previousSignalSource).startsWith("yfinance") ? previousProviderQuote.price : null),
         xtb_change_pct: xtbChangePct,
         change_pct: shouldKeepProviderMove ? previousProviderQuote.change_pct : shouldIgnoreXtbMove ? 0 : xtbChangePct,
@@ -3191,6 +3202,7 @@ function renderSimpleDashboard() {
   const agentArmed = isAgentArmed();
   const tradeAuthorized = isAgentTradeAuthorized();
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
+  const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -3208,7 +3220,7 @@ function renderSimpleDashboard() {
         </section>
         <section class="simple-metrics">
           <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${focusSymbol}</span></div>
-          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">Movimiento CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
+          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">${quoteSideLabel} · CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
           <div class="simple-metric"><span class="simple-label">Decision</span><span class="simple-value">${profile.direction}</span></div>
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
         </section>
