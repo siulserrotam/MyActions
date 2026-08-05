@@ -90,6 +90,8 @@ let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
 let currentDashboardUser = "default";
+let autoLearningTimer = null;
+let lastAutoLessonKey = "";
 
 function storageKey(key) {
   return `${key}:${currentDashboardUser}`;
@@ -119,6 +121,16 @@ function chartFrameConfig() {
 function setChartFrame(key) {
   if (!chartFrameOptions[key]) return;
   setLocalValue("chart-frame-key", key);
+}
+
+function isAgentArmed() {
+  return getLocalValue("decision_engine_agent_armed") === "true";
+}
+
+function setAgentArmed(value) {
+  setLocalValue("decision_engine_agent_armed", value ? "true" : "false");
+  updateAgentLoop();
+  renderSimpleDashboard();
 }
 
 async function loadCurrentDashboardUser() {
@@ -2826,6 +2838,7 @@ function renderSimpleDashboard() {
   const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
   const sourceLabel = liveQuotes[focusSymbol]?.source === "xtb" ? "Lectura directa XTB" : "Yahoo / ultimo precio";
+  const agentArmed = isAgentArmed();
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -2870,18 +2883,22 @@ function renderSimpleDashboard() {
         <div class="simple-agent-card">
           <div>
             <span class="simple-label">Agente IA semiautomatico</span>
-            <strong>${profile.agent.action}</strong>
-            <small>${profile.agent.rule}</small>
+            <strong>${agentArmed ? profile.agent.action : "PAUSADO"}</strong>
+            <small>${agentArmed ? profile.agent.rule : "No guarda ni prepara nada hasta que pulses Empezar bot."}</small>
           </div>
           <div>
             <span class="simple-label">Modo</span>
-            <strong>${profile.agent.mode}</strong>
-            <small>${profile.agent.canAutoOpen ? "Prepararia la orden en XTB, sin pulsar compra/venta final." : "Solo lectura, aprendizaje y alerta."}</small>
+            <strong>${agentArmed ? profile.agent.mode : "sin autorizacion"}</strong>
+            <small>${agentArmed ? (profile.agent.canAutoOpen ? "Prepararia la orden en XTB, sin pulsar compra/venta final." : "Solo lectura, aprendizaje y alerta.") : "Tu autorizacion se guarda en este navegador."}</small>
           </div>
           <div>
-            <span class="simple-label">Fuente final</span>
-            <strong>XTB ejecuta</strong>
-            <small>Yahoo/NQ=F ayuda al contexto; XTB manda precio, spread y margen.</small>
+            <span class="simple-label">Autorizacion</span>
+            <strong>${agentArmed ? "Bot armado" : "Bot apagado"}</strong>
+            <small>${agentArmed ? "Auto-guarda una lectura por minuto mientras esta pagina este abierta." : "Activalo solo cuando quieras empezar a operar."}</small>
+            <div class="simple-agent-actions">
+              <button type="button" data-simple-action="agent-start">${agentArmed ? "Rearmar" : "Empezar bot"}</button>
+              <button type="button" class="secondary" data-simple-action="agent-stop">Pausar</button>
+            </div>
           </div>
         </div>
         <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
@@ -3056,6 +3073,15 @@ function bindSimpleDashboard() {
     if (action === "save-close") saveDayClose();
     if (action === "apply-capital") applyCapitalMovement();
     if (action === "save-lesson") saveTradeLesson();
+    if (action === "agent-start") {
+      setAgentArmed(true);
+      saveAutoLearningSnapshot(true);
+      return;
+    }
+    if (action === "agent-stop") {
+      setAgentArmed(false);
+      return;
+    }
     if (action === "export-excel") exportMonthlyReport();
     if (action === "enable-alerts") enableNotifications();
     if (action === "test-alert") testNotifications();
@@ -3131,6 +3157,68 @@ async function saveTradeLesson() {
   } catch (error) {
     updateLessonStatus("Aprendizaje: no se pudo guardar. Revisa base de datos.", "error");
   }
+}
+
+function autoLessonPayload(profile) {
+  const directionLabel = profile.directionLabel || labelFromDirection(profile.direction);
+  return {
+    trade_date: todayKey(),
+    symbol: focusSymbol,
+    direction: profile.direction,
+    planned_volume: Number(profile.volume || 0),
+    entry_price: Number(profile.entry || 0),
+    stop_price: Number(profile.stopLoss || 0),
+    take_profit_price: Number(profile.takeProfit || 0),
+    expected_loss: Number(profile.stopUsd || 0),
+    expected_profit: Number(profile.targetUsd || 0),
+    actual_result: 0,
+    outcome: "pending",
+    confidence: Number(profile.confidence || 0),
+    market_phase: currentMarketPhaseLabel(),
+    notes: [
+      "AUTO",
+      `estado=${profile.status}`,
+      `orden=${directionLabel}`,
+      `patron=${profile.pattern?.name || "sin patron"}`,
+      `gap_fvg_bag=${profile.imbalance?.type || "sin lectura"}`,
+      `tendencia=${profile.trend?.direction || "WAIT"}`,
+      `precio=${numberText(profile.price)}`,
+      `agente=${profile.agent?.action || "ESPERAR"}`,
+    ].join(" | "),
+  };
+}
+
+async function saveAutoLearningSnapshot(force = false) {
+  if (!isAgentArmed()) return;
+  const profile = us100StrategyProfile();
+  const minuteKey = new Date().toISOString().slice(0, 16);
+  const key = `${minuteKey}:${profile.status}:${profile.direction}:${profile.pattern.name}:${profile.imbalance.type}:${numberText(profile.price)}`;
+  if (!force && key === lastAutoLessonKey) return;
+  lastAutoLessonKey = key;
+  try {
+    const response = await fetch("/lessons/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(autoLessonPayload(profile)),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    updateLessonStatus(`Bot armado: aprendizaje automatico guardado (${profile.status}, ${profile.confidence}%).`, "ok");
+    await loadLessonSummary();
+  } catch {
+    updateLessonStatus("Bot armado: no pudo guardar aprendizaje automatico. Revisa DB.", "error");
+  }
+}
+
+function updateAgentLoop() {
+  window.clearInterval(autoLearningTimer);
+  autoLearningTimer = null;
+  if (!isAgentArmed()) {
+    updateLessonStatus("Bot pausado: no guarda lecturas automaticas.", "neutral");
+    return;
+  }
+  updateLessonStatus("Bot armado: guardando patrones automaticamente cada minuto.", "ok");
+  saveAutoLearningSnapshot(true);
+  autoLearningTimer = window.setInterval(() => saveAutoLearningSnapshot(false), 60 * 1000);
 }
 
 async function loadLessonSummary() {
@@ -3717,6 +3805,7 @@ async function initDashboard() {
   await loadMarketBars([focusSymbol]);
   calculate();
   renderSimpleDashboard();
+  updateAgentLoop();
   refreshLivePrices({ resetSelected: true });
   scheduleAutoRefresh();
 }

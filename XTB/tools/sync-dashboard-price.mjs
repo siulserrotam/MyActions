@@ -42,7 +42,7 @@ function extractXtbQuotes(text) {
     ['US100', activeOrList('US100')]
   ];
 
-  return Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
+  const quotes = Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
     const match = cleaned.match(pattern);
     if (!match) return [];
     return [[symbol, {
@@ -51,6 +51,18 @@ function extractXtbQuotes(text) {
       change_pct: quoteChangePct(cleaned, match.index || 0)
     }]];
   }));
+  const activeUs100 = cleaned.match(/US100\s+CFD[\s\S]{0,180}?([0-9]{2,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s+(?:SL\/TP|M1|M5|H1|Gr[aá]ficos)/i)
+    || cleaned.match(/US100\s+CFD[\s\S]{0,180}?([0-9]{5,}(?:[.,]\d+)?)/i);
+  const activeUs100Price = activeUs100 ? quotePrice(activeUs100[1]) : null;
+  if (activeUs100Price && (!quotes.US100 || Math.abs(activeUs100Price - pickPrice(quotes.US100)) > 25)) {
+    quotes.US100 = {
+      bid: activeUs100Price,
+      ask: activeUs100Price,
+      change_pct: quotes.US100?.change_pct || 0,
+      source_hint: 'active-chart-header'
+    };
+  }
+  return quotes;
 }
 
 function extractActiveXtbSymbol(text, quotes) {
