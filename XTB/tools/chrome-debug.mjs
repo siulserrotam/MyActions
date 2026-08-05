@@ -9,9 +9,29 @@ export function normalize(value) {
 }
 
 export function parseMoney(value) {
-  const text = normalize(value).replace(/\s/g, '').replace(',', '.');
-  const match = text.match(/-?\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : null;
+  const raw = normalize(value).replace(/\s+/g, '');
+  const match = raw.match(/-?[\d.,]+/);
+  if (!match) return null;
+  let text = match[0];
+  const lastComma = text.lastIndexOf(',');
+  const lastDot = text.lastIndexOf('.');
+  const decimalIndex = Math.max(lastComma, lastDot);
+  if (lastComma >= 0 && lastDot >= 0) {
+    const integer = text.slice(0, decimalIndex).replace(/[.,]/g, '');
+    const decimal = text.slice(decimalIndex + 1).replace(/[.,]/g, '');
+    text = `${integer}.${decimal}`;
+  } else if (lastComma >= 0) {
+    const decimalDigits = text.length - lastComma - 1;
+    text = decimalDigits === 3 && text.length > 5
+      ? text.replace(/,/g, '')
+      : text.replace(',', '.');
+  } else if ((text.match(/\./g) || []).length > 1) {
+    const integer = text.slice(0, lastDot).replace(/\./g, '');
+    const decimal = text.slice(lastDot + 1).replace(/\./g, '');
+    text = `${integer}.${decimal}`;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export async function connectChrome() {

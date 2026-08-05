@@ -17,6 +17,7 @@ function quoteChangePct(text, index = 0) {
 
 function extractXtbQuotes(text) {
   const cleaned = normalize(text);
+  const bigPrice = '([0-9]{4,}(?:[.,][0-9]+)?|[0-9]{1,3}(?:[\\s.,][0-9]{3})+(?:[.,][0-9]+)?)';
   const activeOrList = (label) => new RegExp(`${label}\\s+CFD(?:\\s+VENTA\\s+([0-9.,]+(?:\\s+[0-9]+)?)\\s+.*?COMPRA\\s+([0-9.,]+(?:\\s+[0-9]+)?)|\\s+[-0-9.,%]+\\s+([0-9.,]+(?:\\s+[0-9]+)?)\\s+([0-9.,]+(?:\\s+[0-9]+)?))`, 'i');
   const instruments = [
     ['AMD.US', activeOrList('AMD')],
@@ -51,8 +52,8 @@ function extractXtbQuotes(text) {
       change_pct: quoteChangePct(cleaned, match.index || 0)
     }]];
   }));
-  const activeUs100 = cleaned.match(/US100\s+CFD[\s\S]{0,180}?([0-9]{2,3}(?:[.,]\d{3})*(?:[.,]\d+)?)\s+(?:SL\/TP|M1|M5|H1|Gr[aá]ficos)/i)
-    || cleaned.match(/US100\s+CFD[\s\S]{0,180}?([0-9]{5,}(?:[.,]\d+)?)/i);
+  const activeUs100 = cleaned.match(new RegExp(`US100\\s+CFD[\\s\\S]{0,220}?${bigPrice}\\s+(?:SL\\/TP|M1|M5|H1|Gr[aá]ficos)`, 'i'))
+    || cleaned.match(new RegExp(`US100\\s+CFD[\\s\\S]{0,220}?${bigPrice}`, 'i'));
   const activeUs100Price = activeUs100 ? quotePrice(activeUs100[1]) : null;
   if (activeUs100Price && (!quotes.US100 || Math.abs(activeUs100Price - pickPrice(quotes.US100)) > 25)) {
     quotes.US100 = {
@@ -230,8 +231,10 @@ async function syncOnce() {
       throw new Error(`No encontre cotizacion XTB para ${syncSymbol}. Pon ese activo visible en favoritos/lista de XTB.`);
     }
 
-    const applied = quoteBatch.applied && afterBatchState.xtbPrice
-      ? Number(afterBatchState.xtbPrice).toFixed(2)
+    const dashboardAppliedPrice = parseMoney(afterBatchState.xtbPrice);
+    const priceMatchesXtb = dashboardAppliedPrice !== null && Math.abs(dashboardAppliedPrice - price) < 0.01;
+    const applied = quoteBatch.applied && priceMatchesXtb
+      ? dashboardAppliedPrice.toFixed(2)
       : await setDashboardPrice(dashboardPage, syncSymbol, price);
     const result = {
       timestamp: new Date().toISOString(),

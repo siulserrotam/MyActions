@@ -32,6 +32,7 @@ function extractAccount(text) {
 
 function extractXtbQuotes(text) {
   const cleaned = normalize(text);
+  const bigPrice = '([0-9]{4,}(?:[.,][0-9]+)?|[0-9]{1,3}(?:[\\s.,][0-9]{3})+(?:[.,][0-9]+)?)';
   const quotePrice = (value) => {
     const parsed = parseMoney(value);
     return parsed === null ? null : Number(parsed.toFixed(2));
@@ -60,11 +61,18 @@ function extractXtbQuotes(text) {
     ['US100', /US100 CFD\s+[-0-9.,%]+\s+([0-9.,]+)\s+([0-9.,]+)/i]
   ];
 
-  return Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
+  const quotes = Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
     const match = cleaned.match(pattern);
     if (!match) return [];
     return [[symbol, { bid: quotePrice(match[1] ?? match[3]), ask: quotePrice(match[2] ?? match[4]) }]];
   }));
+  const activeUs100 = cleaned.match(new RegExp(`US100\\s+CFD[\\s\\S]{0,220}?${bigPrice}\\s+(?:SL\\/TP|M1|M5|H1|Gr[aá]ficos)`, 'i'))
+    || cleaned.match(new RegExp(`US100\\s+CFD[\\s\\S]{0,220}?${bigPrice}`, 'i'));
+  const activeUs100Price = activeUs100 ? quotePrice(activeUs100[1]) : null;
+  if (activeUs100Price && (!quotes.US100 || Math.abs(activeUs100Price - pickMidPrice(quotes.US100)) > 25)) {
+    quotes.US100 = { bid: activeUs100Price, ask: activeUs100Price, source_hint: 'active-chart-header' };
+  }
+  return quotes;
 }
 
 function pickMidPrice(quote) {
