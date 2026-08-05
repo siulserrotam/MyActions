@@ -2485,6 +2485,8 @@ function currentConfigPayload() {
     symbol: document.getElementById("symbol").value.trim().toUpperCase(),
     xtb_price: xtbPriceValue(),
     market_price: decimalValueById("market-price", 0),
+    target_profit_usd: targetProfitUsd(),
+    stop_risk_usd: stopRiskUsd(),
     entry_price: decimalValueById("entry-price", 0),
     stop_price: decimalValueById("stop-price", 0),
     take_profit_price: decimalValueById("take-profit-price", 0),
@@ -2508,6 +2510,10 @@ function currentConfigPayload() {
     operation3_result: operation3Result,
     operation4_result: operation4Result,
     xtb_estimated_cost_per_operation: xtbEstimatedCostPerOperation,
+    xtb_change_pct: decimalValueById("xtb-change-pct", 0),
+    xtb_day_low: decimalValueById("xtb-day-low", 0),
+    xtb_day_high: decimalValueById("xtb-day-high", 0),
+    xtb_media_buyers: decimalValueById("xtb-media-buyers", 0),
     daily_result_status: dailyStatus,
     risk_pct: riskPct,
     notes: "Auto postback Decision Engine XTB",
@@ -2570,12 +2576,18 @@ function loadConfigLocal() {
     if (config.xtb_estimated_cost_per_operation !== undefined) document.getElementById("xtb-cost-per-operation").value = config.xtb_estimated_cost_per_operation;
     if (config.symbol) document.getElementById("symbol").value = config.symbol;
     if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
+    if (config.target_profit_usd) document.getElementById("target-profit-usd").value = config.target_profit_usd;
+    if (config.stop_risk_usd) document.getElementById("stop-risk-usd").value = config.stop_risk_usd;
     document.getElementById("direction").value = effectiveDirectionForSlot(selectedAsset);
     if (config.market_price) document.getElementById("market-price").value = config.market_price;
     if (config.entry_price) document.getElementById("entry-price").value = config.entry_price;
     if (config.stop_price) document.getElementById("stop-price").value = config.stop_price;
     if (config.take_profit_price) document.getElementById("take-profit-price").value = config.take_profit_price;
     document.getElementById("requested-volume").value = "";
+    if (config.xtb_change_pct !== undefined) document.getElementById("xtb-change-pct").value = config.xtb_change_pct || "";
+    if (config.xtb_day_low !== undefined) document.getElementById("xtb-day-low").value = config.xtb_day_low || "";
+    if (config.xtb_day_high !== undefined) document.getElementById("xtb-day-high").value = config.xtb_day_high || "";
+    if (config.xtb_media_buyers !== undefined) document.getElementById("xtb-media-buyers").value = config.xtb_media_buyers || "";
     if (config.expiry_mode) document.getElementById("expiry-mode").value = config.expiry_mode;
     if (!alreadyMigrated) {
       document.getElementById("risk-pct").value = "dynamic";
@@ -2646,7 +2658,7 @@ function renderDailyResultCard() {
   renderSimpleDashboard();
 }
 
-function setControlValue(id, value) {
+function setControlValue(id, value, options = {}) {
   const element = document.getElementById(id);
   if (!element) return;
   const decimalTargets = new Set([
@@ -2667,8 +2679,13 @@ function setControlValue(id, value) {
     "operation2-result",
     "operation3-result",
     "operation4-result",
+    "xtb-change-pct",
+    "xtb-day-low",
+    "xtb-day-high",
+    "xtb-media-buyers",
   ]);
   element.value = decimalTargets.has(id) ? normalizeDecimalInput(value) : value;
+  if (options.silent) return;
   element.dispatchEvent(new Event("input", { bubbles: true }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -2688,7 +2705,8 @@ function setOperationResult(slot, value) {
 
 function cfdMovementFromQuote(symbol, asset) {
   const quote = liveQuotes[symbol] || {};
-  const raw = quote.xtb_change_pct ?? quote.change_pct ?? asset.liveChangePct ?? 0;
+  const manual = decimalValueById("xtb-change-pct", NaN);
+  const raw = Number.isFinite(manual) ? manual : quote.xtb_change_pct ?? quote.change_pct ?? asset.liveChangePct ?? 0;
   const value = Number(raw);
   return Number.isFinite(value) ? value : 0;
 }
@@ -2749,6 +2767,52 @@ function learningAdjustmentForProfile(symbol) {
   };
 }
 
+function xtbContextAdjustment(asset, direction, price) {
+  const quote = liveQuotes[asset.symbol] || {};
+  const low = decimalValueById("xtb-day-low", Number(quote.low || 0));
+  const high = decimalValueById("xtb-day-high", Number(quote.high || 0));
+  const buyers = decimalValueById("xtb-media-buyers", NaN);
+  const hasRange = Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low && price > 0;
+  const hasSentiment = Number.isFinite(buyers) && buyers >= 0 && buyers <= 100;
+  let score = 0;
+  const notes = [];
+  if (hasRange) {
+    const position = clamp((price - low) / (high - low), 0, 1);
+    if (direction === "LONG" && position <= 0.28) {
+      score += 4;
+      notes.push(`precio cerca de soporte diario (${Math.round(position * 100)}% del rango)`);
+    } else if (direction === "LONG" && position >= 0.82) {
+      score -= 4;
+      notes.push(`precio cerca del maximo diario (${Math.round(position * 100)}% del rango)`);
+    } else if (direction === "SHORT" && position >= 0.72) {
+      score += 4;
+      notes.push(`precio cerca de resistencia diaria (${Math.round(position * 100)}% del rango)`);
+    } else if (direction === "SHORT" && position <= 0.18) {
+      score -= 4;
+      notes.push(`precio cerca del minimo diario (${Math.round(position * 100)}% del rango)`);
+    } else {
+      notes.push(`precio en zona media del rango diario (${Math.round(position * 100)}%)`);
+    }
+  }
+  if (hasSentiment) {
+    const sellers = 100 - buyers;
+    if (buyers >= 60 && direction === "LONG") score += 4;
+    else if (sellers >= 60 && direction === "SHORT") score += 4;
+    else if (buyers >= 60 && direction === "SHORT") score -= 4;
+    else if (sellers >= 60 && direction === "LONG") score -= 4;
+    notes.push(`sentimiento ${numberText(buyers)}% compradores / ${numberText(sellers)}% vendedores`);
+  }
+  score = clamp(Math.round(score), -8, 8);
+  return {
+    score,
+    low: hasRange ? low : null,
+    high: hasRange ? high : null,
+    buyers: hasSentiment ? buyers : null,
+    label: score > 0 ? `Contexto XTB +${score}` : score < 0 ? `Contexto XTB ${score}` : "Contexto XTB neutro",
+    detail: notes.length ? notes.join(". ") + "." : "Sin rango diario o sentimiento cargado; no afecta la decision.",
+  };
+}
+
 function us100StrategyProfile() {
   const asset = findAsset(focusSymbol);
   const quote = liveQuotes[focusSymbol] || {};
@@ -2778,7 +2842,8 @@ function us100StrategyProfile() {
   const cfdMovePct = cfdMovementFromQuote(focusSymbol, asset);
   const cfdMove = cfdMovementScore(cfdMovePct, direction);
   const learning = learningAdjustmentForProfile(focusSymbol);
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score), 0, 95);
+  const xtbContext = xtbContextAdjustment(asset, direction, price);
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score), 0, 95);
   const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
   const confidenceBreakdown = {
     pattern: Math.round(pattern.score),
@@ -2787,8 +2852,9 @@ function us100StrategyProfile() {
     volume: volumeScore,
     cfd: cfdMove.score,
     learning: learning.score,
+    xtbContext: xtbContext.score,
     total: confidence,
-    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + CFD ${cfdMove.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -2844,6 +2910,7 @@ function us100StrategyProfile() {
     cfdMovePct,
     cfdMove,
     learning,
+    xtbContext,
     volumePolicy,
     targetPolicy,
     status,
@@ -3162,6 +3229,7 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
           <div><span class="simple-label">Movimiento CFD</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong><small>${profile.cfdMove.detail}</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
+          <div><span class="simple-label">Contexto XTB</span><strong>${profile.xtbContext.label}</strong><small>${profile.xtbContext.detail}</small></div>
           <div><span class="simple-label">Aprendizaje</span><strong>${profile.learning.label}</strong><small>${profile.learning.detail}</small></div>
           <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango por meta 0.20-0.35. ${profile.volumePolicy.note}</small></div>
           <div><span class="simple-label">Meta IA</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
@@ -3231,15 +3299,18 @@ function renderSimpleDashboard() {
             <label class="simple-field"><span class="simple-label">Objetivo maximo USD</span><select data-sync-target="target-profit-usd">
               ${[50, 100, 150, 200].map((target) => {
                 const allowed = profile.targetPolicy.allowedTargets.includes(target);
-                const hint = target === 50 ? "" : target === 100 ? " 65%+" : target === 150 ? " 78%+" : " 88%+";
-                return `<option value="${target}" ${profile.requestedTargetUsd === target ? "selected" : ""} ${allowed ? "" : "disabled"}>$${target}${allowed ? "" : hint}</option>`;
+                return `<option value="${target}" ${profile.requestedTargetUsd === target ? "selected" : ""} ${allowed ? "" : "disabled"}>$${target}</option>`;
               }).join("")}
             </select></label>
             <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
+            <label class="simple-field"><span class="simple-label">Movimiento CFD %</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-change-pct")?.value || numberText(profile.cfdMovePct)}" data-sync-target="xtb-change-pct" placeholder="Ej: -0.61" /></label>
+            <label class="simple-field"><span class="simple-label">Minimo diario</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-day-low")?.value || ""}" data-sync-target="xtb-day-low" placeholder="Ej: 29561.41" /></label>
+            <label class="simple-field"><span class="simple-label">Maximo diario</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-day-high")?.value || ""}" data-sync-target="xtb-day-high" placeholder="Ej: 29677.20" /></label>
+            <label class="simple-field"><span class="simple-label">Compradores medios %</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-media-buyers")?.value || ""}" data-sync-target="xtb-media-buyers" placeholder="Ej: 53.16" /></label>
           </div>
-          <p class="simple-tiny">Si XTB muestra precio distinto, pegalo aqui y la receta se recalcula con ese precio.</p>
+          <p class="simple-tiny">Metas limpias: $50 base, $100 requiere 65%, $150 requiere 78%, $200 requiere 88%. El contexto XTB solo confirma o alerta, no opera solo.</p>
         </article>
       </section>
 
@@ -3300,7 +3371,7 @@ function bindSimpleDashboard() {
     }
     const syncTarget = event.target?.dataset?.syncTarget;
     if (syncTarget) {
-      setControlValue(syncTarget, event.target.value);
+      setControlValue(syncTarget, event.target.value, { silent: true });
       if (syncTarget.startsWith("operation") && syncTarget.endsWith("-result")) syncOutcomeFromResults();
     }
   });
@@ -4079,7 +4150,7 @@ function bindInputs() {
     document.getElementById(id).addEventListener("input", calculate);
     document.getElementById(id).addEventListener("change", calculate);
   });
-  ["account-balance", "entry-price", "trade-slot", "target-profit-usd", "stop-risk-usd"].forEach((id) => {
+  ["account-balance", "entry-price", "trade-slot", "target-profit-usd", "stop-risk-usd", "xtb-change-pct", "xtb-day-low", "xtb-day-high", "xtb-media-buyers"].forEach((id) => {
     document.getElementById(id).addEventListener("input", () => {
       applyAiAggressiveTargets(selectedAssetFromForm());
       calculate();
