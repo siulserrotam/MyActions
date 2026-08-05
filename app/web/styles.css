@@ -230,13 +230,14 @@ body {
 
 .simple-agent-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
 
 .simple-agent-actions button {
   min-height: 36px;
-  flex: 1;
+  flex: 1 1 120px;
   border: 1px solid rgb(55 235 157 / 0.38);
   border-radius: 12px;
   background: rgb(55 235 157 / 0.16);
@@ -249,6 +250,18 @@ body {
   border-color: rgb(255 255 255 / 0.12);
   background: rgb(255 255 255 / 0.06);
   color: #d8e6e2;
+}
+
+.simple-agent-actions button.permit {
+  border-color: rgb(255 207 92 / 0.55);
+  background: rgb(255 207 92 / 0.16);
+  color: #ffe59e;
+}
+
+.simple-agent-actions button.danger {
+  border-color: rgb(255 102 117 / 0.5);
+  background: rgb(255 102 117 / 0.14);
+  color: #ffb5bf;
 }
 
 .simple-form-grid.two {

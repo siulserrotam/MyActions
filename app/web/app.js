@@ -127,8 +127,19 @@ function isAgentArmed() {
   return getLocalValue("decision_engine_agent_armed") === "true";
 }
 
+function isAgentTradeAuthorized() {
+  return getLocalValue("decision_engine_agent_trade_authorized") === "true";
+}
+
 function setAgentArmed(value) {
   setLocalValue("decision_engine_agent_armed", value ? "true" : "false");
+  if (!value) setAgentTradeAuthorized(false);
+  updateAgentLoop();
+  renderSimpleDashboard();
+}
+
+function setAgentTradeAuthorized(value) {
+  setLocalValue("decision_engine_agent_trade_authorized", value ? "true" : "false");
   updateAgentLoop();
   renderSimpleDashboard();
 }
@@ -2582,6 +2593,7 @@ function us100StrategyProfile() {
 
 function agentControlPlan(profile) {
   const marketOpen = isMarketOpenNow();
+  const tradeAuthorized = isAgentTradeAuthorized();
   const hardOk = profile.status === "OPERABLE"
     && profile.confidence >= 78
     && profile.volume > 0
@@ -2590,21 +2602,27 @@ function agentControlPlan(profile) {
   const nearTrigger = profile.direction === "LONG"
     ? profile.price >= profile.entry * 0.999 && profile.price <= profile.entry * 1.002
     : profile.price <= profile.entry * 1.001 && profile.price >= profile.entry * 0.998;
+  const canPrepareOrder = hardOk && nearTrigger && marketOpen && tradeAuthorized;
   const action = !marketOpen
     ? "PREPARAR"
-    : hardOk && nearTrigger
+    : canPrepareOrder
       ? "PREPARAR ORDEN"
+      : hardOk && nearTrigger
+        ? "PEDIR AUTORIZACION"
       : profile.status === "OPERABLE"
         ? "VIGILAR GATILLO"
         : "ESPERAR";
-  const canAutoOpen = hardOk && nearTrigger && marketOpen;
   return {
     action,
-    mode: canAutoOpen ? "asistido-confirmacion" : "lectura-alerta",
-    canAutoOpen,
-    rule: canAutoOpen
-      ? "El agente puede preparar la orden, pero requiere confirmacion manual final."
-      : "El agente solo lee, aprende y alerta hasta que haya patron fuerte cerca del gatillo.",
+    mode: canPrepareOrder ? "autorizado-asistido" : "lectura-alerta",
+    canAutoOpen: false,
+    canPrepareOrder,
+    tradeAuthorized,
+    rule: canPrepareOrder
+      ? "Autorizado: puede preparar la receta y avisarte para copiarla en XTB. Confirmacion final manual."
+      : tradeAuthorized
+        ? "Autorizado, pero espera patron fuerte, mercado abierto y precio cerca del gatillo."
+        : "Solo lee, aprende y alerta. Para preparar una operacion pulsa Autorizar operacion asistida.",
   };
 }
 
@@ -2839,6 +2857,7 @@ function renderSimpleDashboard() {
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
   const sourceLabel = liveQuotes[focusSymbol]?.source === "xtb" ? "Lectura directa XTB" : "Yahoo / ultimo precio";
   const agentArmed = isAgentArmed();
+  const tradeAuthorized = isAgentTradeAuthorized();
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -2884,19 +2903,20 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Agente IA semiautomatico</span>
             <strong>${agentArmed ? profile.agent.action : "PAUSADO"}</strong>
-            <small>${agentArmed ? profile.agent.rule : "No guarda ni prepara nada hasta que pulses Empezar bot."}</small>
+            <small>${agentArmed ? profile.agent.rule : "No guarda, no prepara y no alerta hasta que pulses Empezar bot."}</small>
           </div>
           <div>
             <span class="simple-label">Modo</span>
             <strong>${agentArmed ? profile.agent.mode : "sin autorizacion"}</strong>
-            <small>${agentArmed ? (profile.agent.canAutoOpen ? "Prepararia la orden en XTB, sin pulsar compra/venta final." : "Solo lectura, aprendizaje y alerta.") : "Tu autorizacion se guarda en este navegador."}</small>
+            <small>${agentArmed ? (tradeAuthorized ? "Puede preparar la operacion asistida cuando haya senal fuerte." : "Solo lectura, aprendizaje y alerta.") : "Tu autorizacion se guarda en este navegador."}</small>
           </div>
           <div>
             <span class="simple-label">Autorizacion</span>
-            <strong>${agentArmed ? "Bot armado" : "Bot apagado"}</strong>
-            <small>${agentArmed ? "Auto-guarda una lectura por minuto mientras esta pagina este abierta." : "Activalo solo cuando quieras empezar a operar."}</small>
+            <strong>${tradeAuthorized ? "Operacion asistida autorizada" : agentArmed ? "Bot armado sin operar" : "Bot apagado"}</strong>
+            <small>${tradeAuthorized ? "Permiso activo solo en este navegador. No pulsa compra/venta final en XTB." : agentArmed ? "Auto-guarda lecturas; no prepara operaciones sin tu permiso." : "Activalo solo cuando quieras empezar a operar."}</small>
             <div class="simple-agent-actions">
               <button type="button" data-simple-action="agent-start">${agentArmed ? "Rearmar" : "Empezar bot"}</button>
+              <button type="button" class="${tradeAuthorized ? "danger" : "permit"}" data-simple-action="agent-authorize">${tradeAuthorized ? "Quitar permiso" : "Autorizar operacion asistida"}</button>
               <button type="button" class="secondary" data-simple-action="agent-stop">Pausar</button>
             </div>
           </div>
@@ -3078,6 +3098,13 @@ function bindSimpleDashboard() {
       saveAutoLearningSnapshot(true);
       return;
     }
+    if (action === "agent-authorize") {
+      const next = !isAgentTradeAuthorized();
+      if (next) setAgentArmed(true);
+      setAgentTradeAuthorized(next);
+      saveAutoLearningSnapshot(true);
+      return;
+    }
     if (action === "agent-stop") {
       setAgentArmed(false);
       return;
@@ -3184,6 +3211,7 @@ function autoLessonPayload(profile) {
       `tendencia=${profile.trend?.direction || "WAIT"}`,
       `precio=${numberText(profile.price)}`,
       `agente=${profile.agent?.action || "ESPERAR"}`,
+      `permiso_operacion=${isAgentTradeAuthorized() ? "si" : "no"}`,
     ].join(" | "),
   };
 }
