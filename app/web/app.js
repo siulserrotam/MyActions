@@ -3286,8 +3286,11 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">Stop</span><strong>${priceText(profile.stopLoss)}</strong></div>
             <div class="simple-number"><span class="simple-label">Take profit</span><strong>${priceText(profile.takeProfit)}</strong></div>
             <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
+            <div class="simple-number"><span class="simple-label">CFD hoy</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong></div>
+            <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong></div>
           </div>
           ${profile.targetPolicy.capped ? `<p class="simple-warning">Objetivo ajustado: pediste ${money(profile.requestedTargetUsd)}, pero con operabilidad ${profile.confidence}% el maximo permitido es ${money(profile.targetPolicy.cap)}.</p>` : ""}
+          <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
         <article class="simple-operation">
