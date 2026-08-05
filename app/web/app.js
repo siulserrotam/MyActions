@@ -845,7 +845,7 @@ function targetContractVolume(asset, entry, balance) {
 
 function preferredUs100Volume(confidence, marginVolume, targetUsd, asset) {
   const desired = targetUsd >= 100
-    ? 0.23
+    ? 0.25
     : targetUsd >= 75
       ? 0.22
       : 0.2;
@@ -2718,7 +2718,7 @@ function us100StrategyProfile() {
     note: volume < 0.2
       ? "Bajo 0.20 solo si el margen disponible no deja abrir ese tamano."
       : requestedTargetUsd >= 100
-        ? "Meta alta: usa 0.23 como volumen objetivo."
+        ? "Meta alta: usa 0.25 como volumen objetivo."
         : requestedTargetUsd >= 75
           ? "Meta media: usa 0.22 como volumen objetivo."
           : "Meta conservadora: usa 0.20 como volumen objetivo.",
