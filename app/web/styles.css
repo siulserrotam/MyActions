@@ -804,6 +804,18 @@ body {
   font-size: 12px;
 }
 
+.simple-warning {
+  border: 1px solid rgb(245 158 11 / 0.45);
+  background: rgb(245 158 11 / 0.1);
+  border-radius: 12px;
+  color: #fde68a;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+}
+
 .login-body {
   min-height: 100vh;
   background:

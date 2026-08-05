@@ -217,6 +217,25 @@ function targetProfitUsd() {
   return Number.isFinite(raw) && raw > 0 ? raw : defaultTargetProfitUsd;
 }
 
+function targetCapForVolume(volume) {
+  const normalized = Number(volume || 0);
+  if (normalized <= 0.2) return 50;
+  if (normalized >= 0.25) return 100;
+  const progress = (normalized - 0.2) / 0.05;
+  return 50 + progress * 50;
+}
+
+function volumeTargetPolicy(volume, requestedTarget) {
+  const cap = targetCapForVolume(volume);
+  const target = Math.min(Number(requestedTarget || defaultTargetProfitUsd), cap);
+  return {
+    cap: Number(cap.toFixed(2)),
+    target: Number(target.toFixed(2)),
+    capped: Number(requestedTarget || 0) > cap,
+    text: `Meta por volumen: ${formatVolumeForXtb(volume, findAsset(focusSymbol))} permite maximo ${money(cap)}.`,
+  };
+}
+
 function stopRiskUsd() {
   const raw = decimalValueById("stop-risk-usd", defaultStopRiskUsd);
   return Number.isFinite(raw) && raw > 0 ? raw : defaultStopRiskUsd;
@@ -2668,11 +2687,13 @@ function us100StrategyProfile() {
   const direction = decideUs100Direction(pattern, trend, asset);
   const level = us100OrderLevels(asset, direction, bars, price);
   const stopUsd = stopRiskUsd();
-  const targetUsd = targetProfitUsd();
+  const requestedTargetUsd = targetProfitUsd();
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
   const volume = preferredUs100Volume(baseConfidence, marginVolume, stopUsd, asset);
+  const targetPolicy = volumeTargetPolicy(volume, requestedTargetUsd);
+  const targetUsd = targetPolicy.target;
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
@@ -2734,12 +2755,14 @@ function us100StrategyProfile() {
     stopPoints: finalStopPoints,
     takePoints,
     targetUsd,
+    requestedTargetUsd,
     stopUsd,
     positionValue,
     marginRequired,
     confidence,
     confidenceBreakdown,
     volumePolicy,
+    targetPolicy,
     status,
     agent,
     explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
@@ -3055,6 +3078,7 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
           <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango deseado 0.20-0.25. ${profile.volumePolicy.note}</small></div>
+          <div><span class="simple-label">Meta por volumen</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
         </div>
         <div class="simple-agent-card">
           <div>
@@ -3109,6 +3133,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">Take profit</span><strong>${priceText(profile.takeProfit)}</strong></div>
             <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
           </div>
+          ${profile.targetPolicy.capped ? `<p class="simple-warning">Objetivo ajustado: pediste ${money(profile.requestedTargetUsd)}, pero con volumen ${formatVolumeForXtb(profile.volume, profile.asset)} el maximo recomendado es ${money(profile.targetPolicy.cap)}.</p>` : ""}
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
         <article class="simple-operation">
@@ -3117,7 +3142,7 @@ function renderSimpleDashboard() {
             <span class="simple-badge">editable</span>
           </div>
           <div class="simple-form-grid two">
-            <label class="simple-field"><span class="simple-label">Objetivo USD</span><input type="text" inputmode="decimal" value="${profile.targetUsd}" data-sync-target="target-profit-usd" /></label>
+            <label class="simple-field"><span class="simple-label">Objetivo maximo USD</span><input type="text" inputmode="decimal" value="${profile.requestedTargetUsd}" data-sync-target="target-profit-usd" /></label>
             <label class="simple-field"><span class="simple-label">Stop USD</span><select data-sync-target="stop-risk-usd"><option value="50" ${profile.stopUsd === 50 ? "selected" : ""}>$50</option><option value="100" ${profile.stopUsd === 100 ? "selected" : ""}>$100</option></select></label>
             <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
             <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
