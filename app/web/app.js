@@ -2849,7 +2849,8 @@ function us100StrategyProfile() {
   const imbalance = detectGapFvgBag(bars);
   const trend = detectTrendProfile(bars, asset);
   const direction = decideUs100Direction(pattern, trend, asset);
-  const level = us100OrderLevels(asset, direction, bars, price);
+  const levelDirection = direction === "WAIT" ? (trend.direction !== "WAIT" ? trend.direction : pattern.bias !== "WAIT" ? pattern.bias : "LONG") : direction;
+  const level = us100OrderLevels(asset, levelDirection, bars, price);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
@@ -2866,13 +2867,14 @@ function us100StrategyProfile() {
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
-  const stopLoss = direction === "LONG" ? level.entry - finalStopPoints : level.entry + finalStopPoints;
-  const takeProfit = direction === "LONG" ? level.entry + takePoints : level.entry - takePoints;
+  const stopLoss = levelDirection === "LONG" ? level.entry - finalStopPoints : level.entry + finalStopPoints;
+  const takeProfit = levelDirection === "LONG" ? level.entry + takePoints : level.entry - takePoints;
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
   const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score), 0, 95);
-  const status = confidence >= 72 && volume > 0 ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
+  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
+  const status = playbook.allowed ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
   const confidenceBreakdown = {
     pattern: Math.round(pattern.score),
     trend: Math.round(trend.score),
@@ -2941,6 +2943,7 @@ function us100StrategyProfile() {
     xtbContext,
     volumePolicy,
     targetPolicy,
+    playbook,
     status,
     agent,
     explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
@@ -3086,9 +3089,42 @@ function detectCandlePattern(candles) {
 
 function decideUs100Direction(pattern, trend, asset) {
   if (pattern.bias !== "WAIT" && pattern.bias === trend.direction) return pattern.bias;
-  if (pattern.bias !== "WAIT" && trend.direction === "WAIT") return pattern.bias;
-  if (trend.direction !== "WAIT") return trend.direction;
-  return aiDirectionForAsset(asset);
+  return "WAIT";
+}
+
+function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
+  const rules = [];
+  const blockers = [];
+  const alignedPatternTrend = direction !== "WAIT" && pattern.bias === direction && trend.direction === direction;
+  const imbalanceOk = imbalance.bias === "WAIT" || imbalance.bias === direction;
+  const cfdOk = cfdMove.direction === "WAIT" || cfdMove.direction === direction;
+  const validOrder = Number(price) > 0 && Number(entry) > 0 && Number(stopLoss) > 0 && Number(takeProfit) > 0 && Number(volume) > 0;
+  const entryDistancePct = price && entry ? Math.abs(entry - price) / price * 100 : 999;
+  const nearTrigger = entryDistancePct <= 0.18;
+  const strongEnough = confidence >= 72;
+
+  if (alignedPatternTrend) rules.push("Patron y tendencia 30m apuntan a la misma direccion.");
+  else blockers.push("Patron y tendencia 30m no estan alineados.");
+  if (imbalanceOk) rules.push("GAP/FVG/BAG no contradice la direccion.");
+  else blockers.push("GAP/FVG/BAG contradice la operacion.");
+  if (cfdOk) rules.push("Movimiento CFD no va en contra.");
+  else blockers.push("Movimiento CFD va contra la operacion.");
+  if (nearTrigger) rules.push(`Precio cerca del gatillo (${numberText(entryDistancePct)}%).`);
+  else blockers.push(`Precio lejos del gatillo (${numberText(entryDistancePct)}%).`);
+  if (strongEnough) rules.push(`Operabilidad suficiente (${confidence}%).`);
+  else blockers.push(`Operabilidad baja (${confidence}%).`);
+  if (!validOrder) blockers.push("Faltan precio, volumen o niveles validos.");
+
+  const allowed = blockers.length === 0;
+  return {
+    allowed,
+    setup: allowed ? "Setup A: ruptura con pullback confirmado" : "Sin setup fijo",
+    rule: allowed ? "Programar orden stop/limitada y esperar activacion." : "No perseguir precio; esperar nueva vela 1M clara.",
+    checklist: rules,
+    blockers,
+    detail: allowed ? rules.join(" ") : blockers.join(" "),
+    entryDistancePct,
+  };
 }
 
 function maxVolumeByMargin(asset, entry) {
@@ -3113,6 +3149,7 @@ function us100OrderLevels(asset, direction, candles, fallbackPrice) {
 }
 
 function buildUs100Explanation(pattern, trend, imbalance, direction, status) {
+  if (direction === "WAIT") return `Esperar: estrategia fija exige patron y tendencia alineados. ${trend.label}.`;
   const side = direction === "LONG" ? "compra por ruptura alcista" : "venta en corto por ruptura bajista";
   const model = `${pattern.name} + ${imbalance.type}`;
   if (status === "NO OPERAR") return `No operar: ${model}. ${trend.label}. Falta confirmacion o volumen valido.`;
@@ -3259,13 +3296,18 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Patron de vela</span><strong>${profile.pattern.name}</strong><small>${profile.pattern.detail}</small></div>
           <div><span class="simple-label">GAP / FVG / BAG</span><strong>${profile.imbalance.type}</strong><small>${profile.imbalance.detail}</small></div>
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
-          <div><span class="simple-label">Regla</span><strong>${profile.status === "OPERABLE" ? "Programar orden stop" : "Esperar confirmacion"}</strong><small>No operar dentro de vela indecisa.</small></div>
+          <div><span class="simple-label">Estrategia fija</span><strong>${profile.playbook.setup}</strong><small>${profile.playbook.rule}</small></div>
           <div><span class="simple-label">Movimiento CFD</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong><small>${profile.cfdMove.detail}</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
           <div><span class="simple-label">Contexto XTB</span><strong>${profile.xtbContext.label}</strong><small>${profile.xtbContext.detail}</small></div>
           <div><span class="simple-label">Aprendizaje</span><strong>${profile.learning.label}</strong><small>${profile.learning.detail}</small></div>
           <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango por meta 0.20-0.35. ${profile.volumePolicy.note}</small></div>
           <div><span class="simple-label">Meta IA</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
+        </div>
+        <div class="simple-playbook-card">
+          <span class="simple-label">Playbook US100</span>
+          <strong>${profile.playbook.allowed ? "Setup valido" : "Esperando setup fijo"}</strong>
+          <small>${profile.playbook.detail}</small>
         </div>
         <div class="simple-agent-card">
           <div>

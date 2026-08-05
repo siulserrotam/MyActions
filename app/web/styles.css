@@ -225,6 +225,30 @@ body {
   margin-top: 12px;
 }
 
+.simple-playbook-card {
+  margin-top: 12px;
+  border: 1px solid rgb(255 207 92 / 0.26);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgb(47 39 19 / 0.68), rgb(12 15 18 / 0.94));
+  padding: 12px;
+}
+
+.simple-playbook-card strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff0b0;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.simple-playbook-card small {
+  display: block;
+  margin-top: 6px;
+  color: #dbc890;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .simple-agent-card > div {
   border: 1px solid rgb(90 160 255 / 0.22);
   border-radius: 14px;
