@@ -45,7 +45,7 @@ if ($runningOpera -and -not $FreshProfile) {
 }
 
 $urls = @(
-  'https://xstation5.xtb.com/#/_/loggedIn?detach=charts&detachDoClose=true',
+  'https://xstation5.xtb.com/?branch=lat#/_/loggedIn',
   'https://api.manantiallodge.com/dashboard/'
 )
 

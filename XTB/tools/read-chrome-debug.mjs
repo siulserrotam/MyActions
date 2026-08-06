@@ -89,12 +89,14 @@ async function main() {
   const xtbSignals = xtbPage ? extractSignals(xtbPage) : { hasLogin: false, hasPortfolio: false, hasDashboard: false };
   const dashboardSignals = dashboardPage ? extractSignals(dashboardPage) : { hasLogin: false, hasPortfolio: false, hasDashboard: false };
 
+  const xtbUrlRequiresLogin = Boolean(xtbPage && xtbPage.url.includes('/login'));
+
   const result = {
     timestamp: new Date().toISOString(),
     status: {
       xtb_page_found: Boolean(xtbPage),
       dashboard_page_found: Boolean(dashboardPage),
-      xtb_login_required: Boolean(xtbPage && xtbSignals.hasLogin && !account.account),
+      xtb_login_required: Boolean(xtbPage && (xtbUrlRequiresLogin || xtbSignals.hasLogin) && !account.account),
       dashboard_login_required: Boolean(dashboardPage && (dashboardPage.url.includes('/login') || (dashboardSignals.hasLogin && !dashboardSignals.hasDashboard)))
     },
     account,

@@ -3,7 +3,7 @@ import { connectChrome, pickBrowserContext, classifyPage } from './chrome-debug.
 const REQUIRED_PAGES = [
   {
     kind: 'xtb',
-    url: 'https://xstation5.xtb.com/#/_/loggedIn?detach=charts&detachDoClose=true'
+    url: 'https://xstation5.xtb.com/?branch=lat#/_/loggedIn'
   },
   {
     kind: 'dashboard',
