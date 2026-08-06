@@ -2084,9 +2084,9 @@ function buildChartCandles(zones, direction) {
   }));
 }
 
-function realCandlesForItem(item) {
+function realCandlesForItem(item, frameOverride = null) {
   const rows = mergedBarsForSymbol(item.asset.symbol);
-  const frame = chartFrameConfig();
+  const frame = frameOverride || chartFrameConfig();
   const visibleRows = frame.aggregateHours ? aggregateCandlesByHours(rows, frame.aggregateHours) : rows;
   const candles = visibleRows.slice(-frame.limit)
     .map((bar) => ({
@@ -2417,16 +2417,17 @@ function renderMiniTradeChart(item) {
 }
 
 function renderFibOnlyCard(item) {
-  const candles = realCandlesForItem(item);
+  const fibFrame = chartFrameOptions["15m"];
+  const candles = realCandlesForItem(item, fibFrame);
   const fib = latestSwingFib(candles);
   if (!fib) {
     return `
       <article class="simple-operation fib-only-card">
         <div class="simple-head">
           <h2>Zona Fibonacci</h2>
-          <span class="simple-badge">auto</span>
+          <span class="simple-badge">15M fijo</span>
         </div>
-        <div class="fib-empty">Aun no hay suficientes velas para dibujar la ultima reaccion.</div>
+        <div class="fib-empty">Aun no hay suficientes velas 15M para dibujar la ultima reaccion.</div>
       </article>
     `;
   }
@@ -2489,7 +2490,7 @@ function renderFibOnlyCard(item) {
       </div>
       <div class="fib-focus-copy">
         <strong>${swingLabel}</strong>
-        <span>${fibRejected ? "Zona rechazada: borrar la lectura anterior y esperar nuevo movimiento" : zoneLabel}</span>
+        <span>15M fijo: ${fibRejected ? "zona rechazada, borrar la lectura anterior y esperar nuevo movimiento" : zoneLabel}</span>
       </div>
       <svg class="fib-focus-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Zona Fibonacci 50 a 61.8">
         <rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="14" class="fib-focus-bg" />
@@ -2508,7 +2509,7 @@ function renderFibOnlyCard(item) {
       ${resetNote}
       ${recipeRows}
       <p class="simple-warning">${actionLabel}</p>
-      <p class="simple-tiny">Esta tarjeta reemplaza los parametros editables: todo se calcula automaticamente desde la ultima reaccion visible.</p>
+      <p class="simple-tiny">Esta tarjeta siempre usa 15M para Fibonacci. Cambiar la grafica visible a 1M o 4H no cambia esta zona.</p>
     </article>
   `;
 }
