@@ -2121,35 +2121,44 @@ function realCandlesForItem(item) {
 
 function latestSwingFib(candles) {
   if (!Array.isArray(candles) || candles.length < 6) return null;
-  const lookbackCount = Math.min(candles.length, 24);
+  const lookbackCount = Math.min(candles.length, 30);
   const offset = candles.length - lookbackCount;
   const window = candles.slice(offset);
-  let low = { index: 0, price: Number.POSITIVE_INFINITY };
-  let high = { index: 0, price: 0 };
-  window.forEach((candle, index) => {
-    if (Number(candle.l) < low.price) low = { index, price: Number(candle.l) };
-    if (Number(candle.h) > high.price) high = { index, price: Number(candle.h) };
-  });
-  if (!Number.isFinite(low.price) || !Number.isFinite(high.price) || high.price <= low.price) return null;
+  const tailStart = Math.max(0, window.length - Math.max(8, Math.ceil(window.length * 0.4)));
+  const tail = window.slice(tailStart);
+  const firstClose = Number(window[0]?.c || 0);
+  const lastClose = Number(window[window.length - 1]?.c || 0);
+  const recentClose = Number(window[Math.max(0, window.length - 7)]?.c || firstClose);
+  const netMove = lastClose - firstClose;
+  const recentMove = lastClose - recentClose;
+  const direction = Math.abs(recentMove) >= Math.abs(netMove) * 0.25
+    ? recentMove >= 0 ? "up" : "down"
+    : netMove >= 0 ? "up" : "down";
 
-  const direction = high.index > low.index ? "up" : "down";
-  const start = direction === "up" ? low : high;
-  const afterStart = window.slice(start.index + 1);
   let end = direction === "up"
-    ? { index: start.index, price: start.price }
-    : { index: start.index, price: start.price };
-
-  afterStart.forEach((candle, localIndex) => {
-    const index = start.index + 1 + localIndex;
+    ? { index: tailStart, price: 0 }
+    : { index: tailStart, price: Number.POSITIVE_INFINITY };
+  tail.forEach((candle, localIndex) => {
+    const index = tailStart + localIndex;
     if (direction === "up" && Number(candle.h) >= end.price) end = { index, price: Number(candle.h) };
-    if (direction === "down" && (end.index === start.index || Number(candle.l) <= end.price)) end = { index, price: Number(candle.l) };
+    if (direction === "down" && Number(candle.l) <= end.price) end = { index, price: Number(candle.l) };
   });
 
-  if (end.index === start.index) {
-    const fallback = window[window.length - 1];
-    end = {
-      index: window.length - 1,
-      price: direction === "up" ? Number(fallback.h) : Number(fallback.l),
+  const beforeEnd = window.slice(0, Math.max(1, end.index + 1));
+  let start = direction === "up"
+    ? { index: 0, price: Number.POSITIVE_INFINITY }
+    : { index: 0, price: 0 };
+  beforeEnd.forEach((candle, index) => {
+    if (direction === "up" && Number(candle.l) <= start.price) start = { index, price: Number(candle.l) };
+    if (direction === "down" && Number(candle.h) >= start.price) start = { index, price: Number(candle.h) };
+  });
+
+  if (start.index >= end.index) {
+    const fallbackStartIndex = Math.max(0, end.index - 6);
+    const fallbackStart = window[fallbackStartIndex];
+    start = {
+      index: fallbackStartIndex,
+      price: direction === "up" ? Number(fallbackStart.l) : Number(fallbackStart.h),
     };
   }
 
@@ -2173,6 +2182,8 @@ function latestSwingFib(candles) {
     startPrice,
     endPrice,
     levels,
+    goldenLow: Math.min(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
+    goldenHigh: Math.max(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
   };
 }
 
@@ -2301,6 +2312,9 @@ function renderTradeChart(item, variant = "mini") {
     <circle cx="${fibX(fib.startIndex)}" cy="${y(fib.startPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
     <circle cx="${fibX(fib.endIndex)}" cy="${y(fib.endPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
   ` : "";
+  const fibGoldenMarkup = fib && (visibleLevel(fib.goldenLow) || visibleLevel(fib.goldenHigh)) ? `
+    <rect x="${plotLeft}" y="${Math.min(y(fib.goldenLow), y(fib.goldenHigh))}" width="${plotRight - plotLeft}" height="${Math.max(6, Math.abs(y(fib.goldenLow) - y(fib.goldenHigh)))}" rx="6" class="chart-fib-golden ${fib.direction}" />
+  ` : "";
   const fibLineMarkup = fib ? fib.levels
     .filter((level) => visibleLevel(level.price))
     .map((level) => `
@@ -2378,6 +2392,7 @@ function renderTradeChart(item, variant = "mini") {
         ${safetyVisible ? `<rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />` : ""}
         ${visibleLevel(proZones.resistance) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />` : ""}
         ${visibleLevel(proZones.support) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />` : ""}
+        ${fibGoldenMarkup}
         ${fibLineMarkup}
         ${fibSwingMarkup}
         ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
@@ -2411,7 +2426,7 @@ function renderTradeChart(item, variant = "mini") {
           ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
           <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
           <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
-          ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. La zona 50%-61.8% sirve para esperar retroceso/rechazo; no reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
+          ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 50%-61.8% ${fib.direction === "up" ? "verde: retroceso comprador posible" : "roja: rebote vendedor posible"}. No reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}

@@ -678,6 +678,18 @@ body {
   stroke-dasharray: 4 7;
 }
 
+.chart-fib-golden.up {
+  fill: rgb(58 216 134 / 0.12);
+  stroke: rgb(58 216 134 / 0.28);
+  stroke-width: 1;
+}
+
+.chart-fib-golden.down {
+  fill: rgb(255 90 102 / 0.13);
+  stroke: rgb(255 90 102 / 0.3);
+  stroke-width: 1;
+}
+
 .chart-fib-level.key line {
   stroke: rgb(255 207 92 / 0.68);
   stroke-width: 1.6;
