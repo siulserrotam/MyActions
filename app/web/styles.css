@@ -337,6 +337,69 @@ body {
   line-height: 1.45;
 }
 
+.technical-trace-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid rgb(255 207 92 / 0.28);
+  border-radius: 16px;
+  background: rgb(12 15 18 / 0.7);
+  padding: 14px;
+}
+
+.technical-trace-card.ok {
+  border-color: rgb(55 235 157 / 0.36);
+  background: linear-gradient(180deg, rgb(25 62 46 / 0.36), rgb(12 15 18 / 0.92));
+}
+
+.technical-trace-card.warn {
+  border-color: rgb(255 207 92 / 0.36);
+  background: linear-gradient(180deg, rgb(53 42 18 / 0.34), rgb(12 15 18 / 0.92));
+}
+
+.technical-trace-card.danger {
+  border-color: rgb(255 102 117 / 0.34);
+}
+
+.technical-trace-card strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 20px;
+}
+
+.technical-trace-card small {
+  display: block;
+  margin-top: 5px;
+  color: #bdd8d0;
+  line-height: 1.4;
+}
+
+.technical-trace-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.technical-trace-grid > div {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 13px;
+  background: rgb(0 0 0 / 0.2);
+  padding: 11px;
+}
+
+.technical-trace-grid span {
+  color: #9bbab2;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.technical-trace-grid strong {
+  font-size: 17px;
+}
+
 .simple-form-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1130,6 +1193,7 @@ body {
   .simple-form-grid.two,
   .simple-pattern-grid,
   .simple-agent-card,
+  .technical-trace-grid,
   .simple-top-list,
   .simple-guide {
     grid-template-columns: 1fr;

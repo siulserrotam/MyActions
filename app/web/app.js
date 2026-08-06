@@ -70,11 +70,10 @@ const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
-const technicalAnalysisDurationMs = 60 * 60 * 1000;
 const chartFrameOptions = {
   "1m": { key: "1m", label: "1M / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos, velas de 1 minuto." },
-  "5m": { key: "5m", label: "5M / 2h", interval: "5m", period: "1d", limit: 24, description: "Ultimas 2 horas, velas de 5 minutos." },
-  "1h": { key: "1h", label: "1H / 5d", interval: "1h", period: "5d", limit: 60, description: "Contexto amplio, velas de 1 hora." },
+  "5m": { key: "5m", label: "5M / 2h", interval: "5m", period: "1d", limit: 24, description: "Estructura corta, velas de 5 minutos." },
+  "1h": { key: "1h", label: "1H / 5d", interval: "1h", period: "5d", limit: 48, description: "Direccion grande, velas de 1 hora." },
 };
 
 let activeCategory = "favorites";
@@ -87,6 +86,8 @@ let lastResetSymbol = selectedAsset.symbol;
 let liveQuotes = {};
 let marketBars = {};
 let marketBarMeta = {};
+let marketBarsByFrame = {};
+let marketBarMetaByFrame = {};
 let liveCandleBars = {};
 let xtbTicketValidation = null;
 let manualOpportunityLockUntil = 0;
@@ -137,11 +138,11 @@ function isAgentTradeAuthorized() {
 
 function technicalAnalysisState() {
   const startedAt = Number(getLocalValue("decision_engine_analysis_started_at") || 0);
-  const graphEnabled = getLocalValue("decision_engine_analysis_graph_enabled") === "true";
+  const graphEnabled = startedAt > 0 || getLocalValue("decision_engine_analysis_graph_enabled") === "true";
   const now = Date.now();
   const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
-  const remainingMs = startedAt ? Math.max(0, technicalAnalysisDurationMs - elapsedMs) : technicalAnalysisDurationMs;
-  const completed = Boolean(startedAt && elapsedMs >= technicalAnalysisDurationMs);
+  const remainingMs = 0;
+  const completed = Boolean(startedAt);
   return {
     startedAt,
     graphEnabled,
@@ -161,11 +162,12 @@ function formatTimer(ms) {
 
 function startTechnicalAnalysis() {
   setLocalValue("decision_engine_analysis_started_at", String(Date.now()));
-  setLocalValue("decision_engine_analysis_graph_enabled", "false");
+  setLocalValue("decision_engine_analysis_graph_enabled", "true");
   setAgentArmed(true);
   setAgentTradeAuthorized(false);
   setChartFrame("1m");
   saveAutoLearningSnapshot(true);
+  loadAnalysisTimeframes().then(() => renderSimpleDashboard());
   renderSimpleDashboard();
 }
 
@@ -177,14 +179,8 @@ function resetTechnicalAnalysis() {
 }
 
 function enableTechnicalChart() {
-  const state = technicalAnalysisState();
-  if (!state.completed) {
-    updateLessonStatus(`Aun faltan ${formatTimer(state.remainingMs)} de lectura antes de graficar objetivo.`, "neutral");
-    return;
-  }
   setLocalValue("decision_engine_analysis_graph_enabled", "true");
-  setChartFrame("1m");
-  loadMarketBars([focusSymbol]).then(() => renderSimpleDashboard());
+  loadAnalysisTimeframes().then(() => renderSimpleDashboard());
 }
 
 function setAgentArmed(value) {
@@ -998,6 +994,10 @@ function mergeCandleRows(rows = []) {
   return Array.from(byMinute.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 }
 
+function marketFrameKey(symbol, frameKey = chartFrameKey()) {
+  return `${String(symbol || "").trim().toUpperCase()}:${frameKey}`;
+}
+
 function recordLiveQuoteCandle(quote) {
   const symbol = String(quote.symbol || "").trim().toUpperCase();
   const price = Number(quote.price || 0);
@@ -1034,7 +1034,10 @@ function recordLiveQuoteCandle(quote) {
 
 function mergedBarsForSymbol(symbol) {
   const normalized = String(symbol || "").trim().toUpperCase();
-  return mergeCandleRows([...(marketBars[normalized] || []), ...(liveCandleBars[normalized] || [])]);
+  const key = marketFrameKey(normalized);
+  const storedRows = marketBarsByFrame[key] || marketBars[normalized] || [];
+  const liveRows = chartFrameConfig().interval === "1m" ? (liveCandleBars[normalized] || []) : [];
+  return mergeCandleRows([...storedRows, ...liveRows]);
 }
 
 function applyLiveQuote(quote) {
@@ -1078,8 +1081,8 @@ async function saveQuoteBars(items = [], source = "dashboard") {
   }
 }
 
-async function loadMarketBars(symbols = []) {
-  const frame = chartFrameConfig();
+async function loadMarketBars(symbols = [], frameOverride = null) {
+  const frame = frameOverride || chartFrameConfig();
   const uniqueSymbols = Array.from(new Set(symbols.map((symbol) => String(symbol || "").trim().toUpperCase()).filter(Boolean)));
   await Promise.all(uniqueSymbols.slice(0, 6).map(async (symbol) => {
     try {
@@ -1093,7 +1096,9 @@ async function loadMarketBars(symbols = []) {
       const response = await fetch(`/market/bars/${encodeURIComponent(symbol)}?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
+      const frameKey = marketFrameKey(symbol, frame.key);
       marketBars[symbol] = payload.items || [];
+      marketBarsByFrame[frameKey] = payload.items || [];
       marketBarMeta[symbol] = {
         source: payload.source || "market_bars",
         isRealOhlc: Boolean(payload.is_real_ohlc),
@@ -1107,11 +1112,17 @@ async function loadMarketBars(symbols = []) {
         endAt: payload.end_at || "",
         storedWasPointQuotes: Boolean(payload.stored_was_point_quotes),
       };
+      marketBarMetaByFrame[frameKey] = marketBarMeta[symbol];
     } catch {
       marketBars[symbol] = marketBars[symbol] || [];
       marketBarMeta[symbol] = marketBarMeta[symbol] || {};
     }
   }));
+}
+
+async function loadAnalysisTimeframes(symbols = [focusSymbol]) {
+  const frames = [chartFrameOptions["1m"], chartFrameOptions["5m"], chartFrameOptions["1h"]];
+  await Promise.all(frames.map((frame) => loadMarketBars(symbols, frame)));
 }
 
 function quoteAgeMinutes(asset) {
@@ -3172,6 +3183,63 @@ function detectCandlePattern(candles) {
   return { bias: "WAIT", name: "Sin patron dominante", score: 10, detail: "No hay vela de confirmacion clara; esperar ruptura o pullback." };
 }
 
+function candlesForFrame(symbol, frameKey) {
+  const rows = marketBarsByFrame[marketFrameKey(symbol, frameKey)] || [];
+  return mergeCandleRows(rows)
+    .slice(-(chartFrameOptions[frameKey]?.limit || 30))
+    .map((bar) => ({
+      o: Number(bar.open || 0),
+      h: Number(bar.high || 0),
+      l: Number(bar.low || 0),
+      c: Number(bar.close || 0),
+      timestamp: bar.timestamp,
+    }))
+    .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
+}
+
+function traceFrame(symbol, frameKey) {
+  const frame = chartFrameOptions[frameKey];
+  const candles = candlesForFrame(symbol, frameKey);
+  const asset = findAsset(symbol);
+  const pattern = detectCandlePattern(candles);
+  const trend = detectTrendProfile(candles, asset);
+  const imbalance = detectGapFvgBag(candles);
+  const closes = candles.map((candle) => candle.c);
+  const first = closes[0] || 0;
+  const last = closes[closes.length - 1] || 0;
+  const movePct = first > 0 ? (last - first) / first * 100 : 0;
+  const biasVotes = [pattern.bias, trend.direction, imbalance.bias].filter((bias) => bias !== "WAIT");
+  const longVotes = biasVotes.filter((bias) => bias === "LONG").length;
+  const shortVotes = biasVotes.filter((bias) => bias === "SHORT").length;
+  const bias = longVotes > shortVotes ? "LONG" : shortVotes > longVotes ? "SHORT" : "WAIT";
+  return {
+    key: frameKey,
+    label: frame.label,
+    role: frameKey === "1m" ? "Entrada fina" : frameKey === "5m" ? "Patron limpio" : "Contexto mayor",
+    candles: candles.length,
+    bias,
+    movePct,
+    pattern,
+    trend,
+    imbalance,
+  };
+}
+
+function technicalTraceSummary(symbol = focusSymbol) {
+  const traces = ["1m", "5m", "1h"].map((key) => traceFrame(symbol, key));
+  const useful = traces.filter((trace) => trace.candles >= 3);
+  const longVotes = useful.filter((trace) => trace.bias === "LONG").length;
+  const shortVotes = useful.filter((trace) => trace.bias === "SHORT").length;
+  const direction = longVotes >= 2 ? "LONG" : shortVotes >= 2 ? "SHORT" : "WAIT";
+  const clarity = useful.length < 2 ? "SIN DATOS" : direction === "WAIT" ? "NO CLARO" : "CLARO";
+  const text = clarity === "CLARO"
+    ? `${direction}: al menos 2 temporalidades coinciden. Validar gatillo en 1M antes de actuar.`
+    : useful.length < 2
+      ? "Faltan velas para leer contexto. Mantener solo observacion."
+      : "No hay alineacion suficiente entre 1M, 5M y 1H. No perseguir precio.";
+  return { traces, direction, clarity, text };
+}
+
 function decideUs100Direction(pattern, trend, asset) {
   if (pattern.bias !== "WAIT" && pattern.bias === trend.direction) return pattern.bias;
   return "WAIT";
@@ -3331,6 +3399,7 @@ function renderSimpleDashboard() {
   if (hiddenStop) hiddenStop.value = String(profile.stopUsd);
   const selectedChartFrame = chartFrameConfig();
   const primaryDisplay = buildAssetOpportunity(profile.asset);
+  const traceSummary = technicalTraceSummary(focusSymbol);
   const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
   const dayTotal = Number(totalOperationResult().toFixed(2));
   const result = document.getElementById("operation1-result")?.value || "0";
@@ -3413,19 +3482,35 @@ function renderSimpleDashboard() {
             <small>${agentArmed ? profile.agent.rule : "No guarda lecturas hasta que pulses Iniciar analisis."}</small>
           </div>
           <div>
-            <span class="simple-label">Cronometro</span>
-            <strong id="analysis-timer">${analysis.startedAt ? formatTimer(analysis.remainingMs) : "60:00"}</strong>
-            <small id="analysis-status">${analysisStatus}. ${analysis.completed ? "Ya puedes graficar objetivo." : "La grafica se habilita al terminar la hora."}</small>
+            <span class="simple-label">Analisis</span>
+            <strong id="analysis-timer">${analysis.startedAt ? "ACTIVO" : "SIN INICIAR"}</strong>
+            <small id="analysis-status">${analysisStatus}. Revisa 1M, 5M y 1H sin esperar una hora fija.</small>
           </div>
           <div>
             <span class="simple-label">Control</span>
-            <strong>${analysisGraphEnabled ? "Grafica activa" : analysisCanGraph ? "Listo para graficar" : "Lectura primero"}</strong>
+            <strong>${analysisGraphEnabled ? "Grafica activa" : "Sin traza"}</strong>
             <small>Playwright solo lee XTB y guarda aprendizaje; no llena ni confirma ordenes.</small>
             <div class="simple-agent-actions">
-              <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Reiniciar analisis" : "Iniciar analisis"}</button>
-              <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart" ${analysisCanGraph ? "" : "disabled"}>Graficar objetivo</button>
+              <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Actualizar analisis" : "Iniciar analisis"}</button>
+              <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart">Graficar objetivo</button>
               <button type="button" class="secondary" data-simple-action="analysis-reset">Limpiar</button>
             </div>
+          </div>
+        </div>
+        <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" ? "warn" : "danger"}">
+          <div>
+            <span class="simple-label">Lectura multi-temporal</span>
+            <strong>${traceSummary.clarity} · ${traceSummary.direction === "WAIT" ? "ESPERAR" : traceSummary.direction}</strong>
+            <small>${traceSummary.text}</small>
+          </div>
+          <div class="technical-trace-grid">
+            ${traceSummary.traces.map((trace) => `
+              <div>
+                <span>${trace.label}</span>
+                <strong>${trace.bias === "WAIT" ? "Sin direccion" : trace.bias}</strong>
+                <small>${trace.role}: ${trace.pattern.name}. Movimiento ${numberText(trace.movePct)}%. Velas ${trace.candles}.</small>
+              </div>
+            `).join("")}
           </div>
         </div>
         <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
@@ -3441,8 +3526,8 @@ function renderSimpleDashboard() {
         </div>
         ${analysisGraphEnabled && primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : `
           <div class="analysis-wait-card">
-            <strong>Grafica bloqueada por disciplina</strong>
-            <span>Primero inicia el analisis y deja que el bot lea XTB durante una hora. Luego activas Graficar objetivo para ver zonas, entrada, stop y take.</span>
+            <strong>Inicia el analisis para ver trazas</strong>
+            <span>El bot revisa hacia atras 1M, 5M y 1H. Si no hay coincidencia clara, debe decir ESPERAR.</span>
           </div>
         `}
       </section>
@@ -3533,15 +3618,13 @@ function refreshAnalysisTimerDom() {
   const timer = document.getElementById("analysis-timer");
   const status = document.getElementById("analysis-status");
   const chartButton = document.getElementById("analysis-chart-btn");
-  if (timer) timer.textContent = state.startedAt ? formatTimer(state.remainingMs) : "60:00";
+  if (timer) timer.textContent = state.startedAt ? "ACTIVO" : "SIN INICIAR";
   if (status) {
     status.textContent = !state.startedAt
       ? "Sin iniciar. Pulsa Iniciar analisis."
-      : state.completed
-        ? "Lectura completa. Ya puedes graficar objetivo."
-        : "Analizando. La grafica se habilita al terminar la hora.";
+      : "Analisis activo. El bot revisa 1M, 5M y 1H hacia atras.";
   }
-  if (chartButton) chartButton.disabled = !state.completed;
+  if (chartButton) chartButton.disabled = false;
 }
 
 function scheduleAnalysisTimer() {
@@ -4391,7 +4474,7 @@ async function initDashboard() {
   selectedAsset = findAsset(focusSymbol);
   resetOrderForCurrentMode(selectedAsset);
   refreshNotificationStatus();
-  await loadMarketBars([focusSymbol]);
+  await loadAnalysisTimeframes([focusSymbol]);
   calculate();
   renderSimpleDashboard();
   updateAgentLoop();
