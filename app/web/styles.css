@@ -672,6 +672,58 @@ body {
   fill: #ffe28a;
 }
 
+.chart-forecast {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 10 8;
+  opacity: 0.82;
+  filter: drop-shadow(0 0 8px rgb(0 0 0 / 0.65));
+}
+
+.chart-forecast.long {
+  stroke: rgb(58 216 134 / 0.95);
+}
+
+.chart-forecast.short {
+  stroke: rgb(255 90 102 / 0.95);
+}
+
+.chart-forecast.pending {
+  opacity: 0.42;
+}
+
+.chart-forecast.confirmed {
+  stroke-width: 4;
+  opacity: 0.95;
+}
+
+.chart-forecast-dot {
+  fill: #101718;
+  stroke-width: 3;
+}
+
+.chart-forecast-dot.pending {
+  stroke: rgb(255 207 92 / 0.82);
+}
+
+.chart-forecast-dot.confirmed {
+  stroke: rgb(116 247 175 / 0.95);
+}
+
+.chart-forecast-risk {
+  stroke: rgb(255 90 102 / 0.38);
+  stroke-width: 2;
+  stroke-dasharray: 4 7;
+}
+
+.chart-forecast-label {
+  fill: #ffe28a;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
 .chart-fib-golden.up {
   fill: rgb(58 216 134 / 0.2);
   stroke: rgb(58 216 134 / 0.56);

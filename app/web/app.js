@@ -2150,7 +2150,7 @@ function latestSwingFib(candles) {
   const range = Math.abs(endPrice - startPrice);
   if (!Number.isFinite(range) || range <= Math.max(endPrice * 0.00005, 0.00001)) return null;
 
-  const ratios = [0, 0.382, 0.5, 0.618, 1];
+  const ratios = [0, 0.382, 0.5, 0.618, 0.83, 0.95, 1];
   const levels = ratios.map((ratio) => ({
     ratio,
     label: `${ratio === 0 ? "0" : ratio === 1 ? "100" : (ratio * 100).toFixed(1)}%`,
@@ -2167,6 +2167,95 @@ function latestSwingFib(candles) {
     levels,
     goldenLow: Math.min(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
     goldenHigh: Math.max(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
+  };
+}
+
+function fibLevelPrice(fib, ratio) {
+  return Number(fib?.levels?.find((level) => level.ratio === ratio)?.price || NaN);
+}
+
+function candleBody(candle) {
+  return Math.abs(Number(candle.c || 0) - Number(candle.o || 0));
+}
+
+function candleRange(candle) {
+  return Math.max(Number(candle.h || 0) - Number(candle.l || 0), 0.00001);
+}
+
+function candleUpperWick(candle) {
+  return Number(candle.h || 0) - Math.max(Number(candle.o || 0), Number(candle.c || 0));
+}
+
+function candleLowerWick(candle) {
+  return Math.min(Number(candle.o || 0), Number(candle.c || 0)) - Number(candle.l || 0);
+}
+
+function evaluateFibPullbackSetup(symbol, direction = "WAIT") {
+  const candles = candlesForFrame(symbol, "15m");
+  const fib = latestSwingFib(candles);
+  if (!fib || candles.length < 8) {
+    return {
+      fib,
+      ready: false,
+      rejected: false,
+      score: -4,
+      status: "SIN FIB",
+      detail: "Faltan velas 15M para medir el ultimo impulso con Fibonacci.",
+    };
+  }
+
+  const last = candles[candles.length - 1];
+  const lastClose = Number(last.c);
+  const lastOpen = Number(last.o);
+  const recent = candles.slice(-5);
+  const level0 = fibLevelPrice(fib, 0);
+  const level83 = fibLevelPrice(fib, 0.83);
+  const level95 = fibLevelPrice(fib, 0.95);
+  const directionFromFib = fib.direction === "up" ? "LONG" : "SHORT";
+  const directionMatches = direction === "WAIT" || direction === directionFromFib;
+  const touchedZone = recent.some((candle) => Number(candle.l) <= fib.goldenHigh && Number(candle.h) >= fib.goldenLow);
+  const bodyPct = candleBody(last) / candleRange(last);
+  const wickRejectsUp = candleLowerWick(last) >= candleBody(last) * 0.75 && lastClose >= lastOpen;
+  const wickRejectsDown = candleUpperWick(last) >= candleBody(last) * 0.75 && lastClose <= lastOpen;
+  const recoveredUp = fib.direction === "up" && touchedZone && lastClose > fib.goldenHigh && (wickRejectsUp || bodyPct >= 0.45);
+  const recoveredDown = fib.direction === "down" && touchedZone && lastClose < fib.goldenLow && (wickRejectsDown || bodyPct >= 0.45);
+  const invalidatedUp = fib.direction === "up" && (lastClose < level83 || recent.some((candle) => Number(candle.l) <= level95));
+  const invalidatedDown = fib.direction === "down" && (lastClose > level83 || recent.some((candle) => Number(candle.h) >= level95));
+  const imbalance = detectGapFvgBag(candles.slice(-8));
+  const imbalanceOk = imbalance.bias === "WAIT" || imbalance.bias === directionFromFib;
+  const ready = directionMatches && imbalanceOk && (recoveredUp || recoveredDown);
+  const rejected = !directionMatches || invalidatedUp || invalidatedDown || (touchedZone && !imbalanceOk);
+  const status = ready
+    ? "FIB CONFIRMADO"
+    : rejected
+      ? "FIB INVALIDADO"
+      : touchedZone
+        ? "FIB EN ZONA"
+        : "ESPERAR FIB";
+  const score = ready ? 18 : rejected ? -22 : touchedZone ? 4 : -2;
+  const target = level0;
+  const stop = fib.direction === "up" ? Math.min(level83, level95) : Math.max(level83, level95);
+  const detail = ready
+    ? `15M: precio respeto la zona 50-61.8 y rechazo a favor. ${imbalance.type} no contradice.`
+    : rejected
+      ? `15M: zona Fibonacci invalidada o direccion contradictoria. Espera un nuevo impulso antes de operar.`
+      : touchedZone
+        ? "15M: el precio esta en la zona 50-61.8, pero falta vela de rechazo clara."
+        : "15M: esperar retroceso hacia 50-61.8 antes de buscar entrada.";
+
+  return {
+    fib,
+    candles,
+    direction: directionFromFib,
+    ready,
+    rejected,
+    touchedZone,
+    imbalance,
+    target,
+    stop,
+    score,
+    status,
+    detail,
   };
 }
 
@@ -2192,6 +2281,8 @@ function renderTradeChart(item, variant = "mini") {
     zones.price,
     ...(nearLevel(zones.entry) ? [zones.entry] : []),
     ...(nearLevel(zones.stopLoss) ? [zones.stopLoss] : []),
+    ...(nearLevel(zones.takeProfit) ? [zones.takeProfit] : []),
+    ...(nearLevel(strategyTarget.price) ? [strategyTarget.price] : []),
     ...(nearLevel(proZones.support) ? [proZones.support] : []),
     ...(nearLevel(proZones.resistance) ? [proZones.resistance] : []),
   ];
@@ -2289,6 +2380,7 @@ function renderTradeChart(item, variant = "mini") {
     <text x="${plotLeft + 8}" y="${plotTop + 18}" class="chart-trend-label ${trendSide}">${trendBiasLabel} ${numberText(visibleTrace.movePct)}%</text>
   ` : "";
   const fib = variant === "main" ? latestSwingFib(candles) : null;
+  const fibSetup = variant === "main" ? item.fibSetup || evaluateFibPullbackSetup(item.asset.symbol, item.direction) : null;
   const fibGoldenMarkup = (() => {
     if (!fib || (!visibleLevel(fib.goldenLow) && !visibleLevel(fib.goldenHigh))) return "";
     const rawTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
@@ -2301,6 +2393,24 @@ function renderTradeChart(item, variant = "mini") {
     return `
       <rect x="${plotLeft}" y="${top}" width="${plotRight - plotLeft}" height="${bottom - top}" rx="9" class="chart-fib-golden ${fib.direction}" />
       <text x="${plotLeft + 10}" y="${labelY}" class="chart-fib-zone-label ${fib.direction}">ZONA FIB 50%-61.8%</text>
+    `;
+  })();
+  const forecastMarkup = (() => {
+    if (variant !== "main" || !candles.length || !Number.isFinite(zones.entry) || !Number.isFinite(zones.takeProfit)) return "";
+    const lastX = startX + (candles.length - 1) * candleGap;
+    const lastY = y(lastClose || zones.price);
+    const entryX = clamp(lastX + 34, plotLeft + 24, plotRight - 52);
+    const targetX = clamp(lastX + 82, plotLeft + 72, plotRight - 8);
+    const entryY = y(zones.entry);
+    const targetY = y(zones.takeProfit);
+    const stopY = y(zones.stopLoss);
+    const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready);
+    const label = confirmed ? "PRONOSTICO SI CONFIRMA" : "ESCENARIO ESPERADO";
+    return `
+      <path d="M ${lastX} ${lastY} C ${entryX - 18} ${lastY}, ${entryX - 8} ${entryY}, ${entryX} ${entryY} S ${targetX - 18} ${targetY}, ${targetX} ${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
+      <line x1="${lastX}" x2="${targetX}" y1="${stopY}" y2="${stopY}" class="chart-forecast-risk" />
+      <text x="${clamp(entryX - 12, plotLeft + 8, plotRight - 120)}" y="${clamp(Math.min(entryY, targetY) - 12, plotTop + 16, plotBottom - 8)}" class="chart-forecast-label">${label}</text>
     `;
   })();
   const levelTag = (label, value, className) => variant === "main" ? `
@@ -2368,6 +2478,7 @@ function renderTradeChart(item, variant = "mini") {
       <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
       <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
       ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 50%-61.8% ${fib.direction === "up" ? "verde: retroceso comprador posible" : "roja: rebote vendedor posible"}. No reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
+      ${fibSetup ? `<span>Pronostico lineal: ${fibSetup.ready ? "activo solo si el rechazo Fib 15M se mantiene" : "solo escenario; no copiar receta hasta confirmacion"}. La linea muestra el recorrido esperado hacia entrada y TP.</span>` : ""}
     </div>
     ${technicalDecisionText(item, candles)}
   ` : "";
@@ -2400,6 +2511,7 @@ function renderTradeChart(item, variant = "mini") {
         ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}
         ${visibleLevel(zones.stopLoss) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />` : ""}
         ${trendMarkup}
+        ${forecastMarkup}
         ${candleMarkup}
         ${visibleLevel(zones.takeProfit) ? levelTag("TP", zones.takeProfit, "take") : ""}
         ${visibleLevel(strategyTarget.price) ? levelTag("IA", strategyTarget.price, "ai-take") : ""}
@@ -3160,7 +3272,8 @@ function us100StrategyProfile() {
   const cfdMove = cfdMovementScore(cfdMovePct, direction);
   const learning = learningAdjustmentForProfile(focusSymbol);
   const xtbContext = xtbContextAdjustment(asset, direction, price);
-  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + 10), 0, 95);
+  const fibSetup = evaluateFibPullbackSetup(focusSymbol, levelDirection);
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
@@ -3174,19 +3287,26 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score), 0, 95);
-  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
-  const status = playbook.allowed ? "OPERABLE" : confidence >= 50 ? "ESPERAR" : "NO OPERAR";
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score), 0, 95);
+  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
+  const status = fibSetup.rejected
+    ? "NO OPERAR"
+    : playbook.allowed && fibSetup.ready
+      ? "OPERABLE"
+      : confidence >= 50
+        ? "ESPERAR"
+        : "NO OPERAR";
   const confidenceBreakdown = {
     pattern: Math.round(pattern.score),
     trend: Math.round(trend.score),
     gap: Math.round(imbalance.score),
+    fib: Math.round(fibSetup.score),
     volume: volumeScore,
     cfd: cfdMove.score,
     learning: learning.score,
     xtbContext: xtbContext.score,
     total: confidence,
-    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -3244,6 +3364,7 @@ function us100StrategyProfile() {
     confidenceBreakdown,
     cfdMovePct,
     cfdMove,
+    fibSetup,
     learning,
     xtbContext,
     volumePolicy,
@@ -3251,7 +3372,7 @@ function us100StrategyProfile() {
     playbook,
     status,
     agent,
-    explanation: buildUs100Explanation(pattern, trend, imbalance, direction, status),
+    explanation: buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, status),
   };
 }
 
@@ -3544,7 +3665,7 @@ function decideUs100Direction(pattern, trend, asset) {
   return "WAIT";
 }
 
-function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
+function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
   const rules = [];
   const blockers = [];
   const alignedPatternTrend = direction !== "WAIT" && pattern.bias === direction && trend.direction === direction;
@@ -3561,6 +3682,8 @@ function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, direction, con
   else blockers.push("GAP/FVG/BAG contradice la operacion.");
   if (cfdOk) rules.push("Movimiento CFD no va en contra.");
   else blockers.push("Movimiento CFD va contra la operacion.");
+  if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso 50-61.8 con rechazo.");
+  else blockers.push(fibSetup?.detail || "Fibonacci 15M no confirma entrada.");
   if (nearTrigger) rules.push(`Precio cerca del gatillo (${numberText(entryDistancePct)}%).`);
   else blockers.push(`Precio lejos del gatillo (${numberText(entryDistancePct)}%).`);
   if (strongEnough) rules.push(`Operabilidad suficiente (${confidence}%).`);
@@ -3600,13 +3723,14 @@ function us100OrderLevels(asset, direction, candles, fallbackPrice) {
   return { entry, stopPoints };
 }
 
-function buildUs100Explanation(pattern, trend, imbalance, direction, status) {
+function buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, status) {
   if (direction === "WAIT") return `Esperar: estrategia fija exige patron y tendencia alineados. ${trend.label}.`;
   const side = direction === "LONG" ? "compra por ruptura alcista" : "venta en corto por ruptura bajista";
   const model = `${pattern.name} + ${imbalance.type}`;
-  if (status === "NO OPERAR") return `No operar: ${model}. ${trend.label}. Falta confirmacion o volumen valido.`;
-  if (status === "ESPERAR") return `Esperar: ${model}. ${trend.label}. La idea seria ${side}, pero aun falta una vela clara.`;
-  return `Operable con confirmacion: ${model}. ${trend.label}. Estrategia: ${side}, entrada por stop, escudo inmediato y objetivo fijo.`;
+  const fibText = fibSetup?.detail ? ` ${fibSetup.detail}` : "";
+  if (status === "NO OPERAR") return `No operar: ${model}. ${trend.label}. Falta confirmacion o volumen valido.${fibText}`;
+  if (status === "ESPERAR") return `Esperar: ${model}. ${trend.label}. La idea seria ${side}, pero falta confirmacion Fib 15M o vela gatillo clara.${fibText}`;
+  return `Operable con confirmacion: ${model}. ${trend.label}. Estrategia: ${side}, entrada por stop, escudo inmediato y objetivo fijo.${fibText}`;
 }
 
 function totalOperationResult() {
