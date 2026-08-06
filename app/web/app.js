@@ -3821,6 +3821,12 @@ function renderSimpleDashboard() {
             `).join("")}
           </div>
         </div>
+        ${analysisGraphEnabled && primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : `
+          <div class="analysis-wait-card">
+            <strong>Inicia el analisis para ver trazas</strong>
+            <span>El bot revisa hacia atras 4H, 15M y 1M. Si mapa, confirmacion y gatillo no se alinean, debe decir ESPERAR.</span>
+          </div>
+        `}
         <div class="chart-frame-controls" aria-label="Temporalidad de grafica">
           <div>
             <span class="simple-label">Temporalidad grafica</span>
@@ -3832,12 +3838,6 @@ function renderSimpleDashboard() {
             `).join("")}
           </div>
         </div>
-        ${analysisGraphEnabled && primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : `
-          <div class="analysis-wait-card">
-            <strong>Inicia el analisis para ver trazas</strong>
-            <span>El bot revisa hacia atras 4H, 15M y 1M. Si mapa, confirmacion y gatillo no se alinean, debe decir ESPERAR.</span>
-          </div>
-        `}
       </section>
 
       <section class="simple-ops single">
