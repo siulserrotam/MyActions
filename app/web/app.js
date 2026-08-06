@@ -2449,17 +2449,28 @@ function renderFibOnlyCard(item) {
   const zoneLabel = fib.direction === "up" ? "Zona verde: esperar retroceso y rechazo comprador" : "Zona roja: esperar rebote y rechazo vendedor";
   const recent = candles.slice(-5);
   const last = candles[candles.length - 1];
+  const lastClose = Number(last.c);
+  const lastOpen = Number(last.o);
   const touchedZone = recent.some((candle) => Number(candle.l) <= fib.goldenHigh && Number(candle.h) >= fib.goldenLow);
-  const confirmsUp = fib.direction === "up" && touchedZone && Number(last.c) > fib.goldenHigh && Number(last.c) >= Number(last.o);
-  const confirmsDown = fib.direction === "down" && touchedZone && Number(last.c) < fib.goldenLow && Number(last.c) <= Number(last.o);
+  const confirmsUp = fib.direction === "up" && touchedZone && lastClose > fib.goldenHigh && lastClose >= lastOpen;
+  const confirmsDown = fib.direction === "down" && touchedZone && lastClose < fib.goldenLow && lastClose <= lastOpen;
+  const rejectedUp = fib.direction === "up" && touchedZone && lastClose < fib.goldenLow && lastClose < lastOpen;
+  const rejectedDown = fib.direction === "down" && touchedZone && lastClose > fib.goldenHigh && lastClose > lastOpen;
   const directionMatches = (fib.direction === "up" && item.direction === "LONG") || (fib.direction === "down" && item.direction === "SHORT");
+  const fibRejected = rejectedUp || rejectedDown || (touchedZone && item.status === "OPERABLE" && !directionMatches);
   const fibReady = directionMatches && (confirmsUp || confirmsDown) && item.status === "OPERABLE";
-  const statusLabel = fibReady ? "OK PARA RECETA" : "ESPERAR";
+  const statusLabel = fibReady ? "OK PARA RECETA" : fibRejected ? "ZONA FIB RECHAZADA" : "ESPERAR";
+  const badgeClass = fibReady ? "ok" : fibRejected ? "danger" : "";
   const actionLabel = fibReady
     ? "La zona fue tocada y hay rechazo a favor. Puedes revisar la receta XTB."
-    : touchedZone
+    : fibRejected
+      ? "La zona Fibonacci fallo contra la lectura esperada. No uses esta receta; espera un nuevo impulso claro antes de volver a operar."
+      : touchedZone
       ? "Zona tocada, pero falta vela clara de rechazo a favor."
       : "Esperar que el precio visite la zona Fibonacci y confirme rechazo.";
+  const resetNote = fibRejected
+    ? `<div class="fib-rejection-note">REINICIANDO MOVIMIENTO: ignora este Fibonacci y espera 3-5 velas nuevas para trazar otra reaccion.</div>`
+    : "";
   const recipeRows = fibReady ? `
     <div class="fib-recipe-grid">
       <div><span>Orden</span><strong>${item.directionLabel}</strong></div>
@@ -2474,11 +2485,11 @@ function renderFibOnlyCard(item) {
     <article class="simple-operation fib-only-card">
       <div class="simple-head">
         <h2>Zona Fibonacci</h2>
-        <span class="simple-badge ${fibReady ? "ok" : ""}">${statusLabel}</span>
+        <span class="simple-badge ${badgeClass}">${statusLabel}</span>
       </div>
       <div class="fib-focus-copy">
         <strong>${swingLabel}</strong>
-        <span>${zoneLabel}</span>
+        <span>${fibRejected ? "Zona rechazada: borrar la lectura anterior y esperar nuevo movimiento" : zoneLabel}</span>
       </div>
       <svg class="fib-focus-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Zona Fibonacci 50 a 61.8">
         <rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="14" class="fib-focus-bg" />
@@ -2494,6 +2505,7 @@ function renderFibOnlyCard(item) {
         <div><span>50%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.5)?.price)}</strong></div>
         <div><span>61.8%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.618)?.price)}</strong></div>
       </div>
+      ${resetNote}
       ${recipeRows}
       <p class="simple-warning">${actionLabel}</p>
       <p class="simple-tiny">Esta tarjeta reemplaza los parametros editables: todo se calcula automaticamente desde la ultima reaccion visible.</p>
