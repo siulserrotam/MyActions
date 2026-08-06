@@ -2119,6 +2119,63 @@ function realCandlesForItem(item) {
   });
 }
 
+function latestSwingFib(candles) {
+  if (!Array.isArray(candles) || candles.length < 6) return null;
+  const lookbackCount = Math.min(candles.length, 24);
+  const offset = candles.length - lookbackCount;
+  const window = candles.slice(offset);
+  let low = { index: 0, price: Number.POSITIVE_INFINITY };
+  let high = { index: 0, price: 0 };
+  window.forEach((candle, index) => {
+    if (Number(candle.l) < low.price) low = { index, price: Number(candle.l) };
+    if (Number(candle.h) > high.price) high = { index, price: Number(candle.h) };
+  });
+  if (!Number.isFinite(low.price) || !Number.isFinite(high.price) || high.price <= low.price) return null;
+
+  const direction = high.index > low.index ? "up" : "down";
+  const start = direction === "up" ? low : high;
+  const afterStart = window.slice(start.index + 1);
+  let end = direction === "up"
+    ? { index: start.index, price: start.price }
+    : { index: start.index, price: start.price };
+
+  afterStart.forEach((candle, localIndex) => {
+    const index = start.index + 1 + localIndex;
+    if (direction === "up" && Number(candle.h) >= end.price) end = { index, price: Number(candle.h) };
+    if (direction === "down" && (end.index === start.index || Number(candle.l) <= end.price)) end = { index, price: Number(candle.l) };
+  });
+
+  if (end.index === start.index) {
+    const fallback = window[window.length - 1];
+    end = {
+      index: window.length - 1,
+      price: direction === "up" ? Number(fallback.h) : Number(fallback.l),
+    };
+  }
+
+  const startPrice = start.price;
+  const endPrice = end.price;
+  const range = Math.abs(endPrice - startPrice);
+  if (!Number.isFinite(range) || range <= Math.max(endPrice * 0.00005, 0.00001)) return null;
+
+  const ratios = [0, 0.382, 0.5, 0.618, 1];
+  const levels = ratios.map((ratio) => ({
+    ratio,
+    label: `${ratio === 0 ? "0" : ratio === 1 ? "100" : (ratio * 100).toFixed(1)}%`,
+    price: direction === "up" ? endPrice - range * ratio : endPrice + range * ratio,
+    key: ratio === 0.5 || ratio === 0.618,
+  }));
+
+  return {
+    direction,
+    startIndex: offset + start.index,
+    endIndex: offset + end.index,
+    startPrice,
+    endPrice,
+    levels,
+  };
+}
+
 function renderTradeChart(item, variant = "mini") {
   const zones = item.zones;
   if (!zones) return "";
@@ -2237,6 +2294,21 @@ function renderTradeChart(item, variant = "mini") {
     <line x1="${trendStartX}" y1="${y(firstClose)}" x2="${trendEndX}" y2="${y(lastClose)}" class="chart-trend ${trendSide}" />
     <text x="${plotLeft + 8}" y="${plotTop + 18}" class="chart-trend-label ${trendSide}">${trendBiasLabel} ${numberText(visibleTrace.movePct)}%</text>
   ` : "";
+  const fib = variant === "main" ? latestSwingFib(candles) : null;
+  const fibX = (index) => startX + index * candleGap;
+  const fibSwingMarkup = fib ? `
+    <line x1="${fibX(fib.startIndex)}" y1="${y(fib.startPrice)}" x2="${fibX(fib.endIndex)}" y2="${y(fib.endPrice)}" class="chart-fib-swing ${fib.direction}" />
+    <circle cx="${fibX(fib.startIndex)}" cy="${y(fib.startPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
+    <circle cx="${fibX(fib.endIndex)}" cy="${y(fib.endPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
+  ` : "";
+  const fibLineMarkup = fib ? fib.levels
+    .filter((level) => visibleLevel(level.price))
+    .map((level) => `
+      <g class="chart-fib-level ${level.key ? "key" : ""}">
+        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(level.price)}" y2="${y(level.price)}" />
+        <text x="${plotLeft + 8}" y="${clamp(y(level.price) - 5, plotTop + 9, plotBottom - 4)}">FIB ${level.label} ${numberText(level.price)}</text>
+      </g>
+    `).join("") : "";
   const levelTag = (label, value, className) => variant === "main" ? `
     <g class="chart-price-tag ${className}">
       <rect x="${plotRight + 8}" y="${clamp(y(value) - 11, plotTop, plotBottom - 18)}" width="58" height="20" rx="4" />
@@ -2306,6 +2378,8 @@ function renderTradeChart(item, variant = "mini") {
         ${safetyVisible ? `<rect x="${plotLeft}" y="${Math.min(y(zones.securityLow), y(zones.securityHigh))}" width="${plotRight - plotLeft}" height="${Math.max(5, Math.abs(y(zones.securityLow) - y(zones.securityHigh)))}" rx="6" class="chart-zone safety" />` : ""}
         ${visibleLevel(proZones.resistance) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />` : ""}
         ${visibleLevel(proZones.support) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />` : ""}
+        ${fibLineMarkup}
+        ${fibSwingMarkup}
         ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
         ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
         ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}
@@ -2337,6 +2411,7 @@ function renderTradeChart(item, variant = "mini") {
           ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
           <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
           <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
+          ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. La zona 50%-61.8% sirve para esperar retroceso/rechazo; no reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}
