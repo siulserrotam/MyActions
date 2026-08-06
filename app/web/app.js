@@ -72,8 +72,8 @@ const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
 const chartFrameOptions = {
   "1m": { key: "1m", label: "1M / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos, velas de 1 minuto." },
-  "5m": { key: "5m", label: "5M / 2h", interval: "5m", period: "1d", limit: 24, description: "Estructura corta, velas de 5 minutos." },
-  "1h": { key: "1h", label: "1H / 5d", interval: "1h", period: "5d", limit: 48, description: "Direccion grande, velas de 1 hora." },
+  "15m": { key: "15m", label: "15M / 4h", interval: "15m", period: "5d", limit: 16, description: "Confirmacion operativa, ultimas 4 horas con velas de 15 minutos." },
+  "4h": { key: "4h", label: "4H / varios dias", interval: "1h", period: "1mo", limit: 30, aggregateHours: 4, description: "Mapa grande: rango, liquidez y tendencia con velas de 4 horas." },
 };
 
 let activeCategory = "favorites";
@@ -1001,7 +1001,7 @@ function marketFrameKey(symbol, frameKey = chartFrameKey()) {
 function recordLiveQuoteCandle(quote) {
   const symbol = String(quote.symbol || "").trim().toUpperCase();
   const price = Number(quote.price || 0);
-  if (!symbol || !price || chartFrameConfig().interval !== "1m") return;
+  if (!symbol || !price) return;
   const timestamp = normalizeCandleTimestamp(quote.updated_at);
   const previousRows = liveCandleBars[symbol] || [];
   const existingIndex = previousRows.findIndex((row) => row.timestamp === timestamp);
@@ -1121,7 +1121,7 @@ async function loadMarketBars(symbols = [], frameOverride = null) {
 }
 
 async function loadAnalysisTimeframes(symbols = [focusSymbol]) {
-  const frames = [chartFrameOptions["1m"], chartFrameOptions["5m"], chartFrameOptions["1h"]];
+  const frames = [chartFrameOptions["1m"], chartFrameOptions["15m"], chartFrameOptions["4h"]];
   await Promise.all(frames.map((frame) => loadMarketBars(symbols, frame)));
 }
 
@@ -2087,7 +2087,8 @@ function buildChartCandles(zones, direction) {
 function realCandlesForItem(item) {
   const rows = mergedBarsForSymbol(item.asset.symbol);
   const frame = chartFrameConfig();
-  const candles = rows.slice(-frame.limit)
+  const visibleRows = frame.aggregateHours ? aggregateCandlesByHours(rows, frame.aggregateHours) : rows;
+  const candles = visibleRows.slice(-frame.limit)
     .map((bar) => ({
       o: Number(bar.open || 0),
       h: Number(bar.high || 0),
@@ -2128,7 +2129,7 @@ function renderTradeChart(item, variant = "mini") {
   const proZones = professionalZonesForItem(item, candles);
   const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
   const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
-  const barsMeta = marketBarMeta[item.asset.symbol] || {};
+  const barsMeta = marketBarMetaByFrame[marketFrameKey(item.asset.symbol, chartFrameKey())] || marketBarMeta[item.asset.symbol] || {};
   const usingOhlcBars = usingRealCandles && barsMeta.isRealOhlc && !pointQuoteMode;
   const candleValues = candles.flatMap((candle) => [candle.o, candle.h, candle.l, candle.c]);
   const candleMin = Math.min(...candleValues);
@@ -2178,8 +2179,11 @@ function renderTradeChart(item, variant = "mini") {
   const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
   const startX = plotLeft;
   const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
-  const chartInterval = String(barsMeta.interval || chartFrameConfig().interval || "1m").toUpperCase();
-  const chartPeriod = String(barsMeta.period || chartFrameConfig().period || "1d").toUpperCase();
+  const activeFrame = chartFrameConfig();
+  const chartInterval = activeFrame.aggregateHours
+    ? `${activeFrame.aggregateHours}H`
+    : String(barsMeta.interval || activeFrame.interval || "1m").toUpperCase();
+  const chartPeriod = String(barsMeta.period || activeFrame.period || "1d").toUpperCase();
   const showDateOnAxis = chartPeriod !== "1D";
   const dateFormatter = new Intl.DateTimeFormat("es-CO", {
     day: "2-digit",
@@ -2332,7 +2336,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
           ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
           <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
-          <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige alinear 1M, 5M y 1H.</span>
+          <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}
@@ -2971,12 +2975,12 @@ function us100StrategyProfile() {
   const trend = detectTrendProfile(bars, asset);
   const directDirection = decideUs100Direction(pattern, trend, asset);
   const frameSummary = technicalTraceSummary(focusSymbol);
-  const direction = directDirection !== "WAIT"
-    ? directDirection
-    : frameSummary.direction !== "WAIT"
-      ? frameSummary.direction
+  const direction = frameSummary.direction !== "WAIT"
+    ? frameSummary.direction
+    : directDirection !== "WAIT"
+      ? directDirection
       : "WAIT";
-  const waitsForTrigger = directDirection === "WAIT" && direction !== "WAIT";
+  const waitsForTrigger = frameSummary.direction !== "WAIT" && !frameSummary.triggerReady;
   const levelDirection = direction === "WAIT" ? (trend.direction !== "WAIT" ? trend.direction : pattern.bias !== "WAIT" ? pattern.bias : "LONG") : direction;
   const level = us100OrderLevels(asset, levelDirection, bars, price);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
@@ -3214,7 +3218,10 @@ function detectCandlePattern(candles) {
 
 function candlesForFrame(symbol, frameKey) {
   const rows = marketBarsByFrame[marketFrameKey(symbol, frameKey)] || [];
-  return mergeCandleRows(rows)
+  const frame = chartFrameOptions[frameKey] || chartFrameOptions["1m"];
+  const mergedRows = mergeCandleRows(rows);
+  const normalizedRows = frame.aggregateHours ? aggregateCandlesByHours(mergedRows, frame.aggregateHours) : mergedRows;
+  return normalizedRows
     .slice(-(chartFrameOptions[frameKey]?.limit || 30))
     .map((bar) => ({
       o: Number(bar.open || 0),
@@ -3226,11 +3233,45 @@ function candlesForFrame(symbol, frameKey) {
     .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
 }
 
+function aggregateCandlesByHours(rows, hours = 4) {
+  const bucketMs = hours * 60 * 60 * 1000;
+  const buckets = new Map();
+  rows
+    .map((row) => ({
+      timestamp: row.timestamp,
+      time: new Date(row.timestamp).getTime(),
+      open: Number(row.open || 0),
+      high: Number(row.high || 0),
+      low: Number(row.low || 0),
+      close: Number(row.close || 0),
+    }))
+    .filter((row) => row.time && row.open > 0 && row.high > 0 && row.low > 0 && row.close > 0)
+    .sort((a, b) => a.time - b.time)
+    .forEach((row) => {
+      const bucketTime = Math.floor(row.time / bucketMs) * bucketMs;
+      const current = buckets.get(bucketTime);
+      if (!current) {
+        buckets.set(bucketTime, {
+          timestamp: new Date(bucketTime).toISOString(),
+          open: row.open,
+          high: row.high,
+          low: row.low,
+          close: row.close,
+        });
+        return;
+      }
+      current.high = Math.max(current.high, row.high);
+      current.low = Math.min(current.low, row.low);
+      current.close = row.close;
+    });
+  return Array.from(buckets.values());
+}
+
 function directionStability(candles, bias, frameKey) {
   if (bias === "WAIT") {
     return { confirmed: false, note: "sin sesgo para estabilizar" };
   }
-  const requiredCandles = frameKey === "1h" ? 2 : 3;
+  const requiredCandles = frameKey === "4h" ? 2 : 3;
   if (candles.length < requiredCandles + 1) {
     return { confirmed: false, note: `faltan ${requiredCandles + 1} velas para confirmar estabilidad` };
   }
@@ -3239,7 +3280,7 @@ function directionStability(candles, bias, frameKey) {
   const directionHits = deltas.filter((delta) => bias === "LONG" ? delta > 0 : delta < 0).length;
   const lastDelta = deltas[deltas.length - 1] || 0;
   const lastOk = bias === "LONG" ? lastDelta > 0 : lastDelta < 0;
-  const minimumHits = frameKey === "1h" ? 1 : 2;
+  const minimumHits = frameKey === "4h" ? 1 : 2;
   const confirmed = directionHits >= minimumHits && lastOk;
   return {
     confirmed,
@@ -3269,7 +3310,7 @@ function traceFrame(symbol, frameKey) {
   return {
     key: frameKey,
     label: frame.label,
-    role: frameKey === "1m" ? "Entrada fina" : frameKey === "5m" ? "Patron limpio" : "Contexto mayor",
+    role: frameKey === "4h" ? "Mapa grande" : frameKey === "15m" ? "Confirmacion" : "Gatillo fino",
     candles: candles.length,
     bias,
     rawBias,
@@ -3293,22 +3334,39 @@ function traceDirectionNote(trace) {
 }
 
 function technicalTraceSummary(symbol = focusSymbol) {
-  const traces = ["1m", "5m", "1h"].map((key) => traceFrame(symbol, key));
+  const traces = ["4h", "15m", "1m"].map((key) => traceFrame(symbol, key));
   const useful = traces.filter((trace) => trace.candles >= 3);
-  const longVotes = useful.filter((trace) => trace.bias === "LONG").length;
-  const shortVotes = useful.filter((trace) => trace.bias === "SHORT").length;
-  const direction = longVotes >= 2 ? "LONG" : shortVotes >= 2 ? "SHORT" : "WAIT";
+  const mapTrace = traces.find((trace) => trace.key === "4h");
+  const confirmTrace = traces.find((trace) => trace.key === "15m");
+  const triggerTrace = traces.find((trace) => trace.key === "1m");
+  const mapDirection = mapTrace?.bias || "WAIT";
+  const confirmDirection = confirmTrace?.bias || "WAIT";
+  const triggerDirection = triggerTrace?.bias || "WAIT";
+  const direction = mapDirection !== "WAIT" && confirmDirection === mapDirection
+    ? mapDirection
+    : "WAIT";
   const activeDirections = new Set(useful.map((trace) => trace.bias).filter((bias) => bias !== "WAIT"));
   const conflict = activeDirections.size > 1;
-  const clarity = useful.length < 2 ? "SIN DATOS" : direction === "WAIT" ? "NO CLARO" : "CLARO";
+  const triggerReady = direction !== "WAIT" && triggerDirection === direction;
+  const clarity = useful.length < 2
+    ? "SIN DATOS"
+    : conflict
+      ? "NO CLARO"
+      : direction === "WAIT"
+        ? "NO CLARO"
+        : triggerReady
+          ? "CLARO"
+          : "PREPARAR";
   const text = conflict
     ? "Temporalidades en conflicto: una parte del mercado apunta a compra y otra a venta. Mejor esperar confirmacion limpia."
     : clarity === "CLARO"
-    ? `${direction}: al menos 2 temporalidades coinciden. Validar gatillo en 1M antes de actuar.`
+    ? `${direction}: 4H marca el mapa, 15M confirma y 1M da gatillo. Se puede vigilar setup, no perseguir precio.`
+    : clarity === "PREPARAR"
+      ? `${direction}: 4H y 15M estan alineados. Falta gatillo estable en 1M antes de preparar entrada.`
     : useful.length < 2
       ? "Faltan velas para leer contexto. Mantener solo observacion."
-      : "No hay alineacion suficiente entre 1M, 5M y 1H. No perseguir precio.";
-  return { traces, direction, clarity, text, conflict };
+      : "No hay alineacion suficiente entre 4H, 15M y 1M. No perseguir precio.";
+  return { traces, direction, clarity, text, conflict, triggerReady };
 }
 
 function decideUs100Direction(pattern, trend, asset) {
@@ -3567,7 +3625,7 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Analisis</span>
             <strong id="analysis-timer">${analysis.startedAt ? "ACTIVO" : "SIN INICIAR"}</strong>
-            <small id="analysis-status">${analysisStatus}. Revisa 1M, 5M y 1H sin esperar una hora fija.</small>
+            <small id="analysis-status">${analysisStatus}. Revisa 4H como mapa, 15M como confirmacion y 1M como gatillo.</small>
           </div>
           <div>
             <span class="simple-label">Control</span>
@@ -3580,12 +3638,12 @@ function renderSimpleDashboard() {
             </div>
           </div>
         </div>
-        <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" ? "warn" : "danger"}">
+        <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" || traceSummary.clarity === "PREPARAR" ? "warn" : "danger"}">
           <div>
             <span class="simple-label">Lectura multi-temporal</span>
             <strong>${traceSummary.clarity} · ${traceSummary.direction === "WAIT" ? "ESPERAR" : traceSummary.direction}</strong>
             <small>${traceSummary.text}</small>
-            <small>La app analiza 1M, 5M y 1H. La grafica visible abajo solo muestra la temporalidad seleccionada: ${selectedChartFrame.label}.</small>
+            <small>La app analiza 4H, 15M y 1M. La grafica visible abajo solo muestra la temporalidad seleccionada: ${selectedChartFrame.label}.</small>
           </div>
           <div class="technical-trace-grid">
             ${traceSummary.traces.map((trace) => `
@@ -3611,7 +3669,7 @@ function renderSimpleDashboard() {
         ${analysisGraphEnabled && primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : `
           <div class="analysis-wait-card">
             <strong>Inicia el analisis para ver trazas</strong>
-            <span>El bot revisa hacia atras 1M, 5M y 1H. Si no hay coincidencia clara, debe decir ESPERAR.</span>
+            <span>El bot revisa hacia atras 4H, 15M y 1M. Si mapa, confirmacion y gatillo no se alinean, debe decir ESPERAR.</span>
           </div>
         `}
       </section>
@@ -3706,7 +3764,7 @@ function refreshAnalysisTimerDom() {
   if (status) {
     status.textContent = !state.startedAt
       ? "Sin iniciar. Pulsa Iniciar analisis."
-      : "Analisis activo. El bot revisa 1M, 5M y 1H hacia atras.";
+      : "Analisis activo. El bot revisa 4H, 15M y 1M hacia atras.";
   }
   if (chartButton) chartButton.disabled = false;
 }
