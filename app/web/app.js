@@ -2295,9 +2295,20 @@ function renderTradeChart(item, variant = "mini") {
     <circle cx="${fibX(fib.startIndex)}" cy="${y(fib.startPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
     <circle cx="${fibX(fib.endIndex)}" cy="${y(fib.endPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
   ` : "";
-  const fibGoldenMarkup = fib && (visibleLevel(fib.goldenLow) || visibleLevel(fib.goldenHigh)) ? `
-    <rect x="${plotLeft}" y="${Math.min(y(fib.goldenLow), y(fib.goldenHigh))}" width="${plotRight - plotLeft}" height="${Math.max(6, Math.abs(y(fib.goldenLow) - y(fib.goldenHigh)))}" rx="6" class="chart-fib-golden ${fib.direction}" />
-  ` : "";
+  const fibGoldenMarkup = (() => {
+    if (!fib || (!visibleLevel(fib.goldenLow) && !visibleLevel(fib.goldenHigh))) return "";
+    const rawTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
+    const rawBottom = Math.max(y(fib.goldenLow), y(fib.goldenHigh));
+    const minFibHeight = 54;
+    const center = (rawTop + rawBottom) / 2;
+    const top = clamp(Math.min(rawTop, center - minFibHeight / 2), plotTop, plotBottom - minFibHeight);
+    const bottom = clamp(Math.max(rawBottom, center + minFibHeight / 2), top + minFibHeight, plotBottom);
+    const labelY = clamp(top + 20, plotTop + 16, plotBottom - 8);
+    return `
+      <rect x="${plotLeft}" y="${top}" width="${plotRight - plotLeft}" height="${bottom - top}" rx="9" class="chart-fib-golden ${fib.direction}" />
+      <text x="${plotLeft + 10}" y="${labelY}" class="chart-fib-zone-label ${fib.direction}">ZONA FIB 50%-61.8%</text>
+    `;
+  })();
   const fibLineMarkup = fib ? fib.levels
     .filter((level) => level.key && visibleLevel(level.price))
     .map((level) => `

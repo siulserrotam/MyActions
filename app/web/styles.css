@@ -679,15 +679,29 @@ body {
 }
 
 .chart-fib-golden.up {
-  fill: rgb(58 216 134 / 0.12);
-  stroke: rgb(58 216 134 / 0.28);
-  stroke-width: 1;
+  fill: rgb(58 216 134 / 0.2);
+  stroke: rgb(58 216 134 / 0.56);
+  stroke-width: 1.4;
 }
 
 .chart-fib-golden.down {
-  fill: rgb(255 90 102 / 0.13);
-  stroke: rgb(255 90 102 / 0.3);
-  stroke-width: 1;
+  fill: rgb(255 90 102 / 0.22);
+  stroke: rgb(255 90 102 / 0.58);
+  stroke-width: 1.4;
+}
+
+.chart-fib-zone-label {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.11em;
+}
+
+.chart-fib-zone-label.up {
+  fill: #9fffc4;
+}
+
+.chart-fib-zone-label.down {
+  fill: #ffadb4;
 }
 
 .chart-fib-level.key line {
@@ -703,10 +717,10 @@ body {
 }
 
 .chart-fib-swing {
-  stroke-width: 2.5;
+  stroke-width: 2;
   stroke-linecap: round;
-  stroke-dasharray: 10 6;
-  opacity: 0.9;
+  stroke-dasharray: 9 7;
+  opacity: 0.52;
   filter: drop-shadow(0 0 7px rgb(0 0 0 / 0.65));
 }
 
