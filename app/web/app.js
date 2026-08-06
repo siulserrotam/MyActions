@@ -2969,7 +2969,14 @@ function us100StrategyProfile() {
   const pattern = detectCandlePattern(bars);
   const imbalance = detectGapFvgBag(bars);
   const trend = detectTrendProfile(bars, asset);
-  const direction = decideUs100Direction(pattern, trend, asset);
+  const directDirection = decideUs100Direction(pattern, trend, asset);
+  const frameSummary = technicalTraceSummary(focusSymbol);
+  const direction = directDirection !== "WAIT"
+    ? directDirection
+    : frameSummary.direction !== "WAIT"
+      ? frameSummary.direction
+      : "WAIT";
+  const waitsForTrigger = directDirection === "WAIT" && direction !== "WAIT";
   const levelDirection = direction === "WAIT" ? (trend.direction !== "WAIT" ? trend.direction : pattern.bias !== "WAIT" ? pattern.bias : "LONG") : direction;
   const level = us100OrderLevels(asset, levelDirection, bars, price);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
@@ -3044,6 +3051,9 @@ function us100StrategyProfile() {
     trend,
     direction,
     directionLabel: labelFromDirection(direction),
+    directDirection,
+    frameSummary,
+    waitsForTrigger,
     entry: level.entry,
     stopLoss,
     takeProfit,
@@ -3457,6 +3467,18 @@ function renderSimpleDashboard() {
       : "Analizando";
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
   const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
+  const actionableOrder = profile.status === "OPERABLE";
+  const objectiveOrderLabel = actionableOrder
+    ? profile.directionLabel
+    : profile.direction === "WAIT"
+      ? "ESPERAR"
+      : `ESPERAR gatillo ${profile.directionLabel}`;
+  const objectiveCaption = actionableOrder ? "Orden" : "Plan si confirma";
+  const objectiveWarning = actionableOrder
+    ? "Setup operable: aun asi confirma precio, spread y margen en XTB antes de enviar."
+    : profile.direction === "WAIT"
+      ? "No hay sesgo suficiente. No copies niveles hasta que aparezca una direccion clara."
+      : `Sesgo ${profile.directionLabel}, pero sin gatillo fino confirmado. Los niveles son mapa tecnico, no orden lista.`;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -3574,7 +3596,7 @@ function renderSimpleDashboard() {
             <span class="simple-badge">${profile.status}</span>
           </div>
           <div class="simple-numbers">
-            <div class="simple-number"><span class="simple-label">Orden</span><strong>${profile.directionLabel}</strong></div>
+            <div class="simple-number"><span class="simple-label">${objectiveCaption}</span><strong>${objectiveOrderLabel}</strong></div>
             <div class="simple-number"><span class="simple-label">Volumen</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong></div>
             <div class="simple-number"><span class="simple-label">Entrada</span><strong>${priceText(profile.entry)}</strong></div>
             <div class="simple-number"><span class="simple-label">Stop</span><strong>${priceText(profile.stopLoss)}</strong></div>
@@ -3583,7 +3605,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">CFD hoy</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong></div>
             <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong></div>
           </div>
-          <p class="simple-warning">No es orden automatica. Es el mapa tecnico que se habilita despues de la hora de lectura.</p>
+          <p class="simple-warning">${objectiveWarning}</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
