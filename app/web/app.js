@@ -2447,14 +2447,34 @@ function renderFibOnlyCard(item) {
   const zoneBottom = Math.max(y(fib.goldenLow), y(fib.goldenHigh));
   const swingLabel = fib.direction === "up" ? "Impulso alcista" : "Impulso bajista";
   const zoneLabel = fib.direction === "up" ? "Zona verde: esperar retroceso y rechazo comprador" : "Zona roja: esperar rebote y rechazo vendedor";
-  const actionLabel = fib.direction === "up"
-    ? "Comprar solo si el precio respeta la zona y vuelve a subir."
-    : "Vender solo si el precio rechaza la zona y vuelve a caer.";
+  const recent = candles.slice(-5);
+  const last = candles[candles.length - 1];
+  const touchedZone = recent.some((candle) => Number(candle.l) <= fib.goldenHigh && Number(candle.h) >= fib.goldenLow);
+  const confirmsUp = fib.direction === "up" && touchedZone && Number(last.c) > fib.goldenHigh && Number(last.c) >= Number(last.o);
+  const confirmsDown = fib.direction === "down" && touchedZone && Number(last.c) < fib.goldenLow && Number(last.c) <= Number(last.o);
+  const directionMatches = (fib.direction === "up" && item.direction === "LONG") || (fib.direction === "down" && item.direction === "SHORT");
+  const fibReady = directionMatches && (confirmsUp || confirmsDown) && item.status === "OPERABLE";
+  const statusLabel = fibReady ? "OK PARA RECETA" : "ESPERAR";
+  const actionLabel = fibReady
+    ? "La zona fue tocada y hay rechazo a favor. Puedes revisar la receta XTB."
+    : touchedZone
+      ? "Zona tocada, pero falta vela clara de rechazo a favor."
+      : "Esperar que el precio visite la zona Fibonacci y confirme rechazo.";
+  const recipeRows = fibReady ? `
+    <div class="fib-recipe-grid">
+      <div><span>Orden</span><strong>${item.directionLabel}</strong></div>
+      <div><span>Volumen</span><strong>${formatVolumeForXtb(item.volume, item.asset)}</strong></div>
+      <div><span>Entrada</span><strong>${priceText(item.entry)}</strong></div>
+      <div><span>Stop</span><strong>${priceText(item.stopLoss)}</strong></div>
+      <div><span>Take</span><strong>${priceText(item.takeProfit)}</strong></div>
+      <div><span>Margen</span><strong>${money(item.marginRequired)}</strong></div>
+    </div>
+  ` : "";
   return `
     <article class="simple-operation fib-only-card">
       <div class="simple-head">
         <h2>Zona Fibonacci</h2>
-        <span class="simple-badge">auto</span>
+        <span class="simple-badge ${fibReady ? "ok" : ""}">${statusLabel}</span>
       </div>
       <div class="fib-focus-copy">
         <strong>${swingLabel}</strong>
@@ -2474,6 +2494,7 @@ function renderFibOnlyCard(item) {
         <div><span>50%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.5)?.price)}</strong></div>
         <div><span>61.8%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.618)?.price)}</strong></div>
       </div>
+      ${recipeRows}
       <p class="simple-warning">${actionLabel}</p>
       <p class="simple-tiny">Esta tarjeta reemplaza los parametros editables: todo se calcula automaticamente desde la ultima reaccion visible.</p>
     </article>
