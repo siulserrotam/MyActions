@@ -114,7 +114,7 @@ async function main() {
       has_dashboard: dashboardSignals.hasDashboard,
       source: 'myactions-dashboard'
     } : null,
-    next_step: 'Si login_required es true, inicia sesion en la ventana del navegador controlable y vuelve a ejecutar npm.cmd run read.'
+    next_step: 'Si xtb_login_required es true, inicia sesion en la ventana Chrome controlable de MyActions y vuelve a ejecutar npm run xtb:read.'
   };
 
   if (xtbPage && dashboardPage) {
