@@ -674,11 +674,11 @@ body {
 
 .chart-forecast {
   fill: none;
-  stroke-width: 2.2;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 8 8;
-  opacity: 0.74;
+  opacity: 0.68;
   filter: drop-shadow(0 0 8px rgb(0 0 0 / 0.65));
 }
 
@@ -695,7 +695,7 @@ body {
 }
 
 .chart-forecast.confirmed {
-  stroke-width: 3.4;
+  stroke-width: 3;
   opacity: 0.95;
 }
 
@@ -712,7 +712,7 @@ body {
 }
 
 .chart-forecast-step.muted {
-  stroke: rgb(255 255 255 / 0.52);
+  stroke: rgb(255 255 255 / 0.45);
   stroke-width: 2;
 }
 

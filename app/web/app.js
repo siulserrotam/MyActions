@@ -2318,7 +2318,7 @@ function renderTradeChart(item, variant = "mini") {
   const chartHeight = variant === "main" ? 430 : 112;
   const plotLeft = variant === "main" ? 54 : 10;
   const plotRight = variant === "main" ? chartWidth - 96 : 230;
-  const forecastSpace = variant === "main" ? 180 : 0;
+  const forecastSpace = variant === "main" ? 230 : 0;
   const dataRight = Math.max(plotLeft + 80, plotRight - forecastSpace);
   const plotTop = variant === "main" ? 34 : 8;
   const plotBottom = variant === "main" ? chartHeight - 72 : 96;
@@ -2407,28 +2407,38 @@ function renderTradeChart(item, variant = "mini") {
     if (variant !== "main" || !candles.length || !Number.isFinite(zones.entry) || !Number.isFinite(zones.takeProfit)) return "";
     const lastX = startX + (candles.length - 1) * candleGap;
     const lastY = y(lastClose || zones.price);
-    const retestX = clamp(lastX + forecastSpace * 0.24, lastX + 18, plotRight - 124);
-    const entryX = clamp(lastX + forecastSpace * 0.48, retestX + 20, plotRight - 78);
-    const targetX = clamp(lastX + forecastSpace * 0.86, entryX + 26, plotRight - 8);
+    const bounceX = clamp(lastX + forecastSpace * 0.18, lastX + 16, plotRight - 164);
+    const rejectX = clamp(lastX + forecastSpace * 0.34, bounceX + 18, plotRight - 128);
+    const entryX = clamp(lastX + forecastSpace * 0.54, rejectX + 20, plotRight - 82);
+    const pullbackX = clamp(lastX + forecastSpace * 0.7, entryX + 18, plotRight - 46);
+    const targetX = clamp(lastX + forecastSpace * 0.9, pullbackX + 22, plotRight - 8);
     const entryY = y(zones.entry);
     const targetY = y(zones.takeProfit);
     const directionSign = item.direction === "SHORT" ? -1 : 1;
-    const retestPrice = Number(lastClose || zones.price) + directionSign * Math.abs(Number(zones.entry) - Number(lastClose || zones.price)) * 0.34;
-    const retestY = y(Number.isFinite(retestPrice) && retestPrice > 0 ? retestPrice : zones.entry);
+    const lastPrice = Number(lastClose || zones.price);
+    const baseMove = Math.max(Math.abs(Number(zones.entry) - lastPrice), Math.abs(Number(zones.takeProfit) - Number(zones.entry)) * 0.28, Math.abs(Number(zones.stopLoss) - Number(zones.entry)) * 0.18);
+    const bouncePrice = lastPrice - directionSign * baseMove * 0.75;
+    const rejectPrice = lastPrice + directionSign * baseMove * 0.18;
+    const pullbackPrice = Number(zones.entry) - directionSign * baseMove * 0.28;
+    const bounceY = y(Number.isFinite(bouncePrice) && bouncePrice > 0 ? bouncePrice : lastPrice);
+    const rejectY = y(Number.isFinite(rejectPrice) && rejectPrice > 0 ? rejectPrice : lastPrice);
+    const pullbackY = y(Number.isFinite(pullbackPrice) && pullbackPrice > 0 ? pullbackPrice : zones.entry);
     const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready);
     const label = confirmed ? "PRONOSTICO" : "ESCENARIO";
     const labelX = clamp(lastX + 8, plotLeft + 8, plotRight - 84);
     const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
     return `
       <line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />
-      <polyline points="${lastX},${lastY} ${retestX},${retestY} ${entryX},${entryY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
-      <circle cx="${retestX}" cy="${retestY}" r="3" class="chart-forecast-step muted" />
+      <polyline points="${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY} ${pullbackX},${pullbackY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
+      <circle cx="${rejectX}" cy="${rejectY}" r="3" class="chart-forecast-step muted" />
       <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
+      <circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />
       <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
       <text x="${labelX}" y="${labelY}" class="chart-forecast-label">${label}</text>
-      <text x="${retestX}" y="${plotBottom + 22}" class="chart-forecast-time">+5m</text>
-      <text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">+10m</text>
-      <text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">+15m</text>
+      <text x="${bounceX}" y="${plotBottom + 22}" class="chart-forecast-time">rebote</text>
+      <text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">gatillo</text>
+      <text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">meta</text>
     `;
   })();
   const levelTag = (label, value, className) => variant === "main" ? `
