@@ -674,11 +674,11 @@ body {
 
 .chart-forecast {
   fill: none;
-  stroke-width: 2.6;
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 9 7;
-  opacity: 0.82;
+  stroke-dasharray: 8 8;
+  opacity: 0.74;
   filter: drop-shadow(0 0 8px rgb(0 0 0 / 0.65));
 }
 
@@ -711,6 +711,11 @@ body {
   stroke-width: 2.5;
 }
 
+.chart-forecast-step.muted {
+  stroke: rgb(255 255 255 / 0.52);
+  stroke-width: 2;
+}
+
 .chart-forecast-dot {
   fill: #101718;
   stroke-width: 3;
@@ -726,20 +731,27 @@ body {
 
 .chart-forecast-label {
   fill: #ffe28a;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 950;
   letter-spacing: 0.1em;
 }
 
+.chart-forecast-time {
+  fill: #9cb8af;
+  font-size: 9px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
 .chart-fib-golden.up {
-  fill: rgb(58 216 134 / 0.2);
-  stroke: rgb(58 216 134 / 0.56);
+  fill: rgb(58 216 134 / 0.12);
+  stroke: rgb(58 216 134 / 0.34);
   stroke-width: 1.4;
 }
 
 .chart-fib-golden.down {
-  fill: rgb(255 90 102 / 0.22);
-  stroke: rgb(255 90 102 / 0.58);
+  fill: rgb(255 90 102 / 0.12);
+  stroke: rgb(255 90 102 / 0.34);
   stroke-width: 1.4;
 }
 

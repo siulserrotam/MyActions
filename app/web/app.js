@@ -2150,12 +2150,12 @@ function latestSwingFib(candles) {
   const range = Math.abs(endPrice - startPrice);
   if (!Number.isFinite(range) || range <= Math.max(endPrice * 0.00005, 0.00001)) return null;
 
-  const ratios = [0, 0.382, 0.5, 0.618, 0.83, 0.95, 1];
+  const ratios = [0, 0.382, 0.5, 0.618, 0.8, 0.9, 0.95, 1];
   const levels = ratios.map((ratio) => ({
     ratio,
     label: `${ratio === 0 ? "0" : ratio === 1 ? "100" : (ratio * 100).toFixed(1)}%`,
     price: direction === "up" ? endPrice - range * ratio : endPrice + range * ratio,
-    key: ratio === 0.5 || ratio === 0.618,
+    key: ratio === 0.8 || ratio === 0.9,
   }));
 
   return {
@@ -2167,6 +2167,8 @@ function latestSwingFib(candles) {
     levels,
     goldenLow: Math.min(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
     goldenHigh: Math.max(levels.find((level) => level.ratio === 0.5)?.price || endPrice, levels.find((level) => level.ratio === 0.618)?.price || endPrice),
+    deepLow: Math.min(levels.find((level) => level.ratio === 0.8)?.price || endPrice, levels.find((level) => level.ratio === 0.9)?.price || endPrice),
+    deepHigh: Math.max(levels.find((level) => level.ratio === 0.8)?.price || endPrice, levels.find((level) => level.ratio === 0.9)?.price || endPrice),
   };
 }
 
@@ -2209,18 +2211,21 @@ function evaluateFibPullbackSetup(symbol, direction = "WAIT") {
   const lastOpen = Number(last.o);
   const recent = candles.slice(-5);
   const level0 = fibLevelPrice(fib, 0);
-  const level83 = fibLevelPrice(fib, 0.83);
+  const level80 = fibLevelPrice(fib, 0.8);
+  const level90 = fibLevelPrice(fib, 0.9);
   const level95 = fibLevelPrice(fib, 0.95);
   const directionFromFib = fib.direction === "up" ? "LONG" : "SHORT";
   const directionMatches = direction === "WAIT" || direction === directionFromFib;
-  const touchedZone = recent.some((candle) => Number(candle.l) <= fib.goldenHigh && Number(candle.h) >= fib.goldenLow);
+  const deepLow = Number.isFinite(fib.deepLow) ? fib.deepLow : Math.min(level80, level90);
+  const deepHigh = Number.isFinite(fib.deepHigh) ? fib.deepHigh : Math.max(level80, level90);
+  const touchedZone = recent.some((candle) => Number(candle.l) <= deepHigh && Number(candle.h) >= deepLow);
   const bodyPct = candleBody(last) / candleRange(last);
   const wickRejectsUp = candleLowerWick(last) >= candleBody(last) * 0.75 && lastClose >= lastOpen;
   const wickRejectsDown = candleUpperWick(last) >= candleBody(last) * 0.75 && lastClose <= lastOpen;
-  const recoveredUp = fib.direction === "up" && touchedZone && lastClose > fib.goldenHigh && (wickRejectsUp || bodyPct >= 0.45);
-  const recoveredDown = fib.direction === "down" && touchedZone && lastClose < fib.goldenLow && (wickRejectsDown || bodyPct >= 0.45);
-  const invalidatedUp = fib.direction === "up" && (lastClose < level83 || recent.some((candle) => Number(candle.l) <= level95));
-  const invalidatedDown = fib.direction === "down" && (lastClose > level83 || recent.some((candle) => Number(candle.h) >= level95));
+  const recoveredUp = fib.direction === "up" && touchedZone && lastClose > deepHigh && (wickRejectsUp || bodyPct >= 0.45);
+  const recoveredDown = fib.direction === "down" && touchedZone && lastClose < deepLow && (wickRejectsDown || bodyPct >= 0.45);
+  const invalidatedUp = fib.direction === "up" && recent.some((candle) => Number(candle.l) <= level95);
+  const invalidatedDown = fib.direction === "down" && recent.some((candle) => Number(candle.h) >= level95);
   const imbalance = detectGapFvgBag(candles.slice(-8));
   const imbalanceOk = imbalance.bias === "WAIT" || imbalance.bias === directionFromFib;
   const ready = directionMatches && imbalanceOk && (recoveredUp || recoveredDown);
@@ -2234,14 +2239,14 @@ function evaluateFibPullbackSetup(symbol, direction = "WAIT") {
         : "ESPERAR FIB";
   const score = ready ? 18 : rejected ? -22 : touchedZone ? 4 : -2;
   const target = level0;
-  const stop = fib.direction === "up" ? Math.min(level83, level95) : Math.max(level83, level95);
+  const stop = fib.direction === "up" ? level95 : level95;
   const detail = ready
-    ? `15M: precio respeto la zona 50-61.8 y rechazo a favor. ${imbalance.type} no contradice.`
+    ? `15M: precio respeto la zona profunda 80-90 y rechazo a favor. ${imbalance.type} no contradice.`
     : rejected
       ? `15M: zona Fibonacci invalidada o direccion contradictoria. Espera un nuevo impulso antes de operar.`
       : touchedZone
-        ? "15M: el precio esta en la zona 50-61.8, pero falta vela de rechazo clara."
-        : "15M: esperar retroceso hacia 50-61.8 antes de buscar entrada.";
+        ? "15M: el precio esta en la zona profunda 80-90, pero falta vela de rechazo clara."
+        : "15M: esperar retroceso hacia 80-90 antes de buscar entrada.";
 
   return {
     fib,
@@ -2313,7 +2318,7 @@ function renderTradeChart(item, variant = "mini") {
   const chartHeight = variant === "main" ? 430 : 112;
   const plotLeft = variant === "main" ? 54 : 10;
   const plotRight = variant === "main" ? chartWidth - 96 : 230;
-  const forecastSpace = variant === "main" ? 112 : 0;
+  const forecastSpace = variant === "main" ? 180 : 0;
   const dataRight = Math.max(plotLeft + 80, plotRight - forecastSpace);
   const plotTop = variant === "main" ? 34 : 8;
   const plotBottom = variant === "main" ? chartHeight - 72 : 96;
@@ -2385,6 +2390,7 @@ function renderTradeChart(item, variant = "mini") {
   const fibSetup = variant === "main" ? item.fibSetup || evaluateFibPullbackSetup(item.asset.symbol, item.direction) : null;
   const fibGoldenMarkup = (() => {
     if (!fib || (!visibleLevel(fib.goldenLow) && !visibleLevel(fib.goldenHigh))) return "";
+    if (variant === "main") return "";
     const rawTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
     const rawBottom = Math.max(y(fib.goldenLow), y(fib.goldenHigh));
     const minFibHeight = 54;
@@ -2394,27 +2400,35 @@ function renderTradeChart(item, variant = "mini") {
     const labelY = clamp(top + 20, plotTop + 16, plotBottom - 8);
     return `
       <rect x="${plotLeft}" y="${top}" width="${plotRight - plotLeft}" height="${bottom - top}" rx="9" class="chart-fib-golden ${fib.direction}" />
-      <text x="${plotLeft + 10}" y="${labelY}" class="chart-fib-zone-label ${fib.direction}">ZONA FIB 50%-61.8%</text>
+      <text x="${plotLeft + 10}" y="${labelY}" class="chart-fib-zone-label ${fib.direction}">ZONA FIB 80%-90%</text>
     `;
   })();
   const forecastMarkup = (() => {
     if (variant !== "main" || !candles.length || !Number.isFinite(zones.entry) || !Number.isFinite(zones.takeProfit)) return "";
     const lastX = startX + (candles.length - 1) * candleGap;
     const lastY = y(lastClose || zones.price);
-    const entryX = clamp(lastX + forecastSpace * 0.38, lastX + 18, plotRight - 54);
-    const targetX = clamp(lastX + forecastSpace * 0.86, entryX + 24, plotRight - 8);
+    const retestX = clamp(lastX + forecastSpace * 0.24, lastX + 18, plotRight - 124);
+    const entryX = clamp(lastX + forecastSpace * 0.48, retestX + 20, plotRight - 78);
+    const targetX = clamp(lastX + forecastSpace * 0.86, entryX + 26, plotRight - 8);
     const entryY = y(zones.entry);
     const targetY = y(zones.takeProfit);
+    const directionSign = item.direction === "SHORT" ? -1 : 1;
+    const retestPrice = Number(lastClose || zones.price) + directionSign * Math.abs(Number(zones.entry) - Number(lastClose || zones.price)) * 0.34;
+    const retestY = y(Number.isFinite(retestPrice) && retestPrice > 0 ? retestPrice : zones.entry);
     const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready);
     const label = confirmed ? "PRONOSTICO" : "ESCENARIO";
     const labelX = clamp(lastX + 8, plotLeft + 8, plotRight - 84);
     const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
     return `
       <line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />
-      <polyline points="${lastX},${lastY} ${entryX},${entryY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <polyline points="${lastX},${lastY} ${retestX},${retestY} ${entryX},${entryY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <circle cx="${retestX}" cy="${retestY}" r="3" class="chart-forecast-step muted" />
       <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
       <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
       <text x="${labelX}" y="${labelY}" class="chart-forecast-label">${label}</text>
+      <text x="${retestX}" y="${plotBottom + 22}" class="chart-forecast-time">+5m</text>
+      <text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">+10m</text>
+      <text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">+15m</text>
     `;
   })();
   const levelTag = (label, value, className) => variant === "main" ? `
@@ -2481,7 +2495,7 @@ function renderTradeChart(item, variant = "mini") {
       ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
       <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
       <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
-      ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 50%-61.8% ${fib.direction === "up" ? "verde: retroceso comprador posible" : "roja: rebote vendedor posible"}. No reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
+      ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 80%-90% ${fib.direction === "up" ? "retroceso profundo comprador" : "rebote profundo vendedor"}. Si atraviesa 95%-100%, se reinicia la lectura.</span>` : ""}
       ${fibSetup ? `<span>Pronostico lineal: ${fibSetup.ready ? "activo solo si el rechazo Fib 15M se mantiene" : "solo escenario; no copiar receta hasta confirmacion"}. La linea muestra el recorrido esperado hacia entrada y TP.</span>` : ""}
     </div>
     ${technicalDecisionText(item, candles)}
@@ -2557,26 +2571,28 @@ function renderFibOnlyCard(item) {
   const right = width - 34;
   const top = 28;
   const bottom = height - 54;
-  const values = [fib.startPrice, fib.endPrice, fib.goldenLow, fib.goldenHigh].filter((value) => Number.isFinite(value));
+  const deepLow = Number.isFinite(fib.deepLow) ? fib.deepLow : fib.goldenLow;
+  const deepHigh = Number.isFinite(fib.deepHigh) ? fib.deepHigh : fib.goldenHigh;
+  const values = [fib.startPrice, fib.endPrice, deepLow, deepHigh].filter((value) => Number.isFinite(value));
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
   const span = Math.max(rawMax - rawMin, rawMax * 0.0006, 0.0001);
   const min = rawMin - span * 0.3;
   const max = rawMax + span * 0.3;
   const y = (value) => clamp(bottom - ((value - min) / (max - min)) * (bottom - top), top, bottom);
-  const zoneTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
-  const zoneBottom = Math.max(y(fib.goldenLow), y(fib.goldenHigh));
+  const zoneTop = Math.min(y(deepLow), y(deepHigh));
+  const zoneBottom = Math.max(y(deepLow), y(deepHigh));
   const swingLabel = fib.direction === "up" ? "Impulso alcista" : "Impulso bajista";
-  const zoneLabel = fib.direction === "up" ? "Zona verde: esperar retroceso y rechazo comprador" : "Zona roja: esperar rebote y rechazo vendedor";
+  const zoneLabel = fib.direction === "up" ? "Zona 80-90: esperar retroceso profundo y rechazo comprador" : "Zona 80-90: esperar rebote profundo y rechazo vendedor";
   const recent = candles.slice(-5);
   const last = candles[candles.length - 1];
   const lastClose = Number(last.c);
   const lastOpen = Number(last.o);
-  const touchedZone = recent.some((candle) => Number(candle.l) <= fib.goldenHigh && Number(candle.h) >= fib.goldenLow);
-  const confirmsUp = fib.direction === "up" && touchedZone && lastClose > fib.goldenHigh && lastClose >= lastOpen;
-  const confirmsDown = fib.direction === "down" && touchedZone && lastClose < fib.goldenLow && lastClose <= lastOpen;
-  const rejectedUp = fib.direction === "up" && touchedZone && lastClose < fib.goldenLow && lastClose < lastOpen;
-  const rejectedDown = fib.direction === "down" && touchedZone && lastClose > fib.goldenHigh && lastClose > lastOpen;
+  const touchedZone = recent.some((candle) => Number(candle.l) <= deepHigh && Number(candle.h) >= deepLow);
+  const confirmsUp = fib.direction === "up" && touchedZone && lastClose > deepHigh && lastClose >= lastOpen;
+  const confirmsDown = fib.direction === "down" && touchedZone && lastClose < deepLow && lastClose <= lastOpen;
+  const rejectedUp = fib.direction === "up" && touchedZone && lastClose < deepLow && lastClose < lastOpen;
+  const rejectedDown = fib.direction === "down" && touchedZone && lastClose > deepHigh && lastClose > lastOpen;
   const directionMatches = (fib.direction === "up" && item.direction === "LONG") || (fib.direction === "down" && item.direction === "SHORT");
   const fibRejected = rejectedUp || rejectedDown || (touchedZone && item.status === "OPERABLE" && !directionMatches);
   const fibReady = directionMatches && (confirmsUp || confirmsDown) && item.status === "OPERABLE";
@@ -2612,19 +2628,19 @@ function renderFibOnlyCard(item) {
         <strong>${swingLabel}</strong>
         <span>15M fijo: ${fibRejected ? "zona rechazada, borrar la lectura anterior y esperar nuevo movimiento" : zoneLabel}</span>
       </div>
-      <svg class="fib-focus-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Zona Fibonacci 50 a 61.8">
+      <svg class="fib-focus-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Zona Fibonacci 80 a 90">
         <rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="14" class="fib-focus-bg" />
         <rect x="${left}" y="${zoneTop}" width="${right - left}" height="${Math.max(42, zoneBottom - zoneTop)}" rx="13" class="fib-focus-zone ${fib.direction}" />
         <line x1="${left + 28}" y1="${y(fib.startPrice)}" x2="${right - 28}" y2="${y(fib.endPrice)}" class="fib-focus-swing ${fib.direction}" />
         <circle cx="${left + 28}" cy="${y(fib.startPrice)}" r="5" class="fib-focus-dot ${fib.direction}" />
         <circle cx="${right - 28}" cy="${y(fib.endPrice)}" r="5" class="fib-focus-dot ${fib.direction}" />
-        <text x="${left + 12}" y="${clamp(zoneTop + 24, top + 22, bottom - 8)}" class="fib-focus-title">ZONA FIB 50%-61.8%</text>
+        <text x="${left + 12}" y="${clamp(zoneTop + 24, top + 22, bottom - 8)}" class="fib-focus-title">ZONA FIB 80%-90%</text>
         <text x="${left + 12}" y="${y(fib.startPrice) - 8}" class="fib-focus-label">Inicio ${numberText(fib.startPrice)}</text>
         <text x="${right - 12}" y="${y(fib.endPrice) - 8}" class="fib-focus-label end">Final ${numberText(fib.endPrice)}</text>
       </svg>
       <div class="fib-focus-levels">
-        <div><span>50%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.5)?.price)}</strong></div>
-        <div><span>61.8%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.618)?.price)}</strong></div>
+        <div><span>80%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.8)?.price)}</strong></div>
+        <div><span>90%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.9)?.price)}</strong></div>
       </div>
       ${resetNote}
       ${recipeRows}
@@ -3686,7 +3702,7 @@ function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, dire
   else blockers.push("GAP/FVG/BAG contradice la operacion.");
   if (cfdOk) rules.push("Movimiento CFD no va en contra.");
   else blockers.push("Movimiento CFD va contra la operacion.");
-  if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso 50-61.8 con rechazo.");
+  if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso profundo 80-90 con rechazo.");
   else blockers.push(fibSetup?.detail || "Fibonacci 15M no confirma entrada.");
   if (nearTrigger) rules.push(`Precio cerca del gatillo (${numberText(entryDistancePct)}%).`);
   else blockers.push(`Precio lejos del gatillo (${numberText(entryDistancePct)}%).`);
