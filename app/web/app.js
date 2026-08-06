@@ -3226,6 +3226,29 @@ function candlesForFrame(symbol, frameKey) {
     .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
 }
 
+function directionStability(candles, bias, frameKey) {
+  if (bias === "WAIT") {
+    return { confirmed: false, note: "sin sesgo para estabilizar" };
+  }
+  const requiredCandles = frameKey === "1h" ? 2 : 3;
+  if (candles.length < requiredCandles + 1) {
+    return { confirmed: false, note: `faltan ${requiredCandles + 1} velas para confirmar estabilidad` };
+  }
+  const recent = candles.slice(-(requiredCandles + 1));
+  const deltas = recent.slice(1).map((candle, index) => candle.c - recent[index].c);
+  const directionHits = deltas.filter((delta) => bias === "LONG" ? delta > 0 : delta < 0).length;
+  const lastDelta = deltas[deltas.length - 1] || 0;
+  const lastOk = bias === "LONG" ? lastDelta > 0 : lastDelta < 0;
+  const minimumHits = frameKey === "1h" ? 1 : 2;
+  const confirmed = directionHits >= minimumHits && lastOk;
+  return {
+    confirmed,
+    note: confirmed
+      ? `estable: ${directionHits}/${requiredCandles} velas recientes a favor`
+      : `inestable: requiere ${minimumHits}/${requiredCandles} velas y la ultima a favor`,
+  };
+}
+
 function traceFrame(symbol, frameKey) {
   const frame = chartFrameOptions[frameKey];
   const candles = candlesForFrame(symbol, frameKey);
@@ -3240,13 +3263,17 @@ function traceFrame(symbol, frameKey) {
   const biasVotes = [pattern.bias, trend.direction, imbalance.bias].filter((bias) => bias !== "WAIT");
   const longVotes = biasVotes.filter((bias) => bias === "LONG").length;
   const shortVotes = biasVotes.filter((bias) => bias === "SHORT").length;
-  const bias = longVotes > shortVotes ? "LONG" : shortVotes > longVotes ? "SHORT" : "WAIT";
+  const rawBias = longVotes > shortVotes ? "LONG" : shortVotes > longVotes ? "SHORT" : "WAIT";
+  const stability = directionStability(candles, rawBias, frameKey);
+  const bias = rawBias === "WAIT" || stability.confirmed ? rawBias : "WAIT";
   return {
     key: frameKey,
     label: frame.label,
     role: frameKey === "1m" ? "Entrada fina" : frameKey === "5m" ? "Patron limpio" : "Contexto mayor",
     candles: candles.length,
     bias,
+    rawBias,
+    stability,
     movePct,
     pattern,
     trend,
@@ -3256,13 +3283,13 @@ function traceFrame(symbol, frameKey) {
 
 function traceDirectionNote(trace) {
   const biasText = trace.bias === "WAIT"
-    ? "No hay gatillo confiable"
+    ? trace.rawBias && trace.rawBias !== "WAIT" ? `Sesgo ${trace.rawBias} sin estabilidad` : "No hay gatillo confiable"
     : trace.bias === "LONG"
       ? "Presion compradora"
       : "Presion vendedora";
   const move = numberText(trace.movePct);
   if (trace.candles < 3) return `${trace.role}: faltan velas reales para leer este marco.`;
-  return `${trace.role}: ${biasText}. Patron ${trace.pattern.name}. Tendencia ${trace.trend.direction}. Movimiento ${move}%.`;
+  return `${trace.role}: ${biasText}. ${trace.stability?.note || ""}. Patron ${trace.pattern.name}. Tendencia ${trace.trend.direction}. Movimiento ${move}%.`;
 }
 
 function technicalTraceSummary(symbol = focusSymbol) {
