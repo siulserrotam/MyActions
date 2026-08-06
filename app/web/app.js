@@ -2289,12 +2289,6 @@ function renderTradeChart(item, variant = "mini") {
     <text x="${plotLeft + 8}" y="${plotTop + 18}" class="chart-trend-label ${trendSide}">${trendBiasLabel} ${numberText(visibleTrace.movePct)}%</text>
   ` : "";
   const fib = variant === "main" ? latestSwingFib(candles) : null;
-  const fibX = (index) => startX + index * candleGap;
-  const fibSwingMarkup = fib ? `
-    <line x1="${fibX(fib.startIndex)}" y1="${y(fib.startPrice)}" x2="${fibX(fib.endIndex)}" y2="${y(fib.endPrice)}" class="chart-fib-swing ${fib.direction}" />
-    <circle cx="${fibX(fib.startIndex)}" cy="${y(fib.startPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
-    <circle cx="${fibX(fib.endIndex)}" cy="${y(fib.endPrice)}" r="4" class="chart-fib-point ${fib.direction}" />
-  ` : "";
   const fibGoldenMarkup = (() => {
     if (!fib || (!visibleLevel(fib.goldenLow) && !visibleLevel(fib.goldenHigh))) return "";
     const rawTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
@@ -2309,14 +2303,6 @@ function renderTradeChart(item, variant = "mini") {
       <text x="${plotLeft + 10}" y="${labelY}" class="chart-fib-zone-label ${fib.direction}">ZONA FIB 50%-61.8%</text>
     `;
   })();
-  const fibLineMarkup = fib ? fib.levels
-    .filter((level) => level.key && visibleLevel(level.price))
-    .map((level) => `
-      <g class="chart-fib-level ${level.key ? "key" : ""}">
-        <line x1="${plotLeft}" x2="${plotRight}" y1="${y(level.price)}" y2="${y(level.price)}" />
-        <text x="${plotLeft + 8}" y="${clamp(y(level.price) - 5, plotTop + 9, plotBottom - 4)}">FIB ${level.label} ${numberText(level.price)}</text>
-      </g>
-    `).join("") : "";
   const levelTag = (label, value, className) => variant === "main" ? `
     <g class="chart-price-tag ${className}">
       <rect x="${plotRight + 8}" y="${clamp(y(value) - 11, plotTop, plotBottom - 18)}" width="58" height="20" rx="4" />
@@ -2387,8 +2373,6 @@ function renderTradeChart(item, variant = "mini") {
         ${visibleLevel(proZones.resistance) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.resistance)}" y2="${y(proZones.resistance)}" class="chart-line resistance" />` : ""}
         ${visibleLevel(proZones.support) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />` : ""}
         ${fibGoldenMarkup}
-        ${fibLineMarkup}
-        ${fibSwingMarkup}
         ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
         ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
         ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}

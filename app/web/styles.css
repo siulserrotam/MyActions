@@ -672,12 +672,6 @@ body {
   fill: #ffe28a;
 }
 
-.chart-fib-level line {
-  stroke: rgb(255 207 92 / 0.34);
-  stroke-width: 1.2;
-  stroke-dasharray: 4 7;
-}
-
 .chart-fib-golden.up {
   fill: rgb(58 216 134 / 0.2);
   stroke: rgb(58 216 134 / 0.56);
@@ -702,47 +696,6 @@ body {
 
 .chart-fib-zone-label.down {
   fill: #ffadb4;
-}
-
-.chart-fib-level.key line {
-  stroke: rgb(255 207 92 / 0.68);
-  stroke-width: 1.6;
-}
-
-.chart-fib-level text {
-  fill: #ffe08a;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-}
-
-.chart-fib-swing {
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 9 7;
-  opacity: 0.52;
-  filter: drop-shadow(0 0 7px rgb(0 0 0 / 0.65));
-}
-
-.chart-fib-swing.up {
-  stroke: rgb(84 240 148 / 0.92);
-}
-
-.chart-fib-swing.down {
-  stroke: rgb(255 111 121 / 0.92);
-}
-
-.chart-fib-point {
-  fill: #12181b;
-  stroke-width: 2.4;
-}
-
-.chart-fib-point.up {
-  stroke: #7df4a1;
-}
-
-.chart-fib-point.down {
-  stroke: #ff7f88;
 }
 
 .chart-candle line {
