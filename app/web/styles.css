@@ -308,6 +308,35 @@ body {
   color: #ffb5bf;
 }
 
+.simple-agent-actions button:disabled {
+  cursor: not-allowed;
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.04);
+  color: #71837d;
+}
+
+.analysis-wait-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  border: 1px dashed rgb(255 207 92 / 0.38);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(47 39 19 / 0.42), rgb(12 15 18 / 0.92));
+  padding: 16px;
+  color: #ffe59e;
+}
+
+.analysis-wait-card strong {
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.analysis-wait-card span {
+  color: #dbc890;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .simple-form-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

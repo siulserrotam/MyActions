@@ -359,6 +359,13 @@ async function preparePendingOrderInXtb(page, request) {
 async function processDashboardOrderRequest(dashboardPage, xtbPage) {
   const request = await readDashboardOrderRequest(dashboardPage);
   if (!request || request.status !== 'pending') return null;
+  await updateDashboardOrderRequest(
+    dashboardPage,
+    request,
+    'disabled',
+    'Modo analisis activo: Playwright solo lee XTB y no prepara ordenes.'
+  );
+  return { ok: false, disabled: true, message: 'Modo analisis activo: no se preparan ordenes en XTB.' };
   if (request.symbol !== 'US100') {
     await updateDashboardOrderRequest(dashboardPage, request, 'error', 'Por seguridad esta automatizacion solo prepara US100.');
     return null;

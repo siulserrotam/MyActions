@@ -70,6 +70,7 @@ const extensionProfitFactor = 0.4;
 const baseProfitShareOfDay = 0.6;
 const noStopMode = false;
 const defaultsVersion = "capital-itinerary-4ops-1pct-stops-v5";
+const technicalAnalysisDurationMs = 60 * 60 * 1000;
 const chartFrameOptions = {
   "1m": { key: "1m", label: "1M / 30m", interval: "1m", period: "1d", limit: 30, description: "Ultimos 30 minutos, velas de 1 minuto." },
   "5m": { key: "5m", label: "5M / 2h", interval: "5m", period: "1d", limit: 24, description: "Ultimas 2 horas, velas de 5 minutos." },
@@ -92,6 +93,7 @@ let manualOpportunityLockUntil = 0;
 const manualOpportunityLockMs = 3 * 60 * 1000;
 let currentDashboardUser = "default";
 let autoLearningTimer = null;
+let analysisCountdownTimer = null;
 let lastAutoLessonKey = "";
 let lessonMemorySummary = null;
 
@@ -131,6 +133,58 @@ function isAgentArmed() {
 
 function isAgentTradeAuthorized() {
   return getLocalValue("decision_engine_agent_trade_authorized") === "true";
+}
+
+function technicalAnalysisState() {
+  const startedAt = Number(getLocalValue("decision_engine_analysis_started_at") || 0);
+  const graphEnabled = getLocalValue("decision_engine_analysis_graph_enabled") === "true";
+  const now = Date.now();
+  const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
+  const remainingMs = startedAt ? Math.max(0, technicalAnalysisDurationMs - elapsedMs) : technicalAnalysisDurationMs;
+  const completed = Boolean(startedAt && elapsedMs >= technicalAnalysisDurationMs);
+  return {
+    startedAt,
+    graphEnabled,
+    elapsedMs,
+    remainingMs,
+    completed,
+    running: Boolean(startedAt && !completed),
+  };
+}
+
+function formatTimer(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function startTechnicalAnalysis() {
+  setLocalValue("decision_engine_analysis_started_at", String(Date.now()));
+  setLocalValue("decision_engine_analysis_graph_enabled", "false");
+  setAgentArmed(true);
+  setAgentTradeAuthorized(false);
+  setChartFrame("1m");
+  saveAutoLearningSnapshot(true);
+  renderSimpleDashboard();
+}
+
+function resetTechnicalAnalysis() {
+  removeLocalValue("decision_engine_analysis_started_at");
+  removeLocalValue("decision_engine_analysis_graph_enabled");
+  setAgentTradeAuthorized(false);
+  renderSimpleDashboard();
+}
+
+function enableTechnicalChart() {
+  const state = technicalAnalysisState();
+  if (!state.completed) {
+    updateLessonStatus(`Aun faltan ${formatTimer(state.remainingMs)} de lectura antes de graficar objetivo.`, "neutral");
+    return;
+  }
+  setLocalValue("decision_engine_analysis_graph_enabled", "true");
+  setChartFrame("1m");
+  loadMarketBars([focusSymbol]).then(() => renderSimpleDashboard());
 }
 
 function setAgentArmed(value) {
@@ -2989,7 +3043,6 @@ function us100StrategyProfile() {
 
 function agentControlPlan(profile) {
   const marketOpen = isMarketOpenNow();
-  const tradeAuthorized = isAgentTradeAuthorized();
   const hardOk = profile.status === "OPERABLE"
     && profile.confidence >= 78
     && profile.volume > 0
@@ -2998,27 +3051,22 @@ function agentControlPlan(profile) {
   const nearTrigger = profile.direction === "LONG"
     ? profile.price >= profile.entry * 0.999 && profile.price <= profile.entry * 1.002
     : profile.price <= profile.entry * 1.001 && profile.price >= profile.entry * 0.998;
-  const canPrepareOrder = hardOk && nearTrigger && marketOpen && tradeAuthorized;
   const action = !marketOpen
-    ? "PREPARAR"
-    : canPrepareOrder
-      ? "PREPARAR ORDEN"
-      : hardOk && nearTrigger
-        ? "PEDIR AUTORIZACION"
+    ? "PREPARAR ANALISIS"
+    : hardOk && nearTrigger
+      ? "SENAL FUERTE"
       : profile.status === "OPERABLE"
         ? "VIGILAR GATILLO"
         : "ESPERAR";
   return {
     action,
-    mode: canPrepareOrder ? "autorizado-asistido" : "lectura-alerta",
+    mode: "lectura-analisis",
     canAutoOpen: false,
-    canPrepareOrder,
-    tradeAuthorized,
-    rule: canPrepareOrder
-      ? "Autorizado: puede preparar la receta y avisarte para copiarla en XTB. Confirmacion final manual."
-      : tradeAuthorized
-        ? "Autorizado, pero espera patron fuerte, mercado abierto y precio cerca del gatillo."
-        : "Solo lee, aprende y alerta. Para preparar una operacion pulsa Autorizar operacion asistida.",
+    canPrepareOrder: false,
+    tradeAuthorized: false,
+    rule: hardOk && nearTrigger && marketOpen
+      ? "Senal fuerte: registra el objetivo, valida spread/margen en XTB y decide manualmente."
+      : "Solo lectura, aprendizaje y alerta. No prepara orden en XTB.",
   };
 }
 
@@ -3296,7 +3344,14 @@ function renderSimpleDashboard() {
       : "Lectura directa XTB"
     : "Yahoo / ultimo precio";
   const agentArmed = isAgentArmed();
-  const tradeAuthorized = isAgentTradeAuthorized();
+  const analysis = technicalAnalysisState();
+  const analysisCanGraph = analysis.completed;
+  const analysisGraphEnabled = analysis.graphEnabled;
+  const analysisStatus = !analysis.startedAt
+    ? "Sin iniciar"
+    : analysis.completed
+      ? "Lectura completa"
+      : "Analizando";
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
   const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
 
@@ -3305,7 +3360,7 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>US100 Decision Desk</h1>
-          <p class="simple-subtitle">Un solo CFD. Objetivo ${money(profile.targetUsd)}. Escudo ${money(profile.stopUsd)}. La receta se calcula por patron, puntos, volumen y margen.</p>
+          <p class="simple-subtitle">Un solo CFD. Primero lee una hora de mercado con Playwright/XTB; despues habilita grafica y objetivo tecnico.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${focusSymbol}</span>
@@ -3353,26 +3408,23 @@ function renderSimpleDashboard() {
         </div>
         <div class="simple-agent-card">
           <div>
-            <span class="simple-label">Agente IA semiautomatico</span>
+          <span class="simple-label">Agente IA semiautomatico</span>
             <strong>${agentArmed ? profile.agent.action : "PAUSADO"}</strong>
-            <small>${agentArmed ? profile.agent.rule : "No guarda, no prepara y no alerta hasta que pulses Activar bot asistido."}</small>
+            <small>${agentArmed ? profile.agent.rule : "No guarda lecturas hasta que pulses Iniciar analisis."}</small>
           </div>
           <div>
-            <span class="simple-label">Modo</span>
-            <strong>${agentArmed ? profile.agent.mode : "sin autorizacion"}</strong>
-            <small>${agentArmed ? (tradeAuthorized ? "Puede preparar la operacion asistida cuando haya senal fuerte." : "Solo lectura, aprendizaje y alerta.") : "Tu autorizacion se guarda en este navegador."}</small>
+            <span class="simple-label">Cronometro</span>
+            <strong id="analysis-timer">${analysis.startedAt ? formatTimer(analysis.remainingMs) : "60:00"}</strong>
+            <small id="analysis-status">${analysisStatus}. ${analysis.completed ? "Ya puedes graficar objetivo." : "La grafica se habilita al terminar la hora."}</small>
           </div>
           <div>
-            <span class="simple-label">Autorizacion</span>
-            <strong>${tradeAuthorized ? "Operacion asistida autorizada" : agentArmed ? "Bot armado sin operar" : "Bot apagado"}</strong>
-            <small>${tradeAuthorized ? "Permiso activo solo en este navegador. No pulsa compra/venta final en XTB." : agentArmed ? "Auto-guarda lecturas; no prepara operaciones sin tu permiso." : "Activalo solo cuando quieras empezar a operar."}</small>
+            <span class="simple-label">Control</span>
+            <strong>${analysisGraphEnabled ? "Grafica activa" : analysisCanGraph ? "Listo para graficar" : "Lectura primero"}</strong>
+            <small>Playwright solo lee XTB y guarda aprendizaje; no llena ni confirma ordenes.</small>
             <div class="simple-agent-actions">
-              ${tradeAuthorized ? `
-                <button type="button" class="permit" data-simple-action="queue-xtb-order">Preparar orden XTB</button>
-                <button type="button" class="secondary" data-simple-action="agent-stop">Apagar bot</button>
-              ` : `
-                <button type="button" class="permit" data-simple-action="agent-authorize">Activar bot asistido</button>
-              `}
+              <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Reiniciar analisis" : "Iniciar analisis"}</button>
+              <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart" ${analysisCanGraph ? "" : "disabled"}>Graficar objetivo</button>
+              <button type="button" class="secondary" data-simple-action="analysis-reset">Limpiar</button>
             </div>
           </div>
         </div>
@@ -3387,13 +3439,18 @@ function renderSimpleDashboard() {
             `).join("")}
           </div>
         </div>
-        ${primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : ""}
+        ${analysisGraphEnabled && primaryDisplay?.zones ? renderTradeChart(primaryDisplay, "main") : `
+          <div class="analysis-wait-card">
+            <strong>Grafica bloqueada por disciplina</strong>
+            <span>Primero inicia el analisis y deja que el bot lea XTB durante una hora. Luego activas Graficar objetivo para ver zonas, entrada, stop y take.</span>
+          </div>
+        `}
       </section>
 
       <section class="simple-ops single">
         <article class="simple-operation active">
           <div class="simple-head">
-            <h2>Receta XTB</h2>
+            <h2>Objetivo tecnico</h2>
             <span class="simple-badge">${profile.status}</span>
           </div>
           <div class="simple-numbers">
@@ -3406,7 +3463,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">CFD hoy</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong></div>
             <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong></div>
           </div>
-          <p class="simple-warning">Objetivo automatico: la IA asigno ${money(profile.targetUsd)} segun operabilidad ${profile.confidence}%.</p>
+          <p class="simple-warning">No es orden automatica. Es el mapa tecnico que se habilita despues de la hora de lectura.</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
@@ -3466,8 +3523,41 @@ function renderSimpleDashboard() {
       </section>
     </div>
   `;
+  scheduleAnalysisTimer();
   return;
 }
+}
+
+function refreshAnalysisTimerDom() {
+  const state = technicalAnalysisState();
+  const timer = document.getElementById("analysis-timer");
+  const status = document.getElementById("analysis-status");
+  const chartButton = document.getElementById("analysis-chart-btn");
+  if (timer) timer.textContent = state.startedAt ? formatTimer(state.remainingMs) : "60:00";
+  if (status) {
+    status.textContent = !state.startedAt
+      ? "Sin iniciar. Pulsa Iniciar analisis."
+      : state.completed
+        ? "Lectura completa. Ya puedes graficar objetivo."
+        : "Analizando. La grafica se habilita al terminar la hora.";
+  }
+  if (chartButton) chartButton.disabled = !state.completed;
+}
+
+function scheduleAnalysisTimer() {
+  window.clearInterval(analysisCountdownTimer);
+  analysisCountdownTimer = null;
+  refreshAnalysisTimerDom();
+  const state = technicalAnalysisState();
+  if (!state.startedAt || state.completed) return;
+  analysisCountdownTimer = window.setInterval(() => {
+    refreshAnalysisTimerDom();
+    if (technicalAnalysisState().completed) {
+      window.clearInterval(analysisCountdownTimer);
+      analysisCountdownTimer = null;
+      renderSimpleDashboard();
+    }
+  }, 1000);
 }
 
 function bindSimpleDashboard() {
@@ -3552,24 +3642,16 @@ function bindSimpleDashboard() {
     if (action === "save-close") saveDayClose();
     if (action === "apply-capital") applyCapitalMovement();
     if (action === "save-lesson") saveTradeLesson();
-    if (action === "agent-start") {
-      setAgentArmed(true);
-      saveAutoLearningSnapshot(true);
+    if (action === "analysis-start") {
+      startTechnicalAnalysis();
       return;
     }
-    if (action === "agent-authorize") {
-      const next = !isAgentTradeAuthorized();
-      if (next) setAgentArmed(true);
-      setAgentTradeAuthorized(next);
-      saveAutoLearningSnapshot(true);
+    if (action === "analysis-chart") {
+      enableTechnicalChart();
       return;
     }
-    if (action === "queue-xtb-order") {
-      queueXtbPendingOrder();
-      return;
-    }
-    if (action === "agent-stop") {
-      setAgentArmed(false);
+    if (action === "analysis-reset") {
+      resetTechnicalAnalysis();
       return;
     }
     if (action === "export-excel") exportMonthlyReport();
@@ -3592,31 +3674,8 @@ function updateLessonStatus(message, tone = "neutral") {
 }
 
 function queueXtbPendingOrder() {
-  if (!isAgentTradeAuthorized()) {
-    updateLessonStatus("Primero pulsa Autorizar operacion asistida. Sin ese permiso no preparo orden en XTB.", "error");
-    return;
-  }
-  const profile = us100StrategyProfile();
-  if (profile.status !== "OPERABLE") {
-    updateLessonStatus(`No envio orden a XTB: estado ${profile.status} con operabilidad ${profile.confidence}%.`, "error");
-    return;
-  }
-  const payload = {
-    id: `xtb-order-${Date.now()}`,
-    created_at: new Date().toISOString(),
-    status: "pending",
-    symbol: focusSymbol,
-    direction: profile.direction,
-    order_type: profile.direction === "LONG" ? "BUY STOP" : "SELL STOP",
-    entry_price: Number(profile.entry.toFixed(2)),
-    stop_loss: Number(profile.stopLoss.toFixed(2)),
-    take_profit: Number(profile.takeProfit.toFixed(2)),
-    volume: Number(formatVolumeForXtb(profile.volume, profile.asset)),
-    confidence: profile.confidence,
-    note: "MyActions preparo esta solicitud. Playwright llena XTB, confirmacion final manual.",
-  };
-  setLocalValue("decision_engine_xtb_order_request", JSON.stringify(payload));
-  updateLessonStatus(`Orden enviada al monitor: ${payload.symbol} ${payload.order_type} entrada ${priceText(payload.entry_price)} volumen ${formatVolumeForXtb(payload.volume, profile.asset)}.`, "ok");
+  removeLocalValue("decision_engine_xtb_order_request");
+  updateLessonStatus("Modo analisis: la app ya no prepara ordenes en XTB. Solo lee, aprende y grafica objetivo.", "neutral");
 }
 
 function applyXtbOrderRequestStatus(payload) {
