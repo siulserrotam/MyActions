@@ -634,6 +634,44 @@ body {
   stroke-dasharray: 5 5;
 }
 
+.chart-trend {
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-dasharray: 12 7;
+  opacity: 0.92;
+  filter: drop-shadow(0 0 8px rgb(0 0 0 / 0.6));
+}
+
+.chart-trend.up {
+  stroke: rgb(55 235 157 / 0.9);
+}
+
+.chart-trend.down {
+  stroke: rgb(255 102 117 / 0.92);
+}
+
+.chart-trend.flat {
+  stroke: rgb(255 207 92 / 0.9);
+}
+
+.chart-trend-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.chart-trend-label.up {
+  fill: #74f7af;
+}
+
+.chart-trend-label.down {
+  fill: #ff8791;
+}
+
+.chart-trend-label.flat {
+  fill: #ffe28a;
+}
+
 .chart-candle line {
   stroke-width: 2.4;
 }

@@ -2216,6 +2216,23 @@ function renderTradeChart(item, variant = "mini") {
       { index: candles.length - 1, label: timeLabel(candles[candles.length - 1].timestamp) },
     ].filter((tick) => tick.label)
     : [];
+  const visibleTrace = traceFrame(item.asset.symbol, chartFrameKey());
+  const firstClose = candles[0]?.c || 0;
+  const lastClose = candles[candles.length - 1]?.c || 0;
+  const trendSide = firstClose > 0 && lastClose > 0
+    ? lastClose > firstClose ? "up" : lastClose < firstClose ? "down" : "flat"
+    : "flat";
+  const trendBiasLabel = visibleTrace.bias === "WAIT"
+    ? "SIN DIRECCION"
+    : visibleTrace.bias === "LONG"
+      ? "TRAZA LONG"
+      : "TRAZA SHORT";
+  const trendStartX = candles.length ? startX : plotLeft;
+  const trendEndX = candles.length > 1 ? startX + (candles.length - 1) * candleGap : plotRight;
+  const trendMarkup = variant === "main" && firstClose > 0 && lastClose > 0 ? `
+    <line x1="${trendStartX}" y1="${y(firstClose)}" x2="${trendEndX}" y2="${y(lastClose)}" class="chart-trend ${trendSide}" />
+    <text x="${plotLeft + 8}" y="${plotTop + 18}" class="chart-trend-label ${trendSide}">${trendBiasLabel} ${numberText(visibleTrace.movePct)}%</text>
+  ` : "";
   const levelTag = (label, value, className) => variant === "main" ? `
     <g class="chart-price-tag ${className}">
       <rect x="${plotRight + 8}" y="${clamp(y(value) - 11, plotTop, plotBottom - 18)}" width="58" height="20" rx="4" />
@@ -2289,6 +2306,7 @@ function renderTradeChart(item, variant = "mini") {
         ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
         ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}
         ${visibleLevel(zones.stopLoss) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />` : ""}
+        ${trendMarkup}
         ${candleMarkup}
         ${visibleLevel(zones.takeProfit) ? levelTag("TP", zones.takeProfit, "take") : ""}
         ${visibleLevel(strategyTarget.price) ? levelTag("IA", strategyTarget.price, "ai-take") : ""}
@@ -2314,6 +2332,7 @@ function renderTradeChart(item, variant = "mini") {
           <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
           ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
           <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
+          <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige alinear 1M, 5M y 1H.</span>
         </div>
         ${technicalDecisionText(item, candles)}
       ` : ""}
@@ -3225,19 +3244,34 @@ function traceFrame(symbol, frameKey) {
   };
 }
 
+function traceDirectionNote(trace) {
+  const biasText = trace.bias === "WAIT"
+    ? "No hay gatillo confiable"
+    : trace.bias === "LONG"
+      ? "Presion compradora"
+      : "Presion vendedora";
+  const move = numberText(trace.movePct);
+  if (trace.candles < 3) return `${trace.role}: faltan velas reales para leer este marco.`;
+  return `${trace.role}: ${biasText}. Patron ${trace.pattern.name}. Tendencia ${trace.trend.direction}. Movimiento ${move}%.`;
+}
+
 function technicalTraceSummary(symbol = focusSymbol) {
   const traces = ["1m", "5m", "1h"].map((key) => traceFrame(symbol, key));
   const useful = traces.filter((trace) => trace.candles >= 3);
   const longVotes = useful.filter((trace) => trace.bias === "LONG").length;
   const shortVotes = useful.filter((trace) => trace.bias === "SHORT").length;
   const direction = longVotes >= 2 ? "LONG" : shortVotes >= 2 ? "SHORT" : "WAIT";
+  const activeDirections = new Set(useful.map((trace) => trace.bias).filter((bias) => bias !== "WAIT"));
+  const conflict = activeDirections.size > 1;
   const clarity = useful.length < 2 ? "SIN DATOS" : direction === "WAIT" ? "NO CLARO" : "CLARO";
-  const text = clarity === "CLARO"
+  const text = conflict
+    ? "Temporalidades en conflicto: una parte del mercado apunta a compra y otra a venta. Mejor esperar confirmacion limpia."
+    : clarity === "CLARO"
     ? `${direction}: al menos 2 temporalidades coinciden. Validar gatillo en 1M antes de actuar.`
     : useful.length < 2
       ? "Faltan velas para leer contexto. Mantener solo observacion."
       : "No hay alineacion suficiente entre 1M, 5M y 1H. No perseguir precio.";
-  return { traces, direction, clarity, text };
+  return { traces, direction, clarity, text, conflict };
 }
 
 function decideUs100Direction(pattern, trend, asset) {
@@ -3502,13 +3536,14 @@ function renderSimpleDashboard() {
             <span class="simple-label">Lectura multi-temporal</span>
             <strong>${traceSummary.clarity} · ${traceSummary.direction === "WAIT" ? "ESPERAR" : traceSummary.direction}</strong>
             <small>${traceSummary.text}</small>
+            <small>La app analiza 1M, 5M y 1H. La grafica visible abajo solo muestra la temporalidad seleccionada: ${selectedChartFrame.label}.</small>
           </div>
           <div class="technical-trace-grid">
             ${traceSummary.traces.map((trace) => `
               <div>
                 <span>${trace.label}</span>
                 <strong>${trace.bias === "WAIT" ? "Sin direccion" : trace.bias}</strong>
-                <small>${trace.role}: ${trace.pattern.name}. Movimiento ${numberText(trace.movePct)}%. Velas ${trace.candles}.</small>
+                <small>${traceDirectionNote(trace)} Velas ${trace.candles}.</small>
               </div>
             `).join("")}
           </div>
