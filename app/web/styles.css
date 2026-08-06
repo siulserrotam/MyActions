@@ -985,6 +985,127 @@ body {
   grid-column: 1 / -1;
 }
 
+.fib-only-card {
+  overflow: hidden;
+}
+
+.fib-focus-copy {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: #b7cec7;
+  font-size: 13px;
+}
+
+.fib-focus-copy strong {
+  color: #fff;
+  font-size: 20px;
+}
+
+.fib-focus-chart {
+  width: 100%;
+  min-height: 220px;
+  border-radius: 18px;
+  background: rgb(4 12 11 / 0.62);
+}
+
+.fib-focus-bg {
+  fill: #151f22;
+  stroke: rgb(255 255 255 / 0.07);
+}
+
+.fib-focus-zone.up {
+  fill: rgb(58 216 134 / 0.24);
+  stroke: rgb(58 216 134 / 0.7);
+}
+
+.fib-focus-zone.down {
+  fill: rgb(255 90 102 / 0.25);
+  stroke: rgb(255 90 102 / 0.72);
+}
+
+.fib-focus-swing {
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 12 8;
+}
+
+.fib-focus-swing.up {
+  stroke: #76ef9c;
+}
+
+.fib-focus-swing.down {
+  stroke: #ff737d;
+}
+
+.fib-focus-dot {
+  fill: #0b1112;
+  stroke-width: 3;
+}
+
+.fib-focus-dot.up {
+  stroke: #8cffae;
+}
+
+.fib-focus-dot.down {
+  stroke: #ff8791;
+}
+
+.fib-focus-title {
+  fill: #fff;
+  font-size: 15px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
+.fib-focus-label {
+  fill: #cbe9df;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.fib-focus-label.end {
+  text-anchor: end;
+}
+
+.fib-focus-levels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fib-focus-levels div {
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 12px;
+}
+
+.fib-focus-levels span {
+  display: block;
+  color: #8cb5aa;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.fib-focus-levels strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 20px;
+}
+
+.fib-empty {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.055);
+  padding: 18px;
+  color: #b7cec7;
+  font-weight: 800;
+}
+
 .simple-guide div {
   border-radius: 16px;
   background: rgb(255 255 255 / 0.055);

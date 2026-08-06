@@ -2416,6 +2416,70 @@ function renderMiniTradeChart(item) {
   return renderTradeChart(item, "mini");
 }
 
+function renderFibOnlyCard(item) {
+  const candles = realCandlesForItem(item);
+  const fib = latestSwingFib(candles);
+  if (!fib) {
+    return `
+      <article class="simple-operation fib-only-card">
+        <div class="simple-head">
+          <h2>Zona Fibonacci</h2>
+          <span class="simple-badge">auto</span>
+        </div>
+        <div class="fib-empty">Aun no hay suficientes velas para dibujar la ultima reaccion.</div>
+      </article>
+    `;
+  }
+  const width = 520;
+  const height = 230;
+  const left = 34;
+  const right = width - 34;
+  const top = 28;
+  const bottom = height - 54;
+  const values = [fib.startPrice, fib.endPrice, fib.goldenLow, fib.goldenHigh].filter((value) => Number.isFinite(value));
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const span = Math.max(rawMax - rawMin, rawMax * 0.0006, 0.0001);
+  const min = rawMin - span * 0.3;
+  const max = rawMax + span * 0.3;
+  const y = (value) => clamp(bottom - ((value - min) / (max - min)) * (bottom - top), top, bottom);
+  const zoneTop = Math.min(y(fib.goldenLow), y(fib.goldenHigh));
+  const zoneBottom = Math.max(y(fib.goldenLow), y(fib.goldenHigh));
+  const swingLabel = fib.direction === "up" ? "Impulso alcista" : "Impulso bajista";
+  const zoneLabel = fib.direction === "up" ? "Zona verde: esperar retroceso y rechazo comprador" : "Zona roja: esperar rebote y rechazo vendedor";
+  const actionLabel = fib.direction === "up"
+    ? "Comprar solo si el precio respeta la zona y vuelve a subir."
+    : "Vender solo si el precio rechaza la zona y vuelve a caer.";
+  return `
+    <article class="simple-operation fib-only-card">
+      <div class="simple-head">
+        <h2>Zona Fibonacci</h2>
+        <span class="simple-badge">auto</span>
+      </div>
+      <div class="fib-focus-copy">
+        <strong>${swingLabel}</strong>
+        <span>${zoneLabel}</span>
+      </div>
+      <svg class="fib-focus-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Zona Fibonacci 50 a 61.8">
+        <rect x="${left}" y="${top}" width="${right - left}" height="${bottom - top}" rx="14" class="fib-focus-bg" />
+        <rect x="${left}" y="${zoneTop}" width="${right - left}" height="${Math.max(42, zoneBottom - zoneTop)}" rx="13" class="fib-focus-zone ${fib.direction}" />
+        <line x1="${left + 28}" y1="${y(fib.startPrice)}" x2="${right - 28}" y2="${y(fib.endPrice)}" class="fib-focus-swing ${fib.direction}" />
+        <circle cx="${left + 28}" cy="${y(fib.startPrice)}" r="5" class="fib-focus-dot ${fib.direction}" />
+        <circle cx="${right - 28}" cy="${y(fib.endPrice)}" r="5" class="fib-focus-dot ${fib.direction}" />
+        <text x="${left + 12}" y="${clamp(zoneTop + 24, top + 22, bottom - 8)}" class="fib-focus-title">ZONA FIB 50%-61.8%</text>
+        <text x="${left + 12}" y="${y(fib.startPrice) - 8}" class="fib-focus-label">Inicio ${numberText(fib.startPrice)}</text>
+        <text x="${right - 12}" y="${y(fib.endPrice) - 8}" class="fib-focus-label end">Final ${numberText(fib.endPrice)}</text>
+      </svg>
+      <div class="fib-focus-levels">
+        <div><span>50%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.5)?.price)}</strong></div>
+        <div><span>61.8%</span><strong>${numberText(fib.levels.find((level) => level.ratio === 0.618)?.price)}</strong></div>
+      </div>
+      <p class="simple-warning">${actionLabel}</p>
+      <p class="simple-tiny">Esta tarjeta reemplaza los parametros editables: todo se calcula automaticamente desde la ultima reaccion visible.</p>
+    </article>
+  `;
+}
+
 function inverseDirection(direction) {
   return direction === "LONG" ? "SHORT" : "LONG";
 }
@@ -3762,19 +3826,7 @@ function renderSimpleDashboard() {
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
-        <article class="simple-operation">
-          <div class="simple-head">
-            <h2>Parametros</h2>
-            <span class="simple-badge">editable</span>
-          </div>
-          <div class="simple-form-grid two">
-            <div class="simple-field"><span class="simple-label">Objetivo automatico USD</span><span class="simple-value">${money(profile.targetUsd)}</span><span class="simple-tiny">$50 base; $100 desde 65%; $150 desde 78%; $200 desde 88%.</span></div>
-            <div class="simple-field"><span class="simple-label">Stop automatico USD</span><span class="simple-value">${money(profile.stopUsd)}</span><span class="simple-tiny">Se ajusta solo: meta $50 usa escudo $50; metas mayores usan escudo $100.</span></div>
-            <label class="simple-field"><span class="simple-label">Precio XTB real</span><input type="text" inputmode="decimal" value="${document.getElementById("xtb-price")?.value || ""}" data-sync-target="xtb-price" placeholder="Pega precio XTB" /></label>
-            <label class="simple-field"><span class="simple-label">Capital operativo</span><input type="text" inputmode="decimal" value="${capital}" data-sync-target="account-balance" /></label>
-          </div>
-          <p class="simple-tiny">Metas limpias: $50 base, $100 requiere 65%, $150 requiere 78%, $200 requiere 88%. El % CFD se toma automaticamente de XTB si el monitor esta activo.</p>
-        </article>
+        ${renderFibOnlyCard(primaryDisplay)}
       </section>
 
       <section class="simple-panel">
