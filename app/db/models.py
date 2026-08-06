@@ -22,6 +22,21 @@ class MarketBar(Base):
     splits: Mapped[float] = mapped_column(Float, default=0)
 
 
+class XtbSnapshot(Base):
+    __tablename__ = "xtb_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    bid: Mapped[float] = mapped_column(Float, default=0)
+    ask: Mapped[float] = mapped_column(Float, default=0)
+    price: Mapped[float] = mapped_column(Float)
+    change_pct: Mapped[float] = mapped_column(Float, default=0)
+    source: Mapped[str] = mapped_column(String(64), default="xtb")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    captured_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
 class PredictionLog(Base):
     __tablename__ = "prediction_logs"
 

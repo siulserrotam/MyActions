@@ -1150,6 +1150,10 @@ function renderPriceGapStatus() {
 async function refreshLivePrices({ resetSelected = false } = {}) {
   const symbols = focusSymbol;
   try {
+    const snapshotApplied = await refreshXtbSnapshotFromServer();
+    if (snapshotApplied) {
+      return;
+    }
     updateLiveStatus("Live prices: actualizando...");
     const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}&ts=${Date.now()}`, {
       cache: "no-store",
@@ -1184,7 +1188,40 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
   }
 }
 
-function applyXtbQuoteBatch(items = []) {
+async function refreshXtbSnapshotFromServer() {
+  try {
+    const response = await fetch(`/xtb/snapshot/latest?symbol=${encodeURIComponent(focusSymbol)}&ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) return false;
+    const payload = await response.json();
+    const items = (payload.items || [])
+      .map((item) => {
+        const raw = item.payload || {};
+        const price = Number(item.price || raw.price || 0);
+        const symbol = String(item.symbol || raw.symbol || "").trim().toUpperCase();
+        if (!symbol || price <= 0) return null;
+        return {
+          symbol,
+          price,
+          bid: Number(item.bid || raw.bid || 0) || null,
+          ask: Number(item.ask || raw.ask || 0) || null,
+          change_pct: Number(item.change_pct || raw.change_pct || 0) || 0,
+          source: item.source || raw.source || "xtb_server_snapshot",
+          updated_at: item.updated_at || raw.updated_at || new Date().toISOString(),
+        };
+      })
+      .filter(Boolean);
+    if (!items.length) return false;
+    applyXtbQuoteBatch(items, { source: "xtb_server_snapshot" });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function applyXtbQuoteBatch(items = [], options = {}) {
+  const source = options.source || "xtb";
   const validQuotes = items
     .filter((item) => String(item.symbol || "").trim().toUpperCase() === focusSymbol)
     .map((item) => {
@@ -1210,19 +1247,19 @@ function applyXtbQuoteBatch(items = []) {
         regular_change_pct: previousProviderQuote.regular_change_pct,
         intraday_change_pct: previousProviderQuote.intraday_change_pct,
         market_phase: previousProviderQuote.market_phase || (shouldIgnoreXtbMove ? "awaiting_yahoo" : "xtb"),
-        source: "xtb",
-        signal_source: shouldKeepProviderMove ? previousSignalSource : shouldIgnoreXtbMove ? "awaiting_yahoo_premarket" : "xtb_visible_text",
+        source,
+        signal_source: shouldKeepProviderMove ? previousSignalSource : shouldIgnoreXtbMove ? "awaiting_yahoo_premarket" : source,
         updated_at: item.updated_at || new Date().toISOString(),
       };
     })
     .filter(Boolean);
 
   validQuotes.forEach(applyLiveQuote);
-  saveQuoteBars(validQuotes, "xtb_visible_text");
+  saveQuoteBars(validQuotes, source);
   renderSimpleDashboard();
   const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
   if (best && !isManualOpportunityLocked()) {
-    applySelectedOpportunity(best, "xtb");
+    applySelectedOpportunity(best, source);
     updateLiveStatus(`XTB: mejor CFD visible ${best.asset.symbol} (${best.directionLabel}, score ${Math.round(best.score)}).`, "ok");
   } else if (best) {
     updateLiveStatus(`XTB: precios actualizados. Mantengo tu seleccion manual ${selectedAsset.symbol}.`, "ok");
@@ -1546,12 +1583,12 @@ function marketRefreshProfile() {
   const { weekday, total } = nyMarketMinutes();
   const isWeekday = !["Sat", "Sun"].includes(weekday);
   if (isWeekday && total >= 9 * 60 + 30 && total < 16 * 60) {
-    return { ms: 30 * 1000, label: "mercado abierto, cada 30 seg" };
+    return { ms: 3 * 1000, label: "mercado abierto, XTB servidor cada 3 seg" };
   }
   if (isWeekday && total >= 4 * 60 && total < 20 * 60) {
-    return { ms: 30 * 1000, label: "pre/post-market Yahoo, cada 30 seg" };
+    return { ms: 5 * 1000, label: "pre/post-market, XTB servidor cada 5 seg" };
   }
-  return { ms: 5 * 60 * 1000, label: "mercado cerrado profundo, cada 5 min" };
+  return { ms: 30 * 1000, label: "mercado cerrado profundo, cada 30 seg" };
 }
 
 function scheduleAutoRefresh() {
@@ -3252,7 +3289,12 @@ function renderSimpleDashboard() {
   const movement = document.getElementById("capital-movement")?.value || "";
   const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
-  const sourceLabel = liveQuotes[focusSymbol]?.source === "xtb" ? "Lectura directa XTB" : "Yahoo / ultimo precio";
+  const quoteSource = String(liveQuotes[focusSymbol]?.source || "");
+  const sourceLabel = quoteSource.startsWith("xtb")
+    ? quoteSource === "xtb_server_snapshot"
+      ? "XTB servidor"
+      : "Lectura directa XTB"
+    : "Yahoo / ultimo precio";
   const agentArmed = isAgentArmed();
   const tradeAuthorized = isAgentTradeAuthorized();
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";

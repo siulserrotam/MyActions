@@ -39,6 +39,7 @@ from app.services.decision_engine import DecisionEngineService
 from app.services.live_market import LiveMarketService
 from app.services.lessons import TradeLessonService
 from app.services.market_bars import MarketBarService
+from app.services.xtb_snapshots import XtbSnapshotService
 
 router = APIRouter()
 WEB_DIR = settings.model_dir.parent / "app" / "web"
@@ -102,6 +103,21 @@ class MarketBarQuote(BaseModel):
 class MarketBarsRequest(BaseModel):
     source: str = Field(default="dashboard", max_length=64)
     items: list[MarketBarQuote] = Field(default_factory=list, max_length=80)
+
+
+class XtbSnapshotItem(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    price: float = Field(gt=0)
+    bid: float = Field(default=0, ge=0)
+    ask: float = Field(default=0, ge=0)
+    change_pct: float = 0
+    source: str = Field(default="xtb", max_length=64)
+    updated_at: str | None = None
+
+
+class XtbSnapshotRequest(BaseModel):
+    source: str = Field(default="xtb", max_length=64)
+    items: list[XtbSnapshotItem] = Field(default_factory=list, max_length=40)
 
 
 def validate_ticker(ticker: str) -> str:
@@ -432,6 +448,35 @@ def save_market_bars(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"No se pudieron guardar velas: {exc}",
+        ) from exc
+
+
+@router.get("/xtb/snapshot/latest")
+def latest_xtb_snapshot(
+    symbol: str | None = Query(default="US100", max_length=32),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        return XtbSnapshotService().latest(session, symbol=symbol)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo cargar snapshot XTB: {exc}",
+        ) from exc
+
+
+@router.post("/xtb/snapshot")
+def save_xtb_snapshot(
+    payload: XtbSnapshotRequest,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    try:
+        items = [item.model_dump() for item in payload.items]
+        return XtbSnapshotService().save(session, items=items, source=payload.source)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo guardar snapshot XTB: {exc}",
         ) from exc
 
 

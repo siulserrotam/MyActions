@@ -2,6 +2,7 @@ import { connectChrome, pickBrowserContext, classifyPage, normalize, parseMoney 
 
 const SIDE = (process.env.XTB_SYNC_SIDE || 'mid').toLowerCase();
 const INTERVAL_MS = Number.parseInt(process.env.XTB_SYNC_INTERVAL_MS || '1000', 10);
+const SNAPSHOT_ENDPOINT = process.env.XTB_SNAPSHOT_ENDPOINT || 'https://api.manantiallodge.com/xtb/snapshot';
 const RUN_ONCE = process.argv.includes('--once');
 
 function quotePrice(value) {
@@ -176,6 +177,21 @@ async function sendQuoteBatchToDashboard(page, quotes) {
   }, items);
 
   return { applied, items };
+}
+
+async function publishQuoteSnapshot(items) {
+  if (!items?.length || !SNAPSHOT_ENDPOINT) return { published: false, count: 0 };
+  try {
+    const response = await fetch(SNAPSHOT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'xtb-browser-sync', items }),
+      signal: AbortSignal.timeout(2500)
+    });
+    return { published: response.ok, count: items.length, status: response.status };
+  } catch (error) {
+    return { published: false, count: 0, error: error.message };
+  }
 }
 
 async function sendTicketToDashboard(page, ticket, symbol) {
@@ -379,6 +395,7 @@ async function syncOnce() {
     const xtbText = await xtbPage.evaluate(() => document.body?.innerText || '');
     const quotes = extractXtbQuotes(xtbText);
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
+    const snapshotPublish = await publishQuoteSnapshot(quoteBatch.items);
     const ticket = extractXtbTicket(xtbText);
     await dashboardPage.waitForTimeout(100);
     const afterBatchState = await dashboardPage.evaluate(() => ({
@@ -414,6 +431,7 @@ async function syncOnce() {
       side: SIDE,
       xtb: quote || null,
       xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
+      snapshot_publish: snapshotPublish,
       order_preparation: orderPreparation,
       applied_xtb_price: applied,
       dashboard_market_price_before: dashboardState.marketPrice,
