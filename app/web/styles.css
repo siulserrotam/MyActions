@@ -674,9 +674,10 @@ body {
 
 .chart-forecast {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 2.6;
   stroke-linecap: round;
-  stroke-dasharray: 10 8;
+  stroke-linejoin: round;
+  stroke-dasharray: 9 7;
   opacity: 0.82;
   filter: drop-shadow(0 0 8px rgb(0 0 0 / 0.65));
 }
@@ -694,8 +695,20 @@ body {
 }
 
 .chart-forecast.confirmed {
-  stroke-width: 4;
+  stroke-width: 3.4;
   opacity: 0.95;
+}
+
+.chart-forecast-divider {
+  stroke: rgb(255 255 255 / 0.14);
+  stroke-width: 1;
+  stroke-dasharray: 3 7;
+}
+
+.chart-forecast-step {
+  fill: #101718;
+  stroke: rgb(246 196 83 / 0.9);
+  stroke-width: 2.5;
 }
 
 .chart-forecast-dot {
@@ -709,12 +722,6 @@ body {
 
 .chart-forecast-dot.confirmed {
   stroke: rgb(116 247 175 / 0.95);
-}
-
-.chart-forecast-risk {
-  stroke: rgb(255 90 102 / 0.38);
-  stroke-width: 2;
-  stroke-dasharray: 4 7;
 }
 
 .chart-forecast-label {

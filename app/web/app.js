@@ -2313,12 +2313,14 @@ function renderTradeChart(item, variant = "mini") {
   const chartHeight = variant === "main" ? 430 : 112;
   const plotLeft = variant === "main" ? 54 : 10;
   const plotRight = variant === "main" ? chartWidth - 96 : 230;
+  const forecastSpace = variant === "main" ? 112 : 0;
+  const dataRight = Math.max(plotLeft + 80, plotRight - forecastSpace);
   const plotTop = variant === "main" ? 34 : 8;
   const plotBottom = variant === "main" ? chartHeight - 72 : 96;
   const plotHeight = plotBottom - plotTop;
   const y = (value) => clamp(plotBottom - ((value - min) / span) * plotHeight, plotTop, plotBottom);
-  const candleWidth = variant === "main" ? clamp((plotRight - plotLeft) / Math.max(candles.length, 1) * 0.54, 8, 18) : 3.8;
-  const candleGap = candles.length > 1 ? (plotRight - plotLeft) / (candles.length - 1) : 8;
+  const candleWidth = variant === "main" ? clamp((dataRight - plotLeft) / Math.max(candles.length, 1) * 0.54, 8, 18) : 3.8;
+  const candleGap = candles.length > 1 ? (dataRight - plotLeft) / (candles.length - 1) : 8;
   const startX = plotLeft;
   const priceTicks = Array.from({ length: 5 }, (_, index) => max - (span * index) / 4);
   const activeFrame = chartFrameConfig();
@@ -2399,18 +2401,20 @@ function renderTradeChart(item, variant = "mini") {
     if (variant !== "main" || !candles.length || !Number.isFinite(zones.entry) || !Number.isFinite(zones.takeProfit)) return "";
     const lastX = startX + (candles.length - 1) * candleGap;
     const lastY = y(lastClose || zones.price);
-    const entryX = clamp(lastX + 34, plotLeft + 24, plotRight - 52);
-    const targetX = clamp(lastX + 82, plotLeft + 72, plotRight - 8);
+    const entryX = clamp(lastX + forecastSpace * 0.38, lastX + 18, plotRight - 54);
+    const targetX = clamp(lastX + forecastSpace * 0.86, entryX + 24, plotRight - 8);
     const entryY = y(zones.entry);
     const targetY = y(zones.takeProfit);
-    const stopY = y(zones.stopLoss);
     const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready);
-    const label = confirmed ? "PRONOSTICO SI CONFIRMA" : "ESCENARIO ESPERADO";
+    const label = confirmed ? "PRONOSTICO" : "ESCENARIO";
+    const labelX = clamp(lastX + 8, plotLeft + 8, plotRight - 84);
+    const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
     return `
-      <path d="M ${lastX} ${lastY} C ${entryX - 18} ${lastY}, ${entryX - 8} ${entryY}, ${entryX} ${entryY} S ${targetX - 18} ${targetY}, ${targetX} ${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />
+      <polyline points="${lastX},${lastY} ${entryX},${entryY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
       <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
-      <line x1="${lastX}" x2="${targetX}" y1="${stopY}" y2="${stopY}" class="chart-forecast-risk" />
-      <text x="${clamp(entryX - 12, plotLeft + 8, plotRight - 120)}" y="${clamp(Math.min(entryY, targetY) - 12, plotTop + 16, plotBottom - 8)}" class="chart-forecast-label">${label}</text>
+      <text x="${labelX}" y="${labelY}" class="chart-forecast-label">${label}</text>
     `;
   })();
   const levelTag = (label, value, className) => variant === "main" ? `
