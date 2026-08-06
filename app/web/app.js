@@ -2121,46 +2121,29 @@ function realCandlesForItem(item) {
 
 function latestSwingFib(candles) {
   if (!Array.isArray(candles) || candles.length < 6) return null;
-  const lookbackCount = Math.min(candles.length, 30);
+  const lookbackCount = Math.min(candles.length, 14);
   const offset = candles.length - lookbackCount;
   const window = candles.slice(offset);
-  const tailStart = Math.max(0, window.length - Math.max(8, Math.ceil(window.length * 0.4)));
-  const tail = window.slice(tailStart);
-  const firstClose = Number(window[0]?.c || 0);
+  const endIndex = window.length - 1;
   const lastClose = Number(window[window.length - 1]?.c || 0);
-  const recentClose = Number(window[Math.max(0, window.length - 7)]?.c || firstClose);
-  const netMove = lastClose - firstClose;
-  const recentMove = lastClose - recentClose;
-  const direction = Math.abs(recentMove) >= Math.abs(netMove) * 0.25
-    ? recentMove >= 0 ? "up" : "down"
-    : netMove >= 0 ? "up" : "down";
+  const recentClose = Number(window[Math.max(0, window.length - 4)]?.c || lastClose);
+  const direction = lastClose >= recentClose ? "up" : "down";
 
-  let end = direction === "up"
-    ? { index: tailStart, price: 0 }
-    : { index: tailStart, price: Number.POSITIVE_INFINITY };
-  tail.forEach((candle, localIndex) => {
-    const index = tailStart + localIndex;
-    if (direction === "up" && Number(candle.h) >= end.price) end = { index, price: Number(candle.h) };
-    if (direction === "down" && Number(candle.l) <= end.price) end = { index, price: Number(candle.l) };
-  });
-
-  const beforeEnd = window.slice(0, Math.max(1, end.index + 1));
   let start = direction === "up"
     ? { index: 0, price: Number.POSITIVE_INFINITY }
     : { index: 0, price: 0 };
-  beforeEnd.forEach((candle, index) => {
+  window.forEach((candle, index) => {
+    if (index >= endIndex) return;
     if (direction === "up" && Number(candle.l) <= start.price) start = { index, price: Number(candle.l) };
     if (direction === "down" && Number(candle.h) >= start.price) start = { index, price: Number(candle.h) };
   });
 
-  if (start.index >= end.index) {
-    const fallbackStartIndex = Math.max(0, end.index - 6);
-    const fallbackStart = window[fallbackStartIndex];
-    start = {
-      index: fallbackStartIndex,
-      price: direction === "up" ? Number(fallbackStart.l) : Number(fallbackStart.h),
-    };
-  }
+  const end = {
+    index: endIndex,
+    price: direction === "up"
+      ? Math.max(Number(window[endIndex].h || 0), lastClose)
+      : Math.min(Number(window[endIndex].l || 0), lastClose),
+  };
 
   const startPrice = start.price;
   const endPrice = end.price;
@@ -2316,7 +2299,7 @@ function renderTradeChart(item, variant = "mini") {
     <rect x="${plotLeft}" y="${Math.min(y(fib.goldenLow), y(fib.goldenHigh))}" width="${plotRight - plotLeft}" height="${Math.max(6, Math.abs(y(fib.goldenLow) - y(fib.goldenHigh)))}" rx="6" class="chart-fib-golden ${fib.direction}" />
   ` : "";
   const fibLineMarkup = fib ? fib.levels
-    .filter((level) => visibleLevel(level.price))
+    .filter((level) => level.key && visibleLevel(level.price))
     .map((level) => `
       <g class="chart-fib-level ${level.key ? "key" : ""}">
         <line x1="${plotLeft}" x2="${plotRight}" y1="${y(level.price)}" y2="${y(level.price)}" />
