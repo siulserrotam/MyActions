@@ -2350,6 +2350,27 @@ function renderTradeChart(item, variant = "mini") {
       </g>
     `;
   }).join("");
+  const chartLegendMarkup = `
+    <div class="chart-legend">
+      <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
+      <span class="ai-take">IA ${numberText(strategyTarget.price)}</span>
+      <span class="entry">Entrada ${numberText(zones.entry)}</span>
+      <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
+    </div>
+  `;
+  const mainExplanationMarkup = variant === "main" ? `
+    <div class="trade-zones">
+      <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
+      <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
+      <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
+      <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
+      ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
+      <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
+      <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
+      ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 50%-61.8% ${fib.direction === "up" ? "verde: retroceso comprador posible" : "roja: rebote vendedor posible"}. No reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
+    </div>
+    ${technicalDecisionText(item, candles)}
+  ` : "";
   return `
     <div class="trade-chart trade-chart-${variant}" aria-label="Mapa rapido de ${title}">
       ${variant === "main" ? `
@@ -2364,6 +2385,7 @@ function renderTradeChart(item, variant = "mini") {
           </div>
         </div>
       ` : ""}
+      ${variant === "main" ? chartLegendMarkup + mainExplanationMarkup : ""}
       <svg viewBox="0 0 ${chartWidth} ${chartHeight}" role="img">
         <rect x="${plotLeft}" y="${plotTop}" width="${plotRight - plotLeft}" height="${plotHeight}" rx="8" class="chart-plot-bg" />
         ${axisMarkup}
@@ -2389,25 +2411,7 @@ function renderTradeChart(item, variant = "mini") {
           <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas` : "Visual tactico"}${chartRangeText ? ` · ${chartRangeText}` : ""}</text>
         ` : ""}
       </svg>
-      <div class="chart-legend">
-        <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
-        <span class="ai-take">IA ${numberText(strategyTarget.price)}</span>
-        <span class="entry">Entrada ${numberText(zones.entry)}</span>
-        <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
-      </div>
-      ${variant === "main" ? `
-        <div class="trade-zones">
-          <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
-          <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
-          <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
-          <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
-          ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
-          <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
-          <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
-          ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 50%-61.8% ${fib.direction === "up" ? "verde: retroceso comprador posible" : "roja: rebote vendedor posible"}. No reemplaza la confirmacion 4H/15M/1M.</span>` : ""}
-        </div>
-        ${technicalDecisionText(item, candles)}
-      ` : ""}
+      ${variant !== "main" ? chartLegendMarkup : ""}
     </div>
   `;
 }
