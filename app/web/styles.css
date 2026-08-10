@@ -699,6 +699,25 @@ body {
   opacity: 0.95;
 }
 
+.chart-forecast.running,
+.chart-forecast.target {
+  stroke: rgb(116 247 175 / 0.95);
+  stroke-width: 3;
+  opacity: 0.96;
+}
+
+.chart-forecast.triggered {
+  stroke: rgb(246 196 83 / 0.95);
+  stroke-width: 2.8;
+  opacity: 0.82;
+}
+
+.chart-forecast.reset {
+  stroke: rgb(148 163 184 / 0.85);
+  stroke-dasharray: 4 10;
+  opacity: 0.46;
+}
+
 .chart-forecast-divider {
   stroke: rgb(255 255 255 / 0.14);
   stroke-width: 1;

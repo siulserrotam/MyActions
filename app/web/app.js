@@ -2264,6 +2264,89 @@ function evaluateFibPullbackSetup(symbol, direction = "WAIT") {
   };
 }
 
+function evaluateForecastProgress(item, candles, zones, fibSetup) {
+  if (!Array.isArray(candles) || !candles.length || !zones) {
+    return {
+      state: "waiting",
+      label: "ESPERAR",
+      detail: "Aun no hay velas suficientes para seguir el escenario.",
+      progressPct: 0,
+      invalidated: false,
+      confirmed: false,
+    };
+  }
+
+  const directionSign = item.direction === "SHORT" ? -1 : 1;
+  const entry = Number(zones.entry);
+  const target = Number(zones.takeProfit);
+  const stop = Number(zones.stopLoss);
+  const last = candles[candles.length - 1];
+  const lastClose = Number(last.c || zones.price);
+  const recent = candles.slice(-8);
+  const touchedEntry = item.direction === "SHORT"
+    ? recent.some((candle) => Number(candle.l) <= entry)
+    : recent.some((candle) => Number(candle.h) >= entry);
+  const touchedTarget = item.direction === "SHORT"
+    ? recent.some((candle) => Number(candle.l) <= target)
+    : recent.some((candle) => Number(candle.h) >= target);
+  const touchedStop = item.direction === "SHORT"
+    ? recent.some((candle) => Number(candle.h) >= stop)
+    : recent.some((candle) => Number(candle.l) <= stop);
+  const invalidated = Boolean(touchedStop || fibSetup?.rejected);
+  const distance = Math.max(Math.abs(target - entry), 0.00001);
+  const progressPct = clamp(((lastClose - entry) * directionSign / distance) * 100, -100, 130);
+
+  if (invalidated) {
+    return {
+      state: "reset",
+      label: "REINICIAR",
+      detail: "El precio contradijo el escenario o toco zona de invalidez. Ignora esta ruta y espera nuevo impulso.",
+      progressPct,
+      invalidated: true,
+      confirmed: false,
+    };
+  }
+  if (touchedTarget) {
+    return {
+      state: "target",
+      label: "META TOCADA",
+      detail: "El recorrido esperado llego a la zona objetivo. No perseguir extension sin nuevo patron.",
+      progressPct: 100,
+      invalidated: false,
+      confirmed: true,
+    };
+  }
+  if (touchedEntry && progressPct > 0) {
+    return {
+      state: "running",
+      label: `EN CURSO ${Math.round(progressPct)}%`,
+      detail: "El precio activo el gatillo y avanza a favor. Mantener lectura mientras no regrese al stop.",
+      progressPct,
+      invalidated: false,
+      confirmed: true,
+    };
+  }
+  if (touchedEntry) {
+    return {
+      state: "triggered",
+      label: "GATILLO TOCADO",
+      detail: "Toco entrada, pero aun no avanza con claridad. Espera confirmacion de la siguiente vela.",
+      progressPct,
+      invalidated: false,
+      confirmed: false,
+    };
+  }
+
+  return {
+    state: "waiting",
+    label: "ESPERAR GATILLO",
+    detail: "El precio aun no activo la entrada. El escenario solo es una ruta posible.",
+    progressPct,
+    invalidated: false,
+    confirmed: false,
+  };
+}
+
 function renderTradeChart(item, variant = "mini") {
   const zones = item.zones;
   if (!zones) return "";
@@ -2388,6 +2471,7 @@ function renderTradeChart(item, variant = "mini") {
   ` : "";
   const fib = variant === "main" ? latestSwingFib(candles) : null;
   const fibSetup = variant === "main" ? item.fibSetup || evaluateFibPullbackSetup(item.asset.symbol, item.direction) : null;
+  const forecastState = variant === "main" ? evaluateForecastProgress(item, candles, zones, fibSetup) : null;
   const fibGoldenMarkup = (() => {
     if (!fib || (!visibleLevel(fib.goldenLow) && !visibleLevel(fib.goldenHigh))) return "";
     if (variant === "main") return "";
@@ -2423,13 +2507,14 @@ function renderTradeChart(item, variant = "mini") {
     const bounceY = y(Number.isFinite(bouncePrice) && bouncePrice > 0 ? bouncePrice : lastPrice);
     const rejectY = y(Number.isFinite(rejectPrice) && rejectPrice > 0 ? rejectPrice : lastPrice);
     const pullbackY = y(Number.isFinite(pullbackPrice) && pullbackPrice > 0 ? pullbackPrice : zones.entry);
-    const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready);
-    const label = confirmed ? "PRONOSTICO" : "ESCENARIO";
+    const confirmed = item.status === "OPERABLE" && (!fibSetup || fibSetup.ready) && !forecastState?.invalidated;
+    const label = forecastState?.label || (confirmed ? "PRONOSTICO" : "ESCENARIO");
     const labelX = clamp(lastX + 8, plotLeft + 8, plotRight - 84);
     const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
+    const forecastClass = forecastState?.state || "waiting";
     return `
       <line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />
-      <polyline points="${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY} ${pullbackX},${pullbackY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"}" />
+      <polyline points="${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY} ${pullbackX},${pullbackY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"} ${forecastClass}" />
       <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
       <circle cx="${rejectX}" cy="${rejectY}" r="3" class="chart-forecast-step muted" />
       <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
@@ -2498,6 +2583,7 @@ function renderTradeChart(item, variant = "mini") {
   `;
   const mainExplanationMarkup = variant === "main" ? `
     <div class="trade-zones">
+      ${forecastState ? `<span><b>Pronostico vivo:</b> ${forecastState.detail}</span>` : ""}
       <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
       <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
       <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
@@ -2506,7 +2592,7 @@ function renderTradeChart(item, variant = "mini") {
       <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
       <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
       ${fib ? `<span>Fibonacci ultimo impulso ${fib.direction === "up" ? "alcista" : "bajista"}: inicio ${numberText(fib.startPrice)}, fin ${numberText(fib.endPrice)}. Zona 80%-90% ${fib.direction === "up" ? "retroceso profundo comprador" : "rebote profundo vendedor"}. Si atraviesa 95%-100%, se reinicia la lectura.</span>` : ""}
-      ${fibSetup ? `<span>Pronostico lineal: ${fibSetup.ready ? "activo solo si el rechazo Fib 15M se mantiene" : "solo escenario; no copiar receta hasta confirmacion"}. La linea muestra el recorrido esperado hacia entrada y TP.</span>` : ""}
+      ${fibSetup ? `<span>Pronostico lineal: ${fibSetup.ready ? "activo solo si el rechazo Fib 15M se mantiene" : "solo escenario; no copiar receta hasta confirmacion"}. Si falla stop/Fib, se reinicia automaticamente con el nuevo impulso.</span>` : ""}
     </div>
     ${technicalDecisionText(item, candles)}
   ` : "";
