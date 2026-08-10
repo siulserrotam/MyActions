@@ -4014,6 +4014,61 @@ function buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, s
   return `Operable con confirmacion: ${model}. ${trend.label}. Estrategia: ${side}, entrada por stop, escudo inmediato y objetivo fijo.${fibText}`;
 }
 
+function buildOperateDecision(profile) {
+  const checks = [
+    {
+      label: "Tesis del dia",
+      ok: Boolean(profile.dayThesis?.stable && !profile.dayThesis?.invalidated),
+      detail: profile.dayThesis?.stable
+        ? `Bloque estable: ${profile.dayThesis.direction}.`
+        : profile.dayThesis?.reason || "Aun no hay direccion diaria confiable.",
+    },
+    {
+      label: "Fibonacci 15M",
+      ok: Boolean(profile.fibSetup?.ready && !profile.fibSetup?.rejected),
+      detail: profile.fibSetup?.ready
+        ? "Zona 80-90 tocada y rechazo confirmado."
+        : profile.fibSetup?.detail || "Falta rechazo Fib 15M.",
+    },
+    {
+      label: "Gatillo 1M",
+      ok: Boolean(profile.playbook?.entryDistancePct <= 0.18),
+      detail: profile.playbook?.entryDistancePct <= 0.18
+        ? `Precio cerca de entrada (${numberText(profile.playbook.entryDistancePct)}%).`
+        : `Precio lejos de entrada (${numberText(profile.playbook?.entryDistancePct || 0)}%).`,
+    },
+    {
+      label: "Operabilidad",
+      ok: profile.confidence >= 72,
+      detail: profile.confidence >= 72
+        ? `${profile.confidence}% suficiente para preparar.`
+        : `${profile.confidence}% bajo; esperar mas confirmacion.`,
+    },
+    {
+      label: "Receta XTB",
+      ok: Number(profile.volume) > 0 && Number(profile.entry) > 0 && Number(profile.stopLoss) > 0 && Number(profile.takeProfit) > 0,
+      detail: Number(profile.volume) > 0
+        ? `Volumen ${formatVolumeForXtb(profile.volume, profile.asset)} con niveles validos.`
+        : "Sin volumen valido para operar.",
+    },
+  ];
+  const firstBlocker = checks.find((check) => !check.ok);
+  const finalStatus = profile.status === "OPERABLE" && !firstBlocker ? "OPERAR" : "NO OPERAR";
+  return {
+    status: finalStatus,
+    tone: finalStatus === "OPERAR" ? "ok" : profile.direction === "WAIT" ? "danger" : "warn",
+    title: finalStatus === "OPERAR"
+      ? `Operar solo ${profile.directionLabel}`
+      : firstBlocker
+        ? `Esperar: falta ${firstBlocker.label}`
+        : "Esperar confirmacion",
+    detail: finalStatus === "OPERAR"
+      ? "Puedes preparar la orden stop/limitada en XTB. Ultima validacion manual: spread, margen y simbolo US100 CFD."
+      : firstBlocker?.detail || "No hay setup suficiente.",
+    checks,
+  };
+}
+
 function totalOperationResult() {
   return [1, 2, 3, 4].reduce((total, slot) => total + operationResultValue(slot), 0);
 }
@@ -4129,6 +4184,7 @@ function renderSimpleDashboard() {
   const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
   const actionableOrder = profile.status === "OPERABLE";
   const thesis = profile.dayThesis;
+  const operateDecision = buildOperateDecision(profile);
   const objectiveOrderLabel = actionableOrder
     ? profile.directionLabel
     : profile.direction === "WAIT"
@@ -4191,6 +4247,22 @@ function renderSimpleDashboard() {
           <span class="simple-label">Playbook US100</span>
           <strong>${profile.playbook.allowed ? "Setup valido" : "Esperando setup fijo"}</strong>
           <small>${profile.playbook.detail}</small>
+        </div>
+        <div class="operate-decision-card ${operateDecision.tone}">
+          <div class="operate-decision-main">
+            <span class="simple-label">Decision final</span>
+            <strong>${operateDecision.status}</strong>
+            <small>${operateDecision.title}. ${operateDecision.detail}</small>
+          </div>
+          <div class="operate-checklist">
+            ${operateDecision.checks.map((check) => `
+              <div class="${check.ok ? "ok" : "blocked"}">
+                <span>${check.ok ? "OK" : "FALTA"}</span>
+                <strong>${check.label}</strong>
+                <small>${check.detail}</small>
+              </div>
+            `).join("")}
+          </div>
         </div>
         <div class="day-thesis-card ${profile.dayThesis.invalidated ? "danger" : profile.dayThesis.stable ? "ok" : "warn"}">
           <div>

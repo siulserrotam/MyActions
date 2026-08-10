@@ -308,6 +308,96 @@ body {
   font-weight: 900;
 }
 
+.operate-decision-card {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.8fr) minmax(0, 1.8fr);
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid rgb(246 196 83 / 0.36);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(47 39 19 / 0.62), rgb(12 15 18 / 0.95));
+  padding: 12px;
+}
+
+.operate-decision-card.ok {
+  border-color: rgb(56 227 156 / 0.52);
+  background: linear-gradient(180deg, rgb(18 62 41 / 0.66), rgb(12 15 18 / 0.95));
+}
+
+.operate-decision-card.danger {
+  border-color: rgb(255 90 102 / 0.52);
+  background: linear-gradient(180deg, rgb(65 22 26 / 0.64), rgb(12 15 18 / 0.95));
+}
+
+.operate-decision-main strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: clamp(24px, 3vw, 38px);
+  line-height: 1;
+}
+
+.operate-decision-main small {
+  display: block;
+  margin-top: 8px;
+  color: #d4e6df;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.operate-checklist {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.operate-checklist > div {
+  min-height: 86px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 13px;
+  background: rgb(7 13 14 / 0.74);
+  padding: 9px;
+}
+
+.operate-checklist > div.ok {
+  border-color: rgb(56 227 156 / 0.36);
+}
+
+.operate-checklist > div.blocked {
+  border-color: rgb(255 188 72 / 0.36);
+}
+
+.operate-checklist span {
+  display: inline-flex;
+  margin-bottom: 6px;
+  color: #8ff4bd;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.operate-checklist > div.blocked span {
+  color: #ffe28a;
+}
+
+.operate-checklist strong,
+.operate-checklist small {
+  display: block;
+}
+
+.operate-checklist strong {
+  color: #fff;
+  font-size: 12px;
+}
+
+.operate-checklist small {
+  margin-top: 5px;
+  color: #aac6bd;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 .simple-agent-card > div {
   border: 1px solid rgb(90 160 255 / 0.22);
   border-radius: 14px;
@@ -1591,6 +1681,8 @@ body {
   .simple-form-grid.two,
   .simple-pattern-grid,
   .simple-agent-card,
+  .operate-decision-card,
+  .operate-checklist,
   .day-thesis-card,
   .technical-trace-grid,
   .simple-top-list,
