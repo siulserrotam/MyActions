@@ -2563,16 +2563,10 @@ function renderTradeChart(item, variant = "mini") {
     const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
     const forecastClass = forecastState?.state || "waiting";
     const divider = `<line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />`;
-    if (forecastClass === "reset") {
-      const resetY = clamp(lastY - 16, plotTop + 18, plotBottom - 18);
-      return `
-        ${divider}
-        <text x="${labelX}" y="${resetY}" class="chart-forecast-label reset">REINICIAR LECTURA</text>
-        <line x1="${lastX + 10}" y1="${lastY - 10}" x2="${lastX + 34}" y2="${lastY + 14}" class="chart-forecast-reset-mark" />
-        <line x1="${lastX + 34}" y1="${lastY - 10}" x2="${lastX + 10}" y2="${lastY + 14}" class="chart-forecast-reset-mark" />
-      `;
-    }
     const forecastPoints = (() => {
+      if (forecastClass === "reset") {
+        return `${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY}`;
+      }
       if (forecastClass === "running" || forecastClass === "target") {
         return `${lastX},${lastY} ${targetX},${targetY}`;
       }
@@ -2583,9 +2577,15 @@ function renderTradeChart(item, variant = "mini") {
     })();
     const stepMarkup = forecastClass === "running" || forecastClass === "target"
       ? ""
-      : forecastClass === "triggered"
-        ? `<circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />`
-        : `
+      : forecastClass === "reset"
+        ? `
+          <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
+          <line x1="${entryX - 9}" y1="${entryY - 9}" x2="${entryX + 9}" y2="${entryY + 9}" class="chart-forecast-reset-mark" />
+          <line x1="${entryX + 9}" y1="${entryY - 9}" x2="${entryX - 9}" y2="${entryY + 9}" class="chart-forecast-reset-mark" />
+        `
+        : forecastClass === "triggered"
+          ? `<circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />`
+          : `
           <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
           <circle cx="${rejectX}" cy="${rejectY}" r="3" class="chart-forecast-step muted" />
           <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
@@ -2595,11 +2595,11 @@ function renderTradeChart(item, variant = "mini") {
       ${divider}
       <polyline points="${forecastPoints}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"} ${forecastClass}" />
       ${stepMarkup}
-      <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
-      <text x="${labelX}" y="${labelY}" class="chart-forecast-label">${label}</text>
+      ${forecastClass === "reset" ? "" : `<circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />`}
+      <text x="${labelX}" y="${labelY}" class="chart-forecast-label ${forecastClass === "reset" ? "reset" : ""}">${forecastClass === "reset" ? "REINICIAR LECTURA" : label}</text>
       ${forecastClass === "waiting" ? `<text x="${bounceX}" y="${plotBottom + 22}" class="chart-forecast-time">rebote</text>` : ""}
       ${forecastClass === "waiting" || forecastClass === "triggered" ? `<text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">gatillo</text>` : ""}
-      <text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">meta</text>
+      ${forecastClass === "reset" ? `<text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">nuevo impulso</text>` : `<text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">meta</text>`}
     `;
   })();
   const levelTag = (label, value, className) => variant === "main" ? `
