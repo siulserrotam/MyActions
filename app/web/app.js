@@ -1321,7 +1321,6 @@ function applyXtbQuoteBatch(items = [], options = {}) {
 
   validQuotes.forEach(applyLiveQuote);
   saveQuoteBars(validQuotes, source);
-  renderSimpleDashboard();
   const best = pickBestCfdOpportunity(validQuotes.map((item) => item.symbol));
   if (best && !isManualOpportunityLocked()) {
     applySelectedOpportunity(best, source);
@@ -1331,6 +1330,9 @@ function applyXtbQuoteBatch(items = [], options = {}) {
   } else if (validQuotes.length) {
     updateLiveStatus("XTB: precios recibidos, pero ningun CFD visible cumple volumen/margen/stop.", "error");
   }
+  calculate();
+  renderAssets();
+  renderSimpleDashboard();
 }
 
 function isManualOpportunityLocked() {
