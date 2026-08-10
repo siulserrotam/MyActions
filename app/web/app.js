@@ -97,6 +97,7 @@ let autoLearningTimer = null;
 let analysisCountdownTimer = null;
 let lastAutoLessonKey = "";
 let lessonMemorySummary = null;
+const us100SessionStartMinute = 6 * 60;
 
 function storageKey(key) {
   return `${key}:${currentDashboardUser}`;
@@ -121,6 +122,53 @@ function chartFrameKey() {
 
 function chartFrameConfig() {
   return chartFrameOptions[chartFrameKey()] || chartFrameOptions["1m"];
+}
+
+function nyDateParts(dateInput = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(dateInput)).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return {
+    dateKey: `${parts.year}-${parts.month}-${parts.day}`,
+    minuteOfDay: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+function formatMinuteOfDay(totalMinutes) {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(totalMinutes)));
+  const hour = Math.floor(clamped / 60);
+  const minute = clamped % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseTimeToMinute(value, fallback = us100SessionStartMinute) {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return fallback;
+  const hour = clamp(Number(match[1]), 0, 23);
+  const minute = clamp(Number(match[2]), 0, 59);
+  return hour * 60 + minute;
+}
+
+function thesisConfig() {
+  const mode = getLocalValue("us100_thesis_mode") || "rolling";
+  const startMinute = parseTimeToMinute(getLocalValue("us100_thesis_start") || "06:00");
+  const blockHours = clamp(Number(getLocalValue("us100_thesis_hours") || 4), 2, 6);
+  return {
+    mode: mode === "fixed" ? "fixed" : "rolling",
+    startMinute,
+    startTime: formatMinuteOfDay(startMinute),
+    blockHours,
+    blockMinutes: blockHours * 60,
+  };
 }
 
 function setChartFrame(key) {
@@ -3401,12 +3449,17 @@ function us100StrategyProfile() {
   const trend = detectTrendProfile(bars, asset);
   const directDirection = decideUs100Direction(pattern, trend, asset);
   const frameSummary = technicalTraceSummary(focusSymbol);
-  const direction = frameSummary.direction !== "WAIT"
-    ? frameSummary.direction
-    : directDirection !== "WAIT"
-      ? directDirection
-      : "WAIT";
-  const waitsForTrigger = frameSummary.direction !== "WAIT" && !frameSummary.triggerReady;
+  const dayThesis = buildUs100DayThesis(focusSymbol);
+  const direction = dayThesis.invalidated
+    ? "WAIT"
+    : dayThesis.direction !== "WAIT"
+      ? dayThesis.direction
+      : frameSummary.direction !== "WAIT"
+        ? frameSummary.direction
+        : directDirection !== "WAIT"
+          ? directDirection
+          : "WAIT";
+  const waitsForTrigger = direction !== "WAIT" && !frameSummary.triggerReady;
   const levelDirection = direction === "WAIT" ? (trend.direction !== "WAIT" ? trend.direction : pattern.bias !== "WAIT" ? pattern.bias : "LONG") : direction;
   const level = us100OrderLevels(asset, levelDirection, bars, price);
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
@@ -3417,7 +3470,8 @@ function us100StrategyProfile() {
   const learning = learningAdjustmentForProfile(focusSymbol);
   const xtbContext = xtbContextAdjustment(asset, direction, price);
   const fibSetup = evaluateFibPullbackSetup(focusSymbol, levelDirection);
-  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + 10), 0, 95);
+  const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + thesisScore + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
@@ -3431,11 +3485,11 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score), 0, 95);
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + thesisScore), 0, 95);
   const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
-  const status = fibSetup.rejected
+  const status = dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
-    : playbook.allowed && fibSetup.ready
+    : playbook.allowed && fibSetup.ready && dayThesis.stable
       ? "OPERABLE"
       : confidence >= 50
         ? "ESPERAR"
@@ -3445,12 +3499,13 @@ function us100StrategyProfile() {
     trend: Math.round(trend.score),
     gap: Math.round(imbalance.score),
     fib: Math.round(fibSetup.score),
+    thesis: Math.round(thesisScore),
     volume: volumeScore,
     cfd: cfdMove.score,
     learning: learning.score,
     xtbContext: xtbContext.score,
     total: confidence,
-    text: `Patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -3508,6 +3563,7 @@ function us100StrategyProfile() {
     confidenceBreakdown,
     cfdMovePct,
     cfdMove,
+    dayThesis,
     fibSetup,
     learning,
     xtbContext,
@@ -3651,13 +3707,12 @@ function detectCandlePattern(candles) {
   return { bias: "WAIT", name: "Sin patron dominante", score: 10, detail: "No hay vela de confirmacion clara; esperar ruptura o pullback." };
 }
 
-function candlesForFrame(symbol, frameKey) {
+function candlesForFrameAll(symbol, frameKey) {
   const rows = marketBarsByFrame[marketFrameKey(symbol, frameKey)] || [];
   const frame = chartFrameOptions[frameKey] || chartFrameOptions["1m"];
   const mergedRows = mergeCandleRows(rows);
   const normalizedRows = frame.aggregateHours ? aggregateCandlesByHours(mergedRows, frame.aggregateHours) : mergedRows;
   return normalizedRows
-    .slice(-(chartFrameOptions[frameKey]?.limit || 30))
     .map((bar) => ({
       o: Number(bar.open || 0),
       h: Number(bar.high || 0),
@@ -3666,6 +3721,88 @@ function candlesForFrame(symbol, frameKey) {
       timestamp: bar.timestamp,
     }))
     .filter((candle) => candle.o > 0 && candle.h > 0 && candle.l > 0 && candle.c > 0);
+}
+
+function candlesForFrame(symbol, frameKey) {
+  return candlesForFrameAll(symbol, frameKey).slice(-(chartFrameOptions[frameKey]?.limit || 30));
+}
+
+function candlesSinceNyMinute(symbol, frameKey, startMinute = us100SessionStartMinute) {
+  const today = nyDateParts();
+  return candlesForFrameAll(symbol, frameKey).filter((candle) => {
+    const parts = nyDateParts(candle.timestamp || new Date());
+    return parts.dateKey === today.dateKey && parts.minuteOfDay >= startMinute;
+  });
+}
+
+function buildUs100DayThesis(symbol = focusSymbol) {
+  const config = thesisConfig();
+  const now = nyDateParts();
+  const allToday = candlesSinceNyMinute(symbol, "1m", config.mode === "fixed" ? config.startMinute : 0);
+  const currentMinute = Math.max(now.minuteOfDay, config.startMinute);
+  const blockIndex = Math.max(0, Math.floor((currentMinute - config.startMinute) / config.blockMinutes));
+  const fixedBlockStart = config.startMinute + blockIndex * config.blockMinutes;
+  const blockStart = config.mode === "rolling"
+    ? Math.max(0, now.minuteOfDay - config.blockMinutes)
+    : fixedBlockStart;
+  const blockEnd = config.mode === "rolling" ? now.minuteOfDay : blockStart + config.blockMinutes;
+  const currentBlock = allToday.filter((candle) => {
+    const parts = nyDateParts(candle.timestamp || new Date());
+    return parts.minuteOfDay >= blockStart && parts.minuteOfDay < blockEnd;
+  });
+  const history = currentBlock.length >= 8 ? currentBlock : allToday;
+  const first = history[0];
+  const last = history[history.length - 1];
+  const open = Number(first?.o || first?.c || 0);
+  const close = Number(last?.c || 0);
+  const high = history.length ? Math.max(...history.map((candle) => Number(candle.h || 0))) : 0;
+  const validLows = history.map((candle) => Number(candle.l || 0)).filter((value) => Number.isFinite(value) && value > 0);
+  const low = validLows.length ? Math.min(...validLows) : 0;
+  const movePct = open > 0 ? (close - open) / open * 100 : 0;
+  const rangePct = open > 0 && high > low ? (high - low) / open * 100 : 0;
+  const mapTrace = traceFrame(symbol, "4h");
+  const confirmTrace = traceFrame(symbol, "15m");
+  const rawDirection = movePct >= 0.22 ? "LONG" : movePct <= -0.22 ? "SHORT" : "WAIT";
+  const mappedDirection = mapTrace.bias !== "WAIT" ? mapTrace.bias : rawDirection;
+  const confirmationOk = confirmTrace.bias === "WAIT" || mappedDirection === "WAIT" || confirmTrace.bias === mappedDirection;
+  const volatilityOk = rangePct <= 1.15 || Math.abs(movePct) >= 0.35;
+  const direction = confirmationOk && volatilityOk ? mappedDirection : "WAIT";
+  const stable = direction !== "WAIT" && history.length >= 24 && Math.abs(movePct) >= 0.22;
+  const invalidated = direction !== "WAIT" && confirmTrace.bias !== "WAIT" && confirmTrace.bias !== direction;
+  const blockLabel = config.mode === "rolling"
+    ? `ultimas ${config.blockHours}h hasta ${formatMinuteOfDay(now.minuteOfDay)} NY`
+    : `${formatMinuteOfDay(blockStart)}-${formatMinuteOfDay(Math.min(blockEnd, 20 * 60))} NY`;
+  const reason = history.length < 8
+    ? `Faltan lecturas para fijar tesis en ${blockLabel}.`
+    : invalidated
+      ? "La confirmacion 15M contradice la tesis del bloque; reiniciar lectura."
+      : !volatilityOk
+        ? "Rango demasiado volatil para perseguir una direccion fija."
+        : direction === "WAIT"
+          ? "El bloque no tiene ventaja clara; mantener espera."
+          : `${direction} por movimiento acumulado del bloque ${numberText(movePct)}% con mapa ${mapTrace.bias}.`;
+  return {
+    dateKey: now.dateKey,
+    blockIndex,
+    blockLabel,
+    mode: config.mode,
+    startTime: config.startTime,
+    blockHours: config.blockHours,
+    direction,
+    rawDirection,
+    stable,
+    invalidated,
+    historyCount: history.length,
+    open,
+    close,
+    high,
+    low,
+    movePct,
+    rangePct,
+    mapBias: mapTrace.bias,
+    confirmBias: confirmTrace.bias,
+    reason,
+  };
 }
 
 function aggregateCandlesByHours(rows, hours = 4) {
@@ -3991,6 +4128,7 @@ function renderSimpleDashboard() {
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
   const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
   const actionableOrder = profile.status === "OPERABLE";
+  const thesis = profile.dayThesis;
   const objectiveOrderLabel = actionableOrder
     ? profile.directionLabel
     : profile.direction === "WAIT"
@@ -4053,6 +4191,44 @@ function renderSimpleDashboard() {
           <span class="simple-label">Playbook US100</span>
           <strong>${profile.playbook.allowed ? "Setup valido" : "Esperando setup fijo"}</strong>
           <small>${profile.playbook.detail}</small>
+        </div>
+        <div class="day-thesis-card ${profile.dayThesis.invalidated ? "danger" : profile.dayThesis.stable ? "ok" : "warn"}">
+          <div>
+            <span class="simple-label">Tesis fija del dia</span>
+            <strong>${profile.dayThesis.direction === "WAIT" ? "ESPERAR" : profile.dayThesis.direction}</strong>
+            <small>${profile.dayThesis.reason}</small>
+          </div>
+          <div>
+            <span class="simple-label">Bloque actual</span>
+            <strong>${profile.dayThesis.blockLabel}</strong>
+            <small>${profile.dayThesis.historyCount} velas leidas ${profile.dayThesis.mode === "fixed" ? `desde ${profile.dayThesis.startTime} NY` : `en rango vivo de ${profile.dayThesis.blockHours}h`}. Movimiento ${numberText(profile.dayThesis.movePct)}%, rango ${numberText(profile.dayThesis.rangePct)}%.</small>
+          </div>
+          <div>
+            <span class="simple-label">Regla anti-ruido</span>
+            <strong>${profile.dayThesis.stable ? "Mantener tesis" : "No forzar entrada"}</strong>
+            <small>La vela 1M solo confirma gatillo. No cambia la estrategia diaria por si sola.</small>
+          </div>
+          <div class="day-thesis-controls">
+            <label>
+              <span class="simple-label">Modo lectura</span>
+              <select data-thesis-control="mode">
+                <option value="rolling" ${thesis.mode === "rolling" ? "selected" : ""}>Ultimas ${thesis.blockHours}h en vivo</option>
+                <option value="fixed" ${thesis.mode === "fixed" ? "selected" : ""}>Desde hora elegida</option>
+              </select>
+            </label>
+            <label>
+              <span class="simple-label">Inicio NY</span>
+              <input type="time" value="${thesis.startTime}" data-thesis-control="start" />
+            </label>
+            <label>
+              <span class="simple-label">Rango</span>
+              <select data-thesis-control="hours">
+                <option value="2" ${thesis.blockHours === 2 ? "selected" : ""}>2 horas</option>
+                <option value="4" ${thesis.blockHours === 4 ? "selected" : ""}>4 horas</option>
+                <option value="6" ${thesis.blockHours === 6 ? "selected" : ""}>6 horas</option>
+              </select>
+            </label>
+          </div>
         </div>
         <div class="simple-agent-card">
           <div>
@@ -4228,6 +4404,14 @@ function bindSimpleDashboard() {
     }
   });
   target.addEventListener("change", (event) => {
+    const thesisControl = event.target?.dataset?.thesisControl;
+    if (thesisControl) {
+      if (thesisControl === "mode") setLocalValue("us100_thesis_mode", event.target.value);
+      if (thesisControl === "start") setLocalValue("us100_thesis_start", event.target.value || "06:00");
+      if (thesisControl === "hours") setLocalValue("us100_thesis_hours", event.target.value || "4");
+      renderSimpleDashboard();
+      return;
+    }
     const opResult = event.target?.dataset?.opResult;
     if (opResult) {
       setOperationResult(opResult, event.target.value);

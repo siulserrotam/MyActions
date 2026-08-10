@@ -249,6 +249,65 @@ body {
   line-height: 1.35;
 }
 
+.day-thesis-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid rgb(246 196 83 / 0.34);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(47 39 19 / 0.6), rgb(12 15 18 / 0.95));
+  padding: 12px;
+}
+
+.day-thesis-card.ok {
+  border-color: rgb(56 227 156 / 0.42);
+  background: linear-gradient(180deg, rgb(20 54 38 / 0.62), rgb(12 15 18 / 0.95));
+}
+
+.day-thesis-card.danger {
+  border-color: rgb(255 90 102 / 0.5);
+  background: linear-gradient(180deg, rgb(65 22 26 / 0.65), rgb(12 15 18 / 0.95));
+}
+
+.day-thesis-card strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.day-thesis-card small {
+  display: block;
+  margin-top: 6px;
+  color: #d4e6df;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.day-thesis-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.day-thesis-controls label {
+  display: grid;
+  gap: 5px;
+}
+
+.day-thesis-controls select,
+.day-thesis-controls input {
+  min-height: 36px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 11px;
+  background: rgb(2 10 8 / 0.62);
+  padding: 7px 9px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .simple-agent-card > div {
   border: 1px solid rgb(90 160 255 / 0.22);
   border-radius: 14px;
@@ -1532,6 +1591,7 @@ body {
   .simple-form-grid.two,
   .simple-pattern-grid,
   .simple-agent-card,
+  .day-thesis-card,
   .technical-trace-grid,
   .simple-top-list,
   .simple-guide {
