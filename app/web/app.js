@@ -2514,17 +2514,43 @@ function renderTradeChart(item, variant = "mini") {
     const labelX = clamp(lastX + 8, plotLeft + 8, plotRight - 84);
     const labelY = clamp(Math.min(lastY, entryY, targetY) - 10, plotTop + 14, plotBottom - 12);
     const forecastClass = forecastState?.state || "waiting";
+    const divider = `<line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />`;
+    if (forecastClass === "reset") {
+      const resetY = clamp(lastY - 16, plotTop + 18, plotBottom - 18);
+      return `
+        ${divider}
+        <text x="${labelX}" y="${resetY}" class="chart-forecast-label reset">REINICIAR LECTURA</text>
+        <line x1="${lastX + 10}" y1="${lastY - 10}" x2="${lastX + 34}" y2="${lastY + 14}" class="chart-forecast-reset-mark" />
+        <line x1="${lastX + 34}" y1="${lastY - 10}" x2="${lastX + 10}" y2="${lastY + 14}" class="chart-forecast-reset-mark" />
+      `;
+    }
+    const forecastPoints = (() => {
+      if (forecastClass === "running" || forecastClass === "target") {
+        return `${lastX},${lastY} ${targetX},${targetY}`;
+      }
+      if (forecastClass === "triggered") {
+        return `${lastX},${lastY} ${pullbackX},${pullbackY} ${targetX},${targetY}`;
+      }
+      return `${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY} ${pullbackX},${pullbackY} ${targetX},${targetY}`;
+    })();
+    const stepMarkup = forecastClass === "running" || forecastClass === "target"
+      ? ""
+      : forecastClass === "triggered"
+        ? `<circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />`
+        : `
+          <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
+          <circle cx="${rejectX}" cy="${rejectY}" r="3" class="chart-forecast-step muted" />
+          <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
+          <circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />
+        `;
     return `
-      <line x1="${lastX}" x2="${lastX}" y1="${plotTop}" y2="${plotBottom}" class="chart-forecast-divider" />
-      <polyline points="${lastX},${lastY} ${bounceX},${bounceY} ${rejectX},${rejectY} ${entryX},${entryY} ${pullbackX},${pullbackY} ${targetX},${targetY}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"} ${forecastClass}" />
-      <circle cx="${bounceX}" cy="${bounceY}" r="3" class="chart-forecast-step muted" />
-      <circle cx="${rejectX}" cy="${rejectY}" r="3" class="chart-forecast-step muted" />
-      <circle cx="${entryX}" cy="${entryY}" r="4" class="chart-forecast-step" />
-      <circle cx="${pullbackX}" cy="${pullbackY}" r="3" class="chart-forecast-step muted" />
+      ${divider}
+      <polyline points="${forecastPoints}" class="chart-forecast ${item.direction === "SHORT" ? "short" : "long"} ${confirmed ? "confirmed" : "pending"} ${forecastClass}" />
+      ${stepMarkup}
       <circle cx="${targetX}" cy="${targetY}" r="5" class="chart-forecast-dot ${confirmed ? "confirmed" : "pending"}" />
       <text x="${labelX}" y="${labelY}" class="chart-forecast-label">${label}</text>
-      <text x="${bounceX}" y="${plotBottom + 22}" class="chart-forecast-time">rebote</text>
-      <text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">gatillo</text>
+      ${forecastClass === "waiting" ? `<text x="${bounceX}" y="${plotBottom + 22}" class="chart-forecast-time">rebote</text>` : ""}
+      ${forecastClass === "waiting" || forecastClass === "triggered" ? `<text x="${entryX}" y="${plotBottom + 22}" class="chart-forecast-time">gatillo</text>` : ""}
       <text x="${targetX}" y="${plotBottom + 22}" class="chart-forecast-time">meta</text>
     `;
   })();

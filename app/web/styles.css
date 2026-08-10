@@ -755,6 +755,16 @@ body {
   letter-spacing: 0.1em;
 }
 
+.chart-forecast-label.reset {
+  fill: #cbd5e1;
+}
+
+.chart-forecast-reset-mark {
+  stroke: rgb(203 213 225 / 0.72);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
 .chart-forecast-time {
   fill: #9cb8af;
   font-size: 9px;
