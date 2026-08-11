@@ -3472,8 +3472,9 @@ function us100StrategyProfile() {
   const xtbContext = xtbContextAdjustment(asset, direction, price);
   const fibSetup = evaluateFibPullbackSetup(focusSymbol, levelDirection);
   const antiChase = antiChaseCheck(bars, levelDirection, price);
+  const movementBudget = movementBudgetCheck(bars, levelDirection, price);
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
-  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + thesisScore + 10), 0, 95);
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
@@ -3487,11 +3488,11 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + thesisScore), 0, 95);
-  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore), 0, 95);
+  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, movementBudget, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
   const status = dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
-    : playbook.allowed && fibSetup.ready && antiChase.ok && dayThesis.stable
+    : playbook.allowed && fibSetup.ready && antiChase.ok && movementBudget.ok && dayThesis.stable
       ? "OPERABLE"
       : confidence >= 50
         ? "ESPERAR"
@@ -3505,10 +3506,11 @@ function us100StrategyProfile() {
     volume: volumeScore,
     cfd: cfdMove.score,
     antiChase: antiChase.score,
+    movementBudget: movementBudget.score,
     learning: learning.score,
     xtbContext: xtbContext.score,
     total: confidence,
-    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + no perseguir ${antiChase.score} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + no perseguir ${antiChase.score} + recorrido ${movementBudget.score} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -3569,6 +3571,7 @@ function us100StrategyProfile() {
     dayThesis,
     fibSetup,
     antiChase,
+    movementBudget,
     learning,
     xtbContext,
     volumePolicy,
@@ -3950,7 +3953,7 @@ function decideUs100Direction(pattern, trend, asset) {
   return "WAIT";
 }
 
-function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
+function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, movementBudget, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
   const rules = [];
   const blockers = [];
   const alignedPatternTrend = direction !== "WAIT" && pattern.bias === direction && trend.direction === direction;
@@ -3971,6 +3974,8 @@ function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, anti
   else blockers.push(fibSetup?.detail || "Fibonacci 15M no confirma entrada.");
   if (antiChase?.ok) rules.push("No estas persiguiendo una vela extendida.");
   else blockers.push(antiChase?.detail || "Riesgo de entrada tardia.");
+  if (movementBudget?.ok) rules.push("Aun queda recorrido razonable en la ventana.");
+  else blockers.push(movementBudget?.detail || "El movimiento ya consumio demasiado rango.");
   if (nearTrigger) rules.push(`Precio cerca del gatillo (${numberText(entryDistancePct)}%).`);
   else blockers.push(`Precio lejos del gatillo (${numberText(entryDistancePct)}%).`);
   if (strongEnough) rules.push(`Operabilidad suficiente (${confidence}%).`);
@@ -4052,6 +4057,55 @@ function antiChaseCheck(candles, direction, price) {
   };
 }
 
+function movementBudgetCheck(candles, direction, price) {
+  const bars = Array.isArray(candles) ? candles.filter((candle) => Number(candle.h) && Number(candle.l) && Number(candle.c)) : [];
+  const current = Number(price || bars.at(-1)?.c || 0);
+  if (direction === "WAIT") {
+    return {
+      ok: false,
+      score: -8,
+      usedPct: 0,
+      remainingPct: 0,
+      rangePct: 0,
+      detail: "Sin direccion no se puede medir recorrido util.",
+    };
+  }
+  if (bars.length < 10 || !current) {
+    return {
+      ok: false,
+      score: -10,
+      usedPct: 100,
+      remainingPct: 0,
+      rangePct: 0,
+      detail: "Faltan velas para calcular recorrido normal.",
+    };
+  }
+  const recent = bars.slice(-30);
+  const high = Math.max(...recent.map((candle) => Number(candle.h)));
+  const low = Math.min(...recent.map((candle) => Number(candle.l)));
+  const range = Math.max(high - low, current * 0.0001);
+  const rangePct = range / current * 100;
+  const traveled = direction === "LONG" ? current - low : high - current;
+  const remaining = direction === "LONG" ? high - current : current - low;
+  const usedPct = clamp(traveled / range * 100, 0, 100);
+  const remainingPct = clamp(remaining / range * 100, 0, 100);
+  const exhausted = usedPct >= 68;
+  const tooFlat = rangePct < 0.08;
+  const ok = !exhausted && !tooFlat;
+  return {
+    ok,
+    score: ok ? 10 : -22,
+    usedPct,
+    remainingPct,
+    rangePct,
+    detail: tooFlat
+      ? `Rango muy pequeno (${numberText(rangePct)}%): no hay recorrido limpio.`
+      : exhausted
+        ? `Recorrido consumido ${numberText(usedPct)}%; queda ${numberText(remainingPct)}%. Entrada tarde, espera pullback.`
+        : `Recorrido sano: usado ${numberText(usedPct)}%, queda ${numberText(remainingPct)}% del rango reciente.`,
+  };
+}
+
 function buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, status) {
   if (direction === "WAIT") return `Esperar: estrategia fija exige patron y tendencia alineados. ${trend.label}.`;
   const side = direction === "LONG" ? "compra por ruptura alcista" : "venta en corto por ruptura bajista";
@@ -4082,6 +4136,11 @@ function buildOperateDecision(profile) {
       label: "No perseguir",
       ok: Boolean(profile.antiChase?.ok),
       detail: profile.antiChase?.detail || "Evita abrir despues de una vela extendida o rechazo contrario.",
+    },
+    {
+      label: "Recorrido",
+      ok: Boolean(profile.movementBudget?.ok),
+      detail: profile.movementBudget?.detail || "Mide si aun queda espacio o si la entrada ya esta tarde.",
     },
     {
       label: "Gatillo 1M",
@@ -4438,6 +4497,7 @@ function renderSimpleDashboard() {
           <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
           <div><span class="simple-label">Estrategia fija</span><strong>${profile.playbook.setup}</strong><small>${profile.playbook.rule}</small></div>
           <div><span class="simple-label">Movimiento CFD</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong><small>${profile.cfdMove.detail}</small></div>
+          <div><span class="simple-label">Recorrido disponible</span><strong>${numberText(profile.movementBudget.remainingPct)}%</strong><small>${profile.movementBudget.detail}</small></div>
           <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
           <div><span class="simple-label">Contexto XTB</span><strong>${profile.xtbContext.label}</strong><small>${profile.xtbContext.detail}</small></div>
           <div><span class="simple-label">Aprendizaje</span><strong>${profile.learning.label}</strong><small>${profile.learning.detail}</small></div>
