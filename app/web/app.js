@@ -3471,8 +3471,9 @@ function us100StrategyProfile() {
   const learning = learningAdjustmentForProfile(focusSymbol);
   const xtbContext = xtbContextAdjustment(asset, direction, price);
   const fibSetup = evaluateFibPullbackSetup(focusSymbol, levelDirection);
+  const antiChase = antiChaseCheck(bars, levelDirection, price);
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
-  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + thesisScore + 10), 0, 95);
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + thesisScore + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
@@ -3486,11 +3487,11 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + thesisScore), 0, 95);
-  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + thesisScore), 0, 95);
+  const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
   const status = dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
-    : playbook.allowed && fibSetup.ready && dayThesis.stable
+    : playbook.allowed && fibSetup.ready && antiChase.ok && dayThesis.stable
       ? "OPERABLE"
       : confidence >= 50
         ? "ESPERAR"
@@ -3503,10 +3504,11 @@ function us100StrategyProfile() {
     thesis: Math.round(thesisScore),
     volume: volumeScore,
     cfd: cfdMove.score,
+    antiChase: antiChase.score,
     learning: learning.score,
     xtbContext: xtbContext.score,
     total: confidence,
-    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + no perseguir ${antiChase.score} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -3566,6 +3568,7 @@ function us100StrategyProfile() {
     cfdMove,
     dayThesis,
     fibSetup,
+    antiChase,
     learning,
     xtbContext,
     volumePolicy,
@@ -3947,7 +3950,7 @@ function decideUs100Direction(pattern, trend, asset) {
   return "WAIT";
 }
 
-function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
+function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, direction, confidence, price, entry, stopLoss, takeProfit, volume }) {
   const rules = [];
   const blockers = [];
   const alignedPatternTrend = direction !== "WAIT" && pattern.bias === direction && trend.direction === direction;
@@ -3966,6 +3969,8 @@ function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, dire
   else blockers.push("Movimiento CFD va contra la operacion.");
   if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso profundo 80-90 con rechazo.");
   else blockers.push(fibSetup?.detail || "Fibonacci 15M no confirma entrada.");
+  if (antiChase?.ok) rules.push("No estas persiguiendo una vela extendida.");
+  else blockers.push(antiChase?.detail || "Riesgo de entrada tardia.");
   if (nearTrigger) rules.push(`Precio cerca del gatillo (${numberText(entryDistancePct)}%).`);
   else blockers.push(`Precio lejos del gatillo (${numberText(entryDistancePct)}%).`);
   if (strongEnough) rules.push(`Operabilidad suficiente (${confidence}%).`);
@@ -4005,6 +4010,48 @@ function us100OrderLevels(asset, direction, candles, fallbackPrice) {
   return { entry, stopPoints };
 }
 
+function antiChaseCheck(candles, direction, price) {
+  const bars = Array.isArray(candles) ? candles.filter((candle) => Number(candle.h) && Number(candle.l) && Number(candle.c)) : [];
+  const current = Number(price || bars.at(-1)?.c || 0);
+  if (bars.length < 8 || !current) {
+    return {
+      ok: false,
+      score: -10,
+      label: "Faltan velas",
+      detail: "Faltan velas para validar que no estas entrando tarde.",
+    };
+  }
+  const recent = bars.slice(-20);
+  const last = bars.at(-1);
+  const previous = bars.at(-2);
+  const high = Math.max(...recent.map((candle) => Number(candle.h)));
+  const low = Math.min(...recent.map((candle) => Number(candle.l)));
+  const range = Math.max(high - low, current * 0.0001);
+  const positionPct = (current - low) / range;
+  const lastBodyPct = Math.abs(Number(last.c) - Number(last.o)) / current * 100;
+  const twoCandleMovePct = Math.abs(Number(last.c) - Number(bars.at(-3)?.c || last.c)) / current * 100;
+  const longTooHigh = direction === "LONG" && positionPct > 0.82;
+  const shortTooLow = direction === "SHORT" && positionPct < 0.18;
+  const rejectionAgainst = direction === "LONG"
+    ? Number(last.c) < Number(last.o) && Number(previous?.c || 0) < Number(previous?.o || 0)
+    : Number(last.c) > Number(last.o) && Number(previous?.c || 0) > Number(previous?.o || 0);
+  const impulseTooFast = lastBodyPct > 0.12 || twoCandleMovePct > 0.18;
+  const blockers = [];
+  if (longTooHigh) blockers.push("LONG esta muy cerca del techo reciente");
+  if (shortTooLow) blockers.push("SHORT esta muy cerca del piso reciente");
+  if (rejectionAgainst) blockers.push("las ultimas velas rechazan esa direccion");
+  if (impulseTooFast) blockers.push("el precio corrio demasiado rapido");
+  const ok = blockers.length === 0;
+  return {
+    ok,
+    score: ok ? 12 : -28,
+    label: ok ? "No perseguir OK" : "Entrada tardia",
+    detail: ok
+      ? "No parece entrada perseguida; aun exige gatillo y stop activo."
+      : `${blockers.join("; ")}. Espera pullback/rebote y nueva confirmacion.`,
+  };
+}
+
 function buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, status) {
   if (direction === "WAIT") return `Esperar: estrategia fija exige patron y tendencia alineados. ${trend.label}.`;
   const side = direction === "LONG" ? "compra por ruptura alcista" : "venta en corto por ruptura bajista";
@@ -4030,6 +4077,11 @@ function buildOperateDecision(profile) {
       detail: profile.fibSetup?.ready
         ? "Zona 80-90 tocada y rechazo confirmado."
         : profile.fibSetup?.detail || "Falta rechazo Fib 15M.",
+    },
+    {
+      label: "No perseguir",
+      ok: Boolean(profile.antiChase?.ok),
+      detail: profile.antiChase?.detail || "Evita abrir despues de una vela extendida o rechazo contrario.",
     },
     {
       label: "Gatillo 1M",
