@@ -4181,6 +4181,71 @@ function buildOperateDecision(profile) {
   };
 }
 
+function professionalDecisionPlan(profile, operateDecision) {
+  const mapTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "4h");
+  const confirmTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "15m");
+  const triggerTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "1m");
+  const direction = profile.direction;
+  const checks = [
+    {
+      key: "context",
+      label: "Mapa 4H",
+      ok: direction !== "WAIT" && mapTrace?.bias === direction,
+      short: mapTrace?.bias === "WAIT" ? "sin direccion" : mapTrace?.bias || "sin datos",
+      detail: "Marca el lado grande del dia. Si no coincide, no se fuerza entrada.",
+    },
+    {
+      key: "confirmation",
+      label: "Confirmacion 15M",
+      ok: direction !== "WAIT" && confirmTrace?.bias === direction && profile.fibSetup?.ready,
+      short: profile.fibSetup?.ready ? "Fib rechazo" : profile.fibSetup?.status || "esperar",
+      detail: "La entrada profesional nace del retroceso 80-90 y rechazo, no de perseguir velas.",
+    },
+    {
+      key: "trigger",
+      label: "Gatillo 1M",
+      ok: direction !== "WAIT" && triggerTrace?.bias === direction && profile.frameSummary?.triggerReady,
+      short: triggerTrace?.bias === "WAIT" ? "sin gatillo" : triggerTrace?.bias || "sin datos",
+      detail: "La vela 1M solo habilita la orden; no cambia sola la tesis.",
+    },
+    {
+      key: "price",
+      label: "No perseguir",
+      ok: Boolean(profile.antiChase?.ok && profile.movementBudget?.ok),
+      short: profile.antiChase?.ok ? "entrada sana" : "tarde",
+      detail: profile.movementBudget?.detail || profile.antiChase?.detail || "Evita abrir despues del movimiento fuerte.",
+    },
+    {
+      key: "risk",
+      label: "Receta y margen",
+      ok: Number(profile.volume) > 0 && profile.marginRequired <= Number(document.getElementById("account-balance")?.value || defaultAccountBalance),
+      short: `${formatVolumeForXtb(profile.volume, profile.asset)} vol`,
+      detail: "El margen solo dice si cabe; el stop define cuanto puedes perder.",
+    },
+  ];
+  const blocker = checks.find((check) => !check.ok);
+  const canOperate = !blocker && operateDecision.status === "OPERAR" && profile.status === "OPERABLE";
+  const title = canOperate
+    ? `OPERAR ${profile.directionLabel}`
+    : blocker
+      ? `ESPERAR: falta ${blocker.label}`
+      : "ESPERAR";
+  const action = canOperate
+    ? "Preparar orden stop/limitada en XTB y no modificar el plan durante la vela."
+    : blocker?.detail || "No hay ventaja limpia; mantener lectura.";
+  const plainRule = canOperate
+    ? "Si el precio toca entrada, debe avanzar. Si no avanza en 30 minutos, revisa salida. Si no llega a meta/stop en 60 minutos, cierra o reinicia."
+    : "No abrir. La pagina debe protegerte de entradas tarde, no darte una orden cada vez que se mueve el precio.";
+  return {
+    status: canOperate ? "OPERAR" : "ESPERAR",
+    title,
+    action,
+    plainRule,
+    blocker,
+    checks,
+  };
+}
+
 function buildDirectionalRecipe(profile, direction) {
   const asset = profile.asset;
   const bars = profile.bars || [];
@@ -4429,7 +4494,6 @@ function renderSimpleDashboard() {
       ? "XTB servidor"
       : "Lectura directa XTB"
     : "Yahoo / ultimo precio";
-  const agentArmed = isAgentArmed();
   const analysis = technicalAnalysisState();
   const analysisCanGraph = analysis.completed;
   const analysisGraphEnabled = analysis.graphEnabled;
@@ -4440,29 +4504,24 @@ function renderSimpleDashboard() {
       : "Analizando";
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
   const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
-  const actionableOrder = profile.status === "OPERABLE";
   const thesis = profile.dayThesis;
   const operateDecision = buildOperateDecision(profile);
-  const recipeOptions = buildDualRecipes(profile);
-  const activeRecipe = activeRecipeState();
+  const professionalPlan = professionalDecisionPlan(profile, operateDecision);
+  const actionableOrder = professionalPlan.status === "OPERAR";
   const objectiveOrderLabel = actionableOrder
     ? profile.directionLabel
     : profile.direction === "WAIT"
       ? "ESPERAR"
       : `ESPERAR gatillo ${profile.directionLabel}`;
   const objectiveCaption = actionableOrder ? "Orden" : "Plan si confirma";
-  const objectiveWarning = actionableOrder
-    ? "Setup operable: aun asi confirma precio, spread y margen en XTB antes de enviar."
-    : profile.direction === "WAIT"
-      ? "No hay sesgo suficiente. No copies niveles hasta que aparezca una direccion clara."
-      : `Sesgo ${profile.directionLabel}, pero sin gatillo fino confirmado. Los niveles son mapa tecnico, no orden lista.`;
+  const objectiveWarning = professionalPlan.plainRule;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>US100 Decision Desk</h1>
-          <p class="simple-subtitle">Un solo CFD. Primero lee una hora de mercado con Playwright/XTB; despues habilita grafica y objetivo tecnico.</p>
+          <p class="simple-subtitle">Un solo CFD. Mapa 4H, confirmacion 15M y gatillo 1M. Si una pieza falta, la respuesta profesional es esperar.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${focusSymbol}</span>
@@ -4491,39 +4550,23 @@ function renderSimpleDashboard() {
             <strong>${profile.confidence}%</strong>
           </div>
         </div>
-        <div class="simple-pattern-grid">
-          <div><span class="simple-label">Patron de vela</span><strong>${profile.pattern.name}</strong><small>${profile.pattern.detail}</small></div>
-          <div><span class="simple-label">GAP / FVG / BAG</span><strong>${profile.imbalance.type}</strong><small>${profile.imbalance.detail}</small></div>
-          <div><span class="simple-label">Tendencia</span><strong>${profile.trend.direction}</strong><small>${profile.trend.label}</small></div>
-          <div><span class="simple-label">Estrategia fija</span><strong>${profile.playbook.setup}</strong><small>${profile.playbook.rule}</small></div>
-          <div><span class="simple-label">Movimiento CFD</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong><small>${profile.cfdMove.detail}</small></div>
-          <div><span class="simple-label">Recorrido disponible</span><strong>${numberText(profile.movementBudget.remainingPct)}%</strong><small>${profile.movementBudget.detail}</small></div>
-          <div><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong><small>${profile.confidenceBreakdown.text}</small></div>
-          <div><span class="simple-label">Contexto XTB</span><strong>${profile.xtbContext.label}</strong><small>${profile.xtbContext.detail}</small></div>
-          <div><span class="simple-label">Aprendizaje</span><strong>${profile.learning.label}</strong><small>${profile.learning.detail}</small></div>
-          <div><span class="simple-label">Volumen IA</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong><small>Rango por meta 0.20-0.35. ${profile.volumePolicy.note}</small></div>
-          <div><span class="simple-label">Meta IA</span><strong>${money(profile.targetUsd)}</strong><small>${profile.targetPolicy.text}${profile.targetPolicy.capped ? " Tu meta manual fue limitada." : ""}</small></div>
-        </div>
-        <div class="simple-playbook-card">
-          <span class="simple-label">Playbook US100</span>
-          <strong>${profile.playbook.allowed ? "Setup valido" : "Esperando setup fijo"}</strong>
-          <small>${profile.playbook.detail}</small>
-        </div>
-        <div class="operate-decision-card ${operateDecision.tone}">
-          <div class="operate-decision-main">
-            <span class="simple-label">Decision final</span>
-            <strong>${operateDecision.status}</strong>
-            <small>${operateDecision.title}. ${operateDecision.detail}</small>
+        <div class="strategy-summary-card ${professionalPlan.status === "OPERAR" ? "ok" : "warn"}">
+          <div>
+            <span class="simple-label">Mesa profesional</span>
+            <strong>${professionalPlan.title}</strong>
+            <small>${professionalPlan.action}</small>
           </div>
-          <div class="operate-checklist">
-            ${operateDecision.checks.map((check) => `
-              <div class="${check.ok ? "ok" : "blocked"}">
-                <span>${check.ok ? "OK" : "FALTA"}</span>
-                <strong>${check.label}</strong>
-                <small>${check.detail}</small>
-              </div>
-            `).join("")}
-          </div>
+          <p>${professionalPlan.plainRule}</p>
+        </div>
+        <div class="strategy-core-grid">
+          ${professionalPlan.checks.map((check) => `
+            <div class="${check.ok ? "ok" : "blocked"}">
+              <span>${check.ok ? "OK" : "FALTA"}</span>
+              <strong>${check.label}</strong>
+              <em>${check.short}</em>
+              <small>${check.detail}</small>
+            </div>
+          `).join("")}
         </div>
         <div class="day-thesis-card ${profile.dayThesis.invalidated ? "danger" : profile.dayThesis.stable ? "ok" : "warn"}">
           <div>
@@ -4563,26 +4606,16 @@ function renderSimpleDashboard() {
             </label>
           </div>
         </div>
-        <div class="simple-agent-card">
+        <div class="analysis-control-card">
           <div>
-          <span class="simple-label">Agente IA semiautomatico</span>
-            <strong>${agentArmed ? profile.agent.action : "PAUSADO"}</strong>
-            <small>${agentArmed ? profile.agent.rule : "No guarda lecturas hasta que pulses Iniciar analisis."}</small>
-          </div>
-          <div>
-            <span class="simple-label">Analisis</span>
+            <span class="simple-label">Analisis automatico</span>
             <strong id="analysis-timer">${analysis.startedAt ? "ACTIVO" : "SIN INICIAR"}</strong>
-            <small id="analysis-status">${analysisStatus}. Revisa 4H como mapa, 15M como confirmacion y 1M como gatillo.</small>
+            <small id="analysis-status">${analysisStatus}. Playwright lee XTB, guarda velas y aprendizaje; no compra ni vende solo.</small>
           </div>
-          <div>
-            <span class="simple-label">Control</span>
-            <strong>${analysisGraphEnabled ? "Grafica activa" : "Sin traza"}</strong>
-            <small>Playwright solo lee XTB y guarda aprendizaje; no llena ni confirma ordenes.</small>
-            <div class="simple-agent-actions">
-              <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Actualizar analisis" : "Iniciar analisis"}</button>
-              <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart">Graficar objetivo</button>
-              <button type="button" class="secondary" data-simple-action="analysis-reset">Limpiar</button>
-            </div>
+          <div class="simple-agent-actions">
+            <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Actualizar" : "Iniciar analisis"}</button>
+            <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart">Graficar</button>
+            <button type="button" class="secondary" data-simple-action="analysis-reset">Limpiar</button>
           </div>
         </div>
         <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" || traceSummary.clarity === "PREPARAR" ? "warn" : "danger"}">
@@ -4641,18 +4674,6 @@ function renderSimpleDashboard() {
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
         </article>
-        <article class="simple-operation dual-recipes-card">
-          <div class="simple-head">
-            <h2>Dos opciones</h2>
-            <span class="simple-badge">elige una</span>
-          </div>
-          <p class="simple-subtitle">La app te muestra los dos caminos. Solo pulsa Inicio en la receta que realmente abriste en XTB.</p>
-          <div class="recipe-options">
-            ${recipeOptions.map((recipe) => renderRecipeOption(recipe, activeRecipe)).join("")}
-          </div>
-          ${renderActiveRecipeCard(activeRecipe)}
-          <p class="simple-tiny">Regla de tiempo: si en 30 minutos no avanza a favor, revisa salida manual. Si en 60 minutos no toca take ni stop, cierra o reinicia lectura.</p>
-        </article>
         ${renderFibOnlyCard(primaryDisplay)}
       </section>
 
@@ -4685,16 +4706,6 @@ function renderSimpleDashboard() {
         <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
 
-      <section class="simple-panel">
-        <div class="simple-guide">
-          <div><strong>GAP</strong>El precio salta y deja un hueco entre una vela y otra. Puede mostrar prisa, pero tambien puede devolverse a cerrar el hueco.</div>
-          <div><strong>FVG</strong>Hueco de desequilibrio: una zona donde el precio paso muy rapido. Los traders esperan pullback o continuacion.</div>
-          <div><strong>BAG</strong>Breakaway/Acceleration Gap: salto con ruptura de zona. Es mas fuerte si rompe soporte/resistencia y sigue con cuerpo grande.</div>
-          <div><strong>Regla</strong>Solo operar si patron + GAP/FVG/BAG + tendencia apuntan al mismo lado. Si no coinciden, esperar.</div>
-          <div><strong>US100 fuera de bolsa</strong>El CFD sigue una referencia tipo futuro Nasdaq. Por eso puede moverse antes/despues de 9:30-16:00 NY; el precio ejecutable siempre es XTB.</div>
-          <div><strong>TradingView</strong>Usa CME_MINI:NQ1! como referencia general. SKILLING:US100 es otro broker CFD y no tiene que coincidir con XTB.</div>
-        </div>
-      </section>
     </div>
   `;
   scheduleAnalysisTimer();

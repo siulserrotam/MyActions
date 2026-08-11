@@ -218,6 +218,139 @@ body {
   line-height: 1.35;
 }
 
+.strategy-summary-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 14px;
+  margin-top: 16px;
+  border: 1px solid rgb(255 207 92 / 0.38);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgb(48 38 15 / 0.68), rgb(9 14 13 / 0.94));
+  padding: 16px;
+}
+
+.strategy-summary-card.ok {
+  border-color: rgb(55 235 157 / 0.52);
+  background: linear-gradient(180deg, rgb(15 57 37 / 0.68), rgb(9 14 13 / 0.94));
+}
+
+.strategy-summary-card strong {
+  display: block;
+  margin-top: 6px;
+  color: #fff;
+  font-size: clamp(24px, 3vw, 40px);
+  line-height: 1;
+}
+
+.strategy-summary-card small,
+.strategy-summary-card p {
+  color: #cde1db;
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.strategy-summary-card p {
+  align-self: center;
+  margin: 0;
+  border-left: 2px solid rgb(255 207 92 / 0.42);
+  padding-left: 14px;
+}
+
+.strategy-summary-card.ok p {
+  border-left-color: rgb(55 235 157 / 0.5);
+}
+
+.strategy-core-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.strategy-core-grid > div {
+  min-height: 122px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 15px;
+  background: rgb(7 13 14 / 0.74);
+  padding: 12px;
+}
+
+.strategy-core-grid > div.ok {
+  border-color: rgb(55 235 157 / 0.38);
+}
+
+.strategy-core-grid > div.blocked {
+  border-color: rgb(255 188 72 / 0.42);
+}
+
+.strategy-core-grid span,
+.strategy-core-grid strong,
+.strategy-core-grid em,
+.strategy-core-grid small {
+  display: block;
+}
+
+.strategy-core-grid span {
+  color: #8ff4bd;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+}
+
+.strategy-core-grid > div.blocked span {
+  color: #ffe28a;
+}
+
+.strategy-core-grid strong {
+  margin-top: 7px;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.strategy-core-grid em {
+  margin-top: 4px;
+  color: #ffe59e;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.strategy-core-grid small {
+  margin-top: 7px;
+  color: #9cb8af;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.analysis-control-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr);
+  gap: 14px;
+  margin-top: 12px;
+  border: 1px solid rgb(90 160 255 / 0.22);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(16 35 46 / 0.58), rgb(12 15 18 / 0.95));
+  padding: 14px;
+}
+
+.analysis-control-card strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 20px;
+}
+
+.analysis-control-card small {
+  display: block;
+  margin-top: 6px;
+  color: #aed3df;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .simple-agent-card {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -251,7 +384,7 @@ body {
 
 .day-thesis-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
   border: 1px solid rgb(246 196 83 / 0.34);
@@ -574,7 +707,7 @@ body {
 }
 
 .recipe-decision-grid {
-  grid-template-columns: minmax(280px, 0.95fr) minmax(360px, 1.25fr) minmax(300px, 0.9fr);
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
 }
 
 .dual-recipes-card {
@@ -1805,6 +1938,9 @@ body {
   .simple-form-grid,
   .simple-form-grid.two,
   .simple-pattern-grid,
+  .strategy-summary-card,
+  .strategy-core-grid,
+  .analysis-control-card,
   .simple-agent-card,
   .operate-decision-card,
   .operate-checklist,
