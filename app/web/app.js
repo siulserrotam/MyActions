@@ -95,6 +95,7 @@ const manualOpportunityLockMs = 3 * 60 * 1000;
 let currentDashboardUser = "default";
 let autoLearningTimer = null;
 let analysisCountdownTimer = null;
+let activeRecipeTimer = null;
 let lastAutoLessonKey = "";
 let lessonMemorySummary = null;
 const us100SessionStartMinute = 6 * 60;
@@ -4069,6 +4070,152 @@ function buildOperateDecision(profile) {
   };
 }
 
+function buildDirectionalRecipe(profile, direction) {
+  const asset = profile.asset;
+  const bars = profile.bars || [];
+  const level = us100OrderLevels(asset, direction, bars, profile.price);
+  const marginVolume = maxVolumeByMargin(asset, level.entry);
+  const targetUsd = profile.targetUsd || defaultTargetProfitUsd;
+  const stopUsd = profile.stopUsd || defaultStopRiskUsd;
+  const volume = preferredUs100Volume(profile.confidence, marginVolume, targetUsd, asset);
+  const pointValue = volume * asset.multiplier;
+  const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
+  const stopPoints = pointValue > 0 ? stopUsd / pointValue : Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
+  const entry = level.entry;
+  const stopLoss = direction === "LONG" ? entry - stopPoints : entry + stopPoints;
+  const takeProfit = direction === "LONG" ? entry + takePoints : entry - takePoints;
+  const marginRequired = entry * asset.multiplier * volume * cfdMarginPct(asset) / 100;
+  const isPrimary = profile.direction === direction && profile.status !== "NO OPERAR";
+  const trigger = triggerReadiness(asset, entry, takeProfit, profile.price);
+  const aligned = profile.direction === direction;
+  const allowed = profile.status === "OPERABLE" && aligned && trigger.ready;
+  return {
+    asset,
+    direction,
+    label: labelFromDirection(direction),
+    entry,
+    stopLoss,
+    takeProfit,
+    volume,
+    pointValue,
+    takePoints,
+    stopPoints,
+    marginRequired,
+    targetUsd,
+    stopUsd,
+    isPrimary,
+    aligned,
+    trigger,
+    allowed,
+    status: allowed ? "LISTA" : isPrimary ? "ESPERAR GATILLO" : "PLAN B",
+    note: allowed
+      ? "Se cumplen direccion, operabilidad y precio cerca del gatillo."
+      : isPrimary
+        ? trigger.message
+        : "Usala solo si el mercado invalida el lado principal y confirma ruptura contraria.",
+  };
+}
+
+function buildDualRecipes(profile) {
+  return [buildDirectionalRecipe(profile, "LONG"), buildDirectionalRecipe(profile, "SHORT")];
+}
+
+function activeRecipeState() {
+  try {
+    return JSON.parse(getLocalValue("us100_active_recipe") || "null");
+  } catch {
+    return null;
+  }
+}
+
+function setActiveRecipe(recipe) {
+  setLocalValue("us100_active_recipe", JSON.stringify({
+    direction: recipe.direction,
+    label: recipe.label,
+    entry: Number(recipe.entry || 0),
+    stopLoss: Number(recipe.stopLoss || 0),
+    takeProfit: Number(recipe.takeProfit || 0),
+    volume: Number(recipe.volume || 0),
+    targetUsd: Number(recipe.targetUsd || 0),
+    stopUsd: Number(recipe.stopUsd || 0),
+    startedAt: new Date().toISOString(),
+    maxMinutes: 60,
+  }));
+}
+
+function clearActiveRecipe() {
+  removeLocalValue("us100_active_recipe");
+}
+
+function activeRecipeProgress(recipe) {
+  if (!recipe?.startedAt) return null;
+  const started = new Date(recipe.startedAt);
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - started.getTime()) / 60000));
+  const remaining = Math.max(0, Number(recipe.maxMinutes || 60) - elapsedMinutes);
+  const current = Number(document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || 0);
+  const direction = recipe.direction;
+  const hitTake = current > 0 && (direction === "LONG" ? current >= recipe.takeProfit : current <= recipe.takeProfit);
+  const hitStop = current > 0 && (direction === "LONG" ? current <= recipe.stopLoss : current >= recipe.stopLoss);
+  const inFavor = current > 0 && (direction === "LONG" ? current > recipe.entry : current < recipe.entry);
+  const timeWarning = elapsedMinutes >= 30 && !inFavor && !hitTake && !hitStop;
+  const expired = elapsedMinutes >= Number(recipe.maxMinutes || 60) && !hitTake && !hitStop;
+  let action = "Vigilar";
+  if (hitTake) action = "Cerrar: meta tocada";
+  else if (hitStop) action = "Cerrar: escudo tocado";
+  else if (expired) action = "Cerrar manual o reiniciar lectura";
+  else if (timeWarning) action = "Revisar: no avanza a favor";
+  return { elapsedMinutes, remaining, current, hitTake, hitStop, inFavor, timeWarning, expired, action };
+}
+
+function renderRecipeOption(recipe, activeRecipe) {
+  const isActive = activeRecipe?.direction === recipe.direction;
+  return `
+    <article class="recipe-option ${recipe.direction.toLowerCase()} ${recipe.isPrimary ? "primary" : ""} ${isActive ? "running" : ""}">
+      <div class="recipe-option-head">
+        <div>
+          <span class="simple-label">${recipe.direction === "LONG" ? "Opcion LONG" : "Opcion SHORT"}</span>
+          <strong>${recipe.label}</strong>
+        </div>
+        <span class="simple-badge">${isActive ? "INICIADA" : recipe.status}</span>
+      </div>
+      <div class="recipe-option-grid">
+        <div><span>Entrada</span><strong>${priceText(recipe.entry)}</strong></div>
+        <div><span>Stop</span><strong>${priceText(recipe.stopLoss)}</strong></div>
+        <div><span>Take</span><strong>${priceText(recipe.takeProfit)}</strong></div>
+        <div><span>Volumen</span><strong>${formatVolumeForXtb(recipe.volume, recipe.asset || findAsset(focusSymbol))}</strong></div>
+      </div>
+      <p>${recipe.note}</p>
+      <button type="button" data-simple-action="start-recipe-${recipe.direction}" ${isActive ? "disabled" : ""}>Inicio: abri esta receta</button>
+    </article>
+  `;
+}
+
+function renderActiveRecipeCard(activeRecipe) {
+  if (!activeRecipe) {
+    return `
+      <div class="active-recipe-card idle">
+        <span class="simple-label">Operacion activa</span>
+        <strong>Ninguna</strong>
+        <small>Cuando abras una receta en XTB, pulsa "Inicio" en LONG o SHORT para que empiece el reloj.</small>
+      </div>
+    `;
+  }
+  const progress = activeRecipeProgress(activeRecipe);
+  return `
+    <div class="active-recipe-card running">
+      <div>
+        <span class="simple-label">Operacion activa</span>
+        <strong>${activeRecipe.label}</strong>
+        <small id="active-recipe-status">${progress.action}. Tiempo ${progress.elapsedMinutes}m / ${activeRecipe.maxMinutes}m.</small>
+      </div>
+      <div class="active-recipe-actions">
+        <button type="button" class="secondary" data-simple-action="finish-active-recipe">Marcar cerrada</button>
+        <button type="button" class="danger" data-simple-action="clear-active-recipe">Cancelar reloj</button>
+      </div>
+    </div>
+  `;
+}
+
 function totalOperationResult() {
   return [1, 2, 3, 4].reduce((total, slot) => total + operationResultValue(slot), 0);
 }
@@ -4185,6 +4332,8 @@ function renderSimpleDashboard() {
   const actionableOrder = profile.status === "OPERABLE";
   const thesis = profile.dayThesis;
   const operateDecision = buildOperateDecision(profile);
+  const recipeOptions = buildDualRecipes(profile);
+  const activeRecipe = activeRecipeState();
   const objectiveOrderLabel = actionableOrder
     ? profile.directionLabel
     : profile.direction === "WAIT"
@@ -4360,7 +4509,7 @@ function renderSimpleDashboard() {
         </div>
       </section>
 
-      <section class="simple-ops single">
+      <section class="simple-ops recipe-decision-grid">
         <article class="simple-operation active">
           <div class="simple-head">
             <h2>Objetivo tecnico</h2>
@@ -4379,6 +4528,18 @@ function renderSimpleDashboard() {
           <p class="simple-warning">${objectiveWarning}</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
+        </article>
+        <article class="simple-operation dual-recipes-card">
+          <div class="simple-head">
+            <h2>Dos opciones</h2>
+            <span class="simple-badge">elige una</span>
+          </div>
+          <p class="simple-subtitle">La app te muestra los dos caminos. Solo pulsa Inicio en la receta que realmente abriste en XTB.</p>
+          <div class="recipe-options">
+            ${recipeOptions.map((recipe) => renderRecipeOption(recipe, activeRecipe)).join("")}
+          </div>
+          ${renderActiveRecipeCard(activeRecipe)}
+          <p class="simple-tiny">Regla de tiempo: si en 30 minutos no avanza a favor, revisa salida manual. Si en 60 minutos no toca take ni stop, cierra o reinicia lectura.</p>
         </article>
         ${renderFibOnlyCard(primaryDisplay)}
       </section>
@@ -4425,6 +4586,7 @@ function renderSimpleDashboard() {
     </div>
   `;
   scheduleAnalysisTimer();
+  scheduleActiveRecipeTimer();
   return;
 }
 }
@@ -4441,6 +4603,23 @@ function refreshAnalysisTimerDom() {
       : "Analisis activo. El bot revisa 4H, 15M y 1M hacia atras.";
   }
   if (chartButton) chartButton.disabled = false;
+}
+
+function refreshActiveRecipeDom() {
+  const activeRecipe = activeRecipeState();
+  const target = document.getElementById("active-recipe-status");
+  if (!activeRecipe || !target) return;
+  const progress = activeRecipeProgress(activeRecipe);
+  if (!progress) return;
+  target.textContent = `${progress.action}. Tiempo ${progress.elapsedMinutes}m / ${activeRecipe.maxMinutes}m. Restan ${progress.remaining}m.`;
+}
+
+function scheduleActiveRecipeTimer() {
+  window.clearInterval(activeRecipeTimer);
+  activeRecipeTimer = null;
+  refreshActiveRecipeDom();
+  if (!activeRecipeState()) return;
+  activeRecipeTimer = window.setInterval(refreshActiveRecipeDom, 5000);
 }
 
 function scheduleAnalysisTimer() {
@@ -4544,6 +4723,27 @@ function bindSimpleDashboard() {
       saveConfigLocal();
       schedulePostback();
       renderDailyResultCard();
+      return;
+    }
+    if (action.startsWith("start-recipe-")) {
+      const direction = action.replace("start-recipe-", "");
+      const profile = us100StrategyProfile();
+      const recipe = buildDirectionalRecipe(profile, direction);
+      setActiveRecipe(recipe);
+      updatePostbackStatus(`Receta ${recipe.label} marcada como iniciada. Vigilar maximo 60 minutos.`, "ok");
+      renderSimpleDashboard();
+      return;
+    }
+    if (action === "finish-active-recipe") {
+      clearActiveRecipe();
+      updatePostbackStatus("Operacion marcada como cerrada. Registra el resultado del dia.", "neutral");
+      renderSimpleDashboard();
+      return;
+    }
+    if (action === "clear-active-recipe") {
+      clearActiveRecipe();
+      updatePostbackStatus("Reloj de receta cancelado.", "neutral");
+      renderSimpleDashboard();
       return;
     }
     if (action === "save-close") saveDayClose();

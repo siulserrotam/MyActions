@@ -573,6 +573,131 @@ body {
   opacity: 0.72;
 }
 
+.recipe-decision-grid {
+  grid-template-columns: minmax(280px, 0.95fr) minmax(360px, 1.25fr) minmax(300px, 0.9fr);
+}
+
+.dual-recipes-card {
+  border-color: rgb(90 160 255 / 0.34);
+}
+
+.recipe-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recipe-option {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  background: rgb(6 12 13 / 0.72);
+  padding: 12px;
+}
+
+.recipe-option.long {
+  border-color: rgb(67 225 145 / 0.28);
+}
+
+.recipe-option.short {
+  border-color: rgb(255 90 102 / 0.28);
+}
+
+.recipe-option.primary {
+  box-shadow: inset 0 0 0 1px rgb(255 188 72 / 0.26);
+}
+
+.recipe-option.running {
+  border-color: rgb(255 188 72 / 0.72);
+  background: rgb(55 43 15 / 0.55);
+}
+
+.recipe-option-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recipe-option-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 17px;
+}
+
+.recipe-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recipe-option-grid > div {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 9px;
+}
+
+.recipe-option-grid span,
+.recipe-option-grid strong {
+  display: block;
+}
+
+.recipe-option-grid span {
+  color: #95b7ad;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.recipe-option-grid strong {
+  margin-top: 4px;
+  color: #fff;
+  font-size: 15px;
+}
+
+.recipe-option p,
+.active-recipe-card small {
+  margin: 0;
+  color: #a8c4bb;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.active-recipe-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 12px;
+}
+
+.active-recipe-card.running {
+  border-color: rgb(255 188 72 / 0.42);
+  background: rgb(255 188 72 / 0.09);
+}
+
+.active-recipe-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 18px;
+}
+
+.active-recipe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .simple-decision {
   border-color: rgb(255 188 72 / 0.3);
 }
@@ -1684,6 +1809,8 @@ body {
   .operate-decision-card,
   .operate-checklist,
   .day-thesis-card,
+  .recipe-decision-grid,
+  .recipe-options,
   .technical-trace-grid,
   .simple-top-list,
   .simple-guide {
