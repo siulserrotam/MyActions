@@ -1263,6 +1263,7 @@ function formatDataAge(ms) {
 
 function xtbFreshnessState(symbol = focusSymbol) {
   const quote = latestXtbQuoteFor(symbol);
+  const manualXtbPrice = xtbPriceValue();
   const source = String(quote?.signal_source || quote?.source || "");
   const sourceLower = source.toLowerCase();
   const updatedAtRaw = quote?.updated_at || quote?.timestamp || quote?.time;
@@ -1272,17 +1273,23 @@ function xtbFreshnessState(symbol = focusSymbol) {
   const hasExecutablePrice = Number(quote?.bid || 0) > 0 || Number(quote?.ask || 0) > 0 || Number(quote?.price || 0) > 0;
   const freshLimitMs = isMarketOpenNow() ? 20_000 : 3 * 60_000;
   const fresh = Boolean(hasXtbSource && hasExecutablePrice && ageMs >= 0 && ageMs <= freshLimitMs);
+  const manualFallback = !fresh && manualXtbPrice > 0;
+  const usable = fresh || manualFallback;
   const ageText = formatDataAge(ageMs);
   const sourceText = hasXtbSource ? "XTB" : source ? source : "sin fuente";
   return {
     fresh,
+    manualFallback,
+    usable,
     ageMs,
     ageText,
     source: sourceText,
-    short: fresh ? `actual ${ageText}` : `viejo ${ageText}`,
+    short: fresh ? `actual ${ageText}` : manualFallback ? "manual aceptable" : `viejo ${ageText}`,
     detail: fresh
       ? `Lectura XTB fresca (${ageText}). La receta puede usar precio real.`
-      : `Lectura XTB no fresca (${ageText}). Reinicia monitor o no copies niveles.`,
+      : manualFallback
+        ? "Precio XTB manual/visible aceptado como respaldo. Mejor reiniciar monitor para lectura automatica."
+        : `Lectura XTB no fresca (${ageText}). Reinicia monitor o no copies niveles.`,
   };
 }
 
@@ -2110,7 +2117,6 @@ function professionalZonesForItem(item, candles = []) {
 
 function technicalDecisionText(item, candles = []) {
   const zones = item.zones;
-  const strategyTarget = strategyTargetForItem(item);
   const proZones = professionalZonesForItem(item, candles);
   const changePct = Number(item.asset.liveChangePct ?? 0);
   const directionText = item.direction === "SHORT" ? "sesgo bajista" : "sesgo alcista";
@@ -2132,23 +2138,10 @@ function technicalDecisionText(item, candles = []) {
       <span><b>Zona rebote/pullback:</b> ${numberText(proZones.pullbackLow)} - ${numberText(proZones.pullbackHigh)}. Si el precio esta ahi, los profesionales esperan confirmacion y no persiguen.</span>
       <span><b>Zona de invalidacion:</b> ${numberText(proZones.invalidation)}; ${proZones.invalidationText}. El ${stopText}; el ${takeText}.</span>
       <span><b>Semaforo:</b> ${proZones.actionText}</span>
-      <span>Meta deseada: ${money(zones.rewardAmount)} en ${numberText(zones.takeProfit)}. Meta IA: ${money(strategyTarget.amount)} en ${numberText(strategyTarget.price)}.</span>
+      <span>Meta deseada: ${money(zones.rewardAmount)} en ${numberText(zones.takeProfit)}.</span>
       <span>Relacion estimada deseada: 1:${numberText(rr || 0)}. Riesgo ${money(zones.riskAmount)} para objetivo ${money(zones.rewardAmount)}.</span>
     </div>
   `;
-}
-
-function strategyTargetForItem(item) {
-  const zones = item.zones;
-  const confidence = Number(item.confidence || 60);
-  const changePct = Math.abs(Number(item.asset.liveChangePct ?? 0));
-  const confidenceFactor = clamp(confidence / 78, 0.45, 1.15);
-  const momentumFactor = clamp(0.75 + changePct / 3, 0.65, 1.2);
-  const factor = clamp(confidenceFactor * momentumFactor, 0.45, 1.15);
-  const amount = zones.rewardAmount * factor;
-  const distance = zones.rewardAmount > 0 ? Math.abs(zones.takeProfit - zones.entry) * factor : 0;
-  const price = item.direction === "SHORT" ? zones.entry - distance : zones.entry + distance;
-  return { amount, price, factor };
 }
 
 function buildChartCandles(zones, direction) {
@@ -2446,7 +2439,6 @@ function renderTradeChart(item, variant = "mini") {
   const realCandles = realCandlesForItem(item);
   const usingRealCandles = realCandles.length >= 2;
   const candles = usingRealCandles ? realCandles : buildChartCandles(zones, item.direction);
-  const strategyTarget = strategyTargetForItem(item);
   const proZones = professionalZonesForItem(item, candles);
   const pointQuoteCount = candles.filter((candle) => candle.pointQuote).length;
   const pointQuoteMode = usingRealCandles && pointQuoteCount >= Math.ceil(candles.length * 0.55);
@@ -2463,7 +2455,6 @@ function renderTradeChart(item, variant = "mini") {
     ...(nearLevel(zones.entry) ? [zones.entry] : []),
     ...(nearLevel(zones.stopLoss) ? [zones.stopLoss] : []),
     ...(nearLevel(zones.takeProfit) ? [zones.takeProfit] : []),
-    ...(nearLevel(strategyTarget.price) ? [strategyTarget.price] : []),
     ...(nearLevel(proZones.support) ? [proZones.support] : []),
     ...(nearLevel(proZones.resistance) ? [proZones.resistance] : []),
   ];
@@ -2473,7 +2464,6 @@ function renderTradeChart(item, variant = "mini") {
     zones.entry,
     zones.stopLoss,
     zones.takeProfit,
-    strategyTarget.price,
     zones.reboundLow,
     zones.reboundHigh,
     proZones.support,
@@ -2695,7 +2685,6 @@ function renderTradeChart(item, variant = "mini") {
   const chartLegendMarkup = `
     <div class="chart-legend">
       <span class="take">Deseada ${numberText(zones.takeProfit)}</span>
-      <span class="ai-take">IA ${numberText(strategyTarget.price)}</span>
       <span class="entry">Entrada ${numberText(zones.entry)}</span>
       <span class="stop">Stop ${numberText(zones.stopLoss)}</span>
     </div>
@@ -2706,7 +2695,7 @@ function renderTradeChart(item, variant = "mini") {
       <span>Zona rebote: ${numberText(zones.reboundLow)} - ${numberText(zones.reboundHigh)}</span>
       <span>Zona seguridad: ${numberText(zones.securityLow)} - ${numberText(zones.securityHigh)}</span>
       <span>Zonas profesionales: soporte ${numberText(proZones.support)}, resistencia ${numberText(proZones.resistance)}, gatillo ${numberText(proZones.trigger)}.</span>
-      <span>Valor deseado: ${money(zones.rewardAmount)} | Valor IA: ${money(strategyTarget.amount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
+      <span>Valor deseado: ${money(zones.rewardAmount)} | Riesgo aprox: ${money(zones.riskAmount)}</span>
       ${chartRangeText ? `<span>Rango visible: ${chartRangeText}. Si ves pocas velas, Yahoo no entrego todas las velas de esa ventana.</span>` : ""}
       <span>Fuente grafica: ${chartSourceText}. La escala prioriza precio reciente, entrada y stop para no aplastar las velas.</span>
       <span>Traza visible: ${chartFrameConfig().label} muestra ${visibleTrace.bias === "WAIT" ? "sin direccion operable" : visibleTrace.bias}, patron ${visibleTrace.pattern.name}, tendencia ${visibleTrace.trend.direction}. La decision final exige mapa 4H, confirmacion 15M y gatillo 1M.</span>
@@ -2740,14 +2729,12 @@ function renderTradeChart(item, variant = "mini") {
         ${visibleLevel(proZones.support) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(proZones.support)}" y2="${y(proZones.support)}" class="chart-line support" />` : ""}
         ${fibGoldenMarkup}
         ${visibleLevel(zones.takeProfit) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.takeProfit)}" y2="${y(zones.takeProfit)}" class="chart-line take" />` : ""}
-        ${visibleLevel(strategyTarget.price) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(strategyTarget.price)}" y2="${y(strategyTarget.price)}" class="chart-line ai-take" />` : ""}
         ${visibleLevel(zones.entry) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.entry)}" y2="${y(zones.entry)}" class="chart-line entry" />` : ""}
         ${visibleLevel(zones.stopLoss) ? `<line x1="${plotLeft}" x2="${plotRight}" y1="${y(zones.stopLoss)}" y2="${y(zones.stopLoss)}" class="chart-line stop" />` : ""}
         ${trendMarkup}
         ${forecastMarkup}
         ${candleMarkup}
         ${visibleLevel(zones.takeProfit) ? levelTag("TP", zones.takeProfit, "take") : ""}
-        ${visibleLevel(strategyTarget.price) ? levelTag("IA", strategyTarget.price, "ai-take") : ""}
         ${visibleLevel(zones.entry) ? levelTag("Entrada", zones.entry, "entry") : ""}
         ${visibleLevel(zones.stopLoss) ? levelTag("SL", zones.stopLoss, "stop") : ""}
         ${variant === "main" ? `
@@ -3518,7 +3505,7 @@ function us100StrategyProfile() {
   const antiChase = antiChaseCheck(bars, levelDirection, price);
   const movementBudget = movementBudgetCheck(bars, levelDirection, price);
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
-  const dataFreshnessScore = dataFreshness.fresh ? 10 : -45;
+  const dataFreshnessScore = dataFreshness.fresh ? 10 : dataFreshness.manualFallback ? -8 : -45;
   const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
@@ -3535,7 +3522,7 @@ function us100StrategyProfile() {
   const volumeScore = volume > 0 ? 10 : -30;
   const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore), 0, 95);
   const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, movementBudget, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
-  const status = !dataFreshness.fresh || dayThesis.invalidated || fibSetup.rejected
+  const status = !dataFreshness.usable || dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
     : playbook.allowed && fibSetup.ready && antiChase.ok && movementBudget.ok && dayThesis.stable
       ? "OPERABLE"
@@ -4167,7 +4154,7 @@ function buildOperateDecision(profile) {
   const checks = [
     {
       label: "Lectura XTB",
-      ok: Boolean(profile.dataFreshness?.fresh),
+      ok: Boolean(profile.dataFreshness?.usable),
       detail: profile.dataFreshness?.detail || "Sin lectura XTB reciente.",
     },
     {
@@ -4242,7 +4229,7 @@ function professionalDecisionPlan(profile, operateDecision) {
     {
       key: "data",
       label: "Lectura XTB",
-      ok: Boolean(profile.dataFreshness?.fresh),
+      ok: Boolean(profile.dataFreshness?.usable),
       short: profile.dataFreshness?.short || "sin lectura",
       detail: profile.dataFreshness?.detail || "Sin dato fresco no hay receta accionable.",
     },
@@ -4363,16 +4350,39 @@ function activeRecipeState() {
   }
 }
 
+function activeRecipeLessonNote(recipe) {
+  if (!recipe) return "";
+  const startedAt = recipe.startedAt ? new Date(recipe.startedAt).toLocaleString("es-CO") : "sin hora";
+  const closedAt = recipe.closedAt ? new Date(recipe.closedAt).toLocaleString("es-CO") : "";
+  return [
+    `RECETA_ABIERTA=${recipe.label || recipe.direction}`,
+    `inicio=${startedAt}`,
+    closedAt ? `cierre_marcado=${closedAt}` : "",
+    `entrada=${numberText(recipe.entry)}`,
+    `stop=${numberText(recipe.stopLoss)}`,
+    `take=${numberText(recipe.takeProfit)}`,
+    `volumen=${numberText(recipe.volume)}`,
+    `confianza=${numberText(recipe.confidence || 0)}%`,
+    `estado=${recipe.status || "sin estado"}`,
+  ].filter(Boolean).join(" | ");
+}
+
 function setActiveRecipe(recipe) {
   setLocalValue("us100_active_recipe", JSON.stringify({
+    symbol: recipe.asset?.symbol || focusSymbol,
     direction: recipe.direction,
     label: recipe.label,
     entry: Number(recipe.entry || 0),
     stopLoss: Number(recipe.stopLoss || 0),
     takeProfit: Number(recipe.takeProfit || 0),
     volume: Number(recipe.volume || 0),
+    pointValue: Number(recipe.pointValue || 0),
+    marginRequired: Number(recipe.marginRequired || 0),
     targetUsd: Number(recipe.targetUsd || 0),
     stopUsd: Number(recipe.stopUsd || 0),
+    confidence: Number(recipe.confidence || 0),
+    status: recipe.status || "",
+    note: recipe.note || "",
     startedAt: new Date().toISOString(),
     maxMinutes: 60,
   }));
@@ -4382,10 +4392,20 @@ function clearActiveRecipe() {
   removeLocalValue("us100_active_recipe");
 }
 
+function markActiveRecipeClosed() {
+  const recipe = activeRecipeState();
+  if (!recipe) return;
+  recipe.closedAt = new Date().toISOString();
+  recipe.manuallyClosed = true;
+  setLocalValue("us100_active_recipe", JSON.stringify(recipe));
+}
+
 function activeRecipeProgress(recipe) {
   if (!recipe?.startedAt) return null;
   const started = new Date(recipe.startedAt);
-  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - started.getTime()) / 60000));
+  const closedAt = recipe.closedAt ? new Date(recipe.closedAt) : null;
+  const nowMs = closedAt ? closedAt.getTime() : Date.now();
+  const elapsedMinutes = Math.max(0, Math.floor((nowMs - started.getTime()) / 60000));
   const remaining = Math.max(0, Number(recipe.maxMinutes || 60) - elapsedMinutes);
   const current = Number(document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || 0);
   const direction = recipe.direction;
@@ -4395,7 +4415,8 @@ function activeRecipeProgress(recipe) {
   const timeWarning = elapsedMinutes >= 30 && !inFavor && !hitTake && !hitStop;
   const expired = elapsedMinutes >= Number(recipe.maxMinutes || 60) && !hitTake && !hitStop;
   let action = "Vigilar";
-  if (hitTake) action = "Cerrar: meta tocada";
+  if (closedAt) action = "Cerrada registrada; guarda resultado";
+  else if (hitTake) action = "Cerrar: meta tocada";
   else if (hitStop) action = "Cerrar: escudo tocado";
   else if (expired) action = "Cerrar manual o reiniciar lectura";
   else if (timeWarning) action = "Revisar: no avanza a favor";
@@ -4446,6 +4467,36 @@ function renderActiveRecipeCard(activeRecipe) {
       <div class="active-recipe-actions">
         <button type="button" class="secondary" data-simple-action="finish-active-recipe">Marcar cerrada</button>
         <button type="button" class="danger" data-simple-action="clear-active-recipe">Cancelar reloj</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderActiveRecipeLearningCard(profile, activeRecipe) {
+  const current = activeRecipe || activeRecipeState();
+  if (!current) {
+    const canMark = profile?.direction === "LONG" || profile?.direction === "SHORT";
+    const buttonText = canMark ? `Marcar que opere ${profile.directionLabel}` : "Sin direccion para marcar";
+    return `
+      <div class="active-recipe-card idle simple-wide">
+        <span class="simple-label">Receta operada</span>
+        <strong>Sin operacion marcada</strong>
+        <small>Cuando abras en XTB, pulsa este boton. La app no compra ni vende: solo enlaza tu resultado con la receta para aprendizaje.</small>
+        <button type="button" class="secondary" data-simple-action="start-current-recipe" ${canMark ? "" : "disabled"}>${buttonText}</button>
+      </div>
+    `;
+  }
+  const progress = activeRecipeProgress(current);
+  return `
+    <div class="active-recipe-card running simple-wide">
+      <div>
+        <span class="simple-label">Receta operada para aprendizaje</span>
+        <strong>${current.symbol || focusSymbol} ${current.label}</strong>
+        <small id="active-recipe-status">${progress.action}. Tiempo ${progress.elapsedMinutes}m / ${current.maxMinutes}m. El cierre del dia se guardara con esta receta.</small>
+      </div>
+      <div class="active-recipe-actions">
+        <button type="button" class="secondary" data-simple-action="finish-active-recipe">Marcar cerrada</button>
+        <button type="button" class="danger" data-simple-action="clear-active-recipe">Cancelar registro</button>
       </div>
     </div>
   `;
@@ -4773,6 +4824,7 @@ function renderSimpleDashboard() {
           <p class="simple-warning">${objectiveWarning}</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">${recipeRiskText}</p>
+          ${renderActiveRecipeLearningCard(profile, activeRecipeState())}
         </article>
         ${renderFibOnlyCard(primaryDisplay)}
       </section>
@@ -4952,14 +5004,30 @@ function bindSimpleDashboard() {
       const direction = action.replace("start-recipe-", "");
       const profile = us100StrategyProfile();
       const recipe = buildDirectionalRecipe(profile, direction);
+      recipe.confidence = profile.confidence;
+      recipe.status = profile.status;
       setActiveRecipe(recipe);
       updatePostbackStatus(`Receta ${recipe.label} marcada como iniciada. Vigilar maximo 60 minutos.`, "ok");
       renderSimpleDashboard();
       return;
     }
+    if (action === "start-current-recipe") {
+      const profile = us100StrategyProfile();
+      if (profile.direction !== "LONG" && profile.direction !== "SHORT") {
+        updatePostbackStatus("No hay direccion clara para registrar una receta.", "error");
+        return;
+      }
+      const recipe = buildDirectionalRecipe(profile, profile.direction);
+      recipe.confidence = profile.confidence;
+      recipe.status = profile.status;
+      setActiveRecipe(recipe);
+      updatePostbackStatus(`Receta ${recipe.label} registrada como operada. El cierre del dia alimentara el aprendizaje.`, "ok");
+      renderSimpleDashboard();
+      return;
+    }
     if (action === "finish-active-recipe") {
-      clearActiveRecipe();
-      updatePostbackStatus("Operacion marcada como cerrada. Registra el resultado del dia.", "neutral");
+      markActiveRecipeClosed();
+      updatePostbackStatus("Operacion marcada como cerrada. Ahora registra el resultado real para alimentar el aprendizaje.", "neutral");
       renderSimpleDashboard();
       return;
     }
@@ -5036,25 +5104,40 @@ function currentMarketPhaseLabel() {
 }
 
 async function saveTradeLesson() {
-  if (!lastResult || !lastResult.symbol) {
-    updateLessonStatus("Aprendizaje: calcula una receta antes de guardar.", "error");
-    return;
-  }
-  const payload = {
-    trade_date: todayKey(),
+  const activeRecipe = activeRecipeState();
+  const profile = us100StrategyProfile();
+  const lessonSource = activeRecipe || (lastResult?.symbol ? {
     symbol: lastResult.symbol,
     direction: lastResult.direction,
-    planned_volume: Number(lastResult.volume || 0),
-    entry_price: Number(lastResult.entry_price || 0),
-    stop_price: Number(lastResult.stop_price || 0),
-    take_profit_price: Number(lastResult.take_profit_price || 0),
-    expected_loss: Number(lastResult.expected_loss || 0),
-    expected_profit: Number(lastResult.expected_profit || 0),
+    volume: lastResult.volume,
+    entry: lastResult.entry_price,
+    stopLoss: lastResult.stop_loss,
+    takeProfit: lastResult.take_profit,
+    stopUsd: lastResult.expected_loss,
+    targetUsd: lastResult.expected_profit,
+    confidence: buildAiConfirmation().confidence || 0,
+  } : null);
+  if (!lessonSource) {
+    updateLessonStatus("Aprendizaje: marca una receta como iniciada o calcula una receta antes de guardar.", "error");
+    return;
+  }
+  const manualNotes = document.getElementById("lesson-notes")?.value || "";
+  const activeNote = activeRecipeLessonNote(activeRecipe);
+  const payload = {
+    trade_date: todayKey(),
+    symbol: lessonSource.symbol || focusSymbol,
+    direction: lessonSource.direction,
+    planned_volume: Number(lessonSource.volume || 0),
+    entry_price: Number(lessonSource.entry || 0),
+    stop_price: Number(lessonSource.stopLoss || 0),
+    take_profit_price: Number(lessonSource.takeProfit || 0),
+    expected_loss: Number(lessonSource.stopUsd || 0),
+    expected_profit: Number(lessonSource.targetUsd || 0),
     actual_result: decimalValueById("lesson-result", 0),
     outcome: document.getElementById("lesson-outcome")?.value || "pending",
-    confidence: Number((buildAiConfirmation().confidence || 0)),
+    confidence: Number(lessonSource.confidence || profile.confidence || 0),
     market_phase: currentMarketPhaseLabel(),
-    notes: document.getElementById("lesson-notes")?.value || "",
+    notes: [activeNote, manualNotes].filter(Boolean).join(" || "),
   };
   updateLessonStatus("Aprendizaje: guardando...");
   try {
@@ -5066,6 +5149,7 @@ async function saveTradeLesson() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     updateLessonStatus(`Aprendizaje guardado: ${payload.symbol} ${payload.direction} ${money(payload.actual_result)}.`, "ok");
     document.getElementById("lesson-notes").value = "";
+    if (activeRecipe && payload.outcome !== "pending") clearActiveRecipe();
     await loadLessonSummary();
   } catch (error) {
     updateLessonStatus("Aprendizaje: no se pudo guardar. Revisa base de datos.", "error");
@@ -5333,9 +5417,7 @@ async function saveDayClose() {
 
   if (balanceInput) balanceInput.value = nextBalance.toFixed(2);
   await postbackConfig();
-  if (lastResult?.symbol) {
-    await saveTradeLesson();
-  }
+  await saveTradeLesson();
   resultInputs.forEach((input) => {
     if (input) input.value = 0;
   });
