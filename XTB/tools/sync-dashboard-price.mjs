@@ -47,9 +47,12 @@ function extractXtbQuotes(text) {
   const quotes = Object.fromEntries(instruments.flatMap(([symbol, pattern]) => {
     const match = cleaned.match(pattern);
     if (!match) return [];
+    const bid = quotePrice(match[1] ?? match[3]);
+    const ask = quotePrice(match[2] ?? match[4]);
+    if (bid === null && ask === null) return [];
     return [[symbol, {
-      bid: quotePrice(match[1] ?? match[3]),
-      ask: quotePrice(match[2] ?? match[4]),
+      bid,
+      ask,
       change_pct: quoteChangePct(cleaned, match.index || 0)
     }]];
   }));
@@ -100,7 +103,41 @@ function pickPrice(quote) {
   if (!quote) return null;
   if (SIDE === 'bid') return quote.bid;
   if (SIDE === 'ask') return quote.ask;
-  return Number((((quote.bid || 0) + (quote.ask || 0)) / 2).toFixed(2));
+  const values = [quote.bid, quote.ask].filter((value) => Number.isFinite(value));
+  if (!values.length) return null;
+  return Number((values.reduce((total, value) => total + value, 0) / values.length).toFixed(2));
+}
+
+function currentTradingSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  const total = hour * 60 + minute;
+  const active = [];
+  const asia = total >= 18 * 60 || total < 3 * 60;
+  const london = total >= 3 * 60 && total < 11 * 60 + 30;
+  const ny = total >= 9 * 60 + 30 && total < 16 * 60;
+  if (asia) active.push('Asia');
+  if (london) active.push('London');
+  if (ny) active.push('NY');
+  const session = active.length ? active.join('/') : 'Fuera de sesion principal';
+  return {
+    session,
+    session_code: session.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+    active,
+    ny_time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    ny_weekday: parts.weekday || '',
+    timezone: 'America/New_York'
+  };
 }
 
 function extractXtbTicket(text) {
@@ -222,7 +259,7 @@ function extractXtbAccountFromAccessibleText(text) {
 
 function numberMatch(text, pattern) {
   const match = text.match(pattern);
-  return match ? parseMoney(match[1]) : null;
+  return match?.[1] ? parseMoney(match[1]) : null;
 }
 
 function textHash(value) {
@@ -299,6 +336,28 @@ function extractXtbPositions(text) {
   return positions;
 }
 
+function extractXtbDayHistoryResult(text) {
+  const cleaned = normalize(text);
+  const looksLikeHistory = /Historial\s+de\s+la\s+cuenta|Posiciones\s+cerradas|Precio\s+del\s+cierre|Beneficio\s+neto/i.test(cleaned);
+  if (!looksLikeHistory) return null;
+
+  const patterns = [
+    /Beneficio\s+neto\s*\/\s*P[eÃ©]rdida\s*:?\s*(-?[0-9.,\s]+)\s*USD/i,
+    /Beneficio\s+neto\s*:?\s*(-?[0-9.,\s]+)\s*USD/i,
+    /P[eÃ©]rdida\s*:?\s*(-?[0-9.,\s]+)\s*USD/i
+  ];
+  const value = patterns
+    .map((pattern) => numberMatch(cleaned, pattern))
+    .find((result) => Number.isFinite(result));
+  if (!Number.isFinite(value)) return null;
+
+  return {
+    closed_result: Number(value.toFixed(2)),
+    source: 'xtb-visible-history-summary',
+    detected_at: new Date().toISOString()
+  };
+}
+
 async function setDashboardPrice(page, symbol, value) {
   const formatted = value.toFixed(2);
   await page.evaluate(({ nextSymbol, price }) => {
@@ -354,13 +413,13 @@ async function sendQuoteBatchToDashboard(page, quotes) {
   return { applied, items };
 }
 
-async function publishQuoteSnapshot(items) {
+async function publishQuoteSnapshot(items, marketSession = null) {
   if (!items?.length || !SNAPSHOT_ENDPOINT) return { published: false, count: 0 };
   try {
     const response = await fetch(SNAPSHOT_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'xtb-browser-sync', items }),
+      body: JSON.stringify({ source: 'xtb-browser-sync', items, market_session: marketSession }),
       signal: AbortSignal.timeout(2500)
     });
     return { published: response.ok, count: items.length, status: response.status };
@@ -384,32 +443,35 @@ async function sendTicketToDashboard(page, ticket, symbol) {
   }, { ticketPayload: ticket, ticketSymbol: symbol });
 }
 
-async function sendPositionsToDashboard(page, positions) {
-  if (!positions?.length) return false;
-  return page.evaluate((positionItems) => {
+async function sendPositionsToDashboard(page, positions, dayResult = null, marketSession = null) {
+  if (!positions?.length && !dayResult) return false;
+  return page.evaluate(({ positionItems, dayResultPayload, marketSessionPayload }) => {
     if (typeof window.dispatchEvent !== 'function') return false;
     window.dispatchEvent(new CustomEvent('xtb-positions', {
       detail: {
         positions: positionItems,
+        day_result: dayResultPayload,
+        market_session: marketSessionPayload,
         updated_at: new Date().toISOString()
       }
     }));
     return true;
-  }, positions);
+  }, { positionItems: positions || [], dayResultPayload: dayResult, marketSessionPayload: marketSession });
 }
 
-async function sendAccountToDashboard(page, account) {
+async function sendAccountToDashboard(page, account, marketSession = null) {
   if (!account) return false;
-  return page.evaluate((accountPayload) => {
+  return page.evaluate(({ accountPayload, marketSessionPayload }) => {
     if (typeof window.dispatchEvent !== 'function') return false;
     window.dispatchEvent(new CustomEvent('xtb-account', {
       detail: {
         ...accountPayload,
+        market_session: marketSessionPayload,
         updated_at: new Date().toISOString()
       }
     }));
     return true;
-  }, account);
+  }, { accountPayload: account, marketSessionPayload: marketSession });
 }
 
 async function readDashboardOrderRequest(page) {
@@ -585,6 +647,7 @@ async function processDashboardOrderRequest(dashboardPage, xtbPage) {
 }
 
 async function syncOnce() {
+  const marketSession = currentTradingSession();
   const browser = await connectChrome();
   try {
     const context = pickBrowserContext(browser);
@@ -620,7 +683,7 @@ async function syncOnce() {
     const xtbText = quoteSnapshot.text;
     const quotes = extractXtbQuotes(xtbText);
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
-    const snapshotPublish = await publishQuoteSnapshot(quoteBatch.items);
+    const snapshotPublish = await publishQuoteSnapshot(quoteBatch.items, marketSession);
     const ticket = extractXtbTicket(xtbText);
     const account = xtbSnapshots
       .map((snapshot) => {
@@ -629,13 +692,16 @@ async function syncOnce() {
         return extracted ? { ...extracted, source_url: snapshot.url } : null;
       })
       .find(Boolean) || null;
-    const accountApplied = await sendAccountToDashboard(dashboardPage, account);
+    const accountApplied = await sendAccountToDashboard(dashboardPage, account, marketSession);
     const positions = Array.from(new Map(
       xtbSnapshots
-        .flatMap((snapshot) => extractXtbPositions(snapshot.text))
+        .flatMap((snapshot) => extractXtbPositions(`${snapshot.text}\n${snapshot.accessibleText}`))
         .map((position) => [position.id, position])
     ).values());
-    const positionsApplied = await sendPositionsToDashboard(dashboardPage, positions);
+    const dayHistoryResult = xtbSnapshots
+      .map((snapshot) => extractXtbDayHistoryResult(`${snapshot.text}\n${snapshot.accessibleText}`))
+      .find(Boolean) || null;
+    const positionsApplied = await sendPositionsToDashboard(dashboardPage, positions, dayHistoryResult, marketSession);
     await dashboardPage.waitForTimeout(100);
     const afterBatchState = await dashboardPage.evaluate(() => ({
       symbol: document.querySelector('#symbol')?.value || '',
@@ -652,15 +718,22 @@ async function syncOnce() {
     if (!quoteBatch.items.length && !syncSymbol) {
       throw new Error('No encontre un activo sincronizable. Selecciona o deja visible el activo en XTB.');
     }
-    if (!quoteBatch.applied && (!quote || price === null)) {
+    const fallbackPrice = parseMoney(afterBatchState.xtbPrice)
+      ?? parseMoney(dashboardState.xtbPrice)
+      ?? parseMoney(dashboardState.marketPrice);
+    const usablePrice = price ?? fallbackPrice;
+    if (!quoteBatch.applied && (!quote || usablePrice === null)) {
       throw new Error(`No encontre cotizacion XTB para ${syncSymbol}. Pon ese activo visible en favoritos/lista de XTB.`);
+    }
+    if (usablePrice === null) {
+      throw new Error(`No encontre precio valido para ${syncSymbol}. Revisa que XTB muestre oferta/demanda o que el dashboard tenga un precio de respaldo.`);
     }
 
     const dashboardAppliedPrice = parseMoney(afterBatchState.xtbPrice);
-    const priceMatchesXtb = dashboardAppliedPrice !== null && Math.abs(dashboardAppliedPrice - price) < 0.01;
+    const priceMatchesXtb = dashboardAppliedPrice !== null && usablePrice !== null && Math.abs(dashboardAppliedPrice - usablePrice) < 0.01;
     const applied = quoteBatch.applied && priceMatchesXtb
       ? dashboardAppliedPrice.toFixed(2)
-      : await setDashboardPrice(dashboardPage, syncSymbol, price);
+      : await setDashboardPrice(dashboardPage, syncSymbol, usablePrice);
     await dashboardPage.waitForTimeout(100);
     const finalDashboardState = await dashboardPage.evaluate(() => ({
       symbol: document.querySelector('#symbol')?.value || '',
@@ -678,6 +751,8 @@ async function syncOnce() {
       xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
       xtb_account: account ? { ...account, applied: accountApplied } : null,
       xtb_positions: { detected: positions.length, applied: positionsApplied },
+      xtb_day_history: dayHistoryResult,
+      market_session: marketSession,
       snapshot_publish: snapshotPublish,
       order_preparation: orderPreparation,
       applied_xtb_price: applied,
@@ -698,7 +773,8 @@ async function main() {
     try {
       await syncOnce();
     } catch (error) {
-      console.error(`[xtb-sync] ${error.message}`);
+      console.error(`[xtb-sync] ${error?.message || error}`);
+      if (process.env.XTB_SYNC_DEBUG === '1' && error?.stack) console.error(error.stack);
     }
     if (!RUN_ONCE) {
       await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));

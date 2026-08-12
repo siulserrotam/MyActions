@@ -4542,6 +4542,18 @@ function latestXtbPositionsSnapshot() {
   }
 }
 
+function latestMarketSession() {
+  try {
+    const positionsSnapshot = latestXtbPositionsSnapshot();
+    if (positionsSnapshot?.market_session?.session) return positionsSnapshot.market_session;
+    const accountSnapshot = JSON.parse(getLocalValue("decision_engine_xtb_account_last") || "{}") || {};
+    if (accountSnapshot?.market_session?.session) return accountSnapshot.market_session;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function sumPositionResults(positions = [], status = "") {
   return positions
     .filter((position) => !status || position.status === status)
@@ -4588,6 +4600,10 @@ function rememberClosedXtbPositionLocal(position) {
 
 function latestXtbClosedResult() {
   try {
+    const snapshot = latestXtbPositionsSnapshot();
+    const dayResult = Number(snapshot?.day_result?.closed_result);
+    if (Number.isFinite(dayResult) && Math.abs(dayResult) > 0.004) return Number(dayResult.toFixed(2));
+
     const stored = JSON.parse(getLocalValue("decision_engine_xtb_closed_positions_today") || "[]") || [];
     return Number(stored
       .filter((item) => item.trade_date === todayKey())
@@ -4609,16 +4625,17 @@ function liveDayResult() {
   const positionsOpen = latestXtbOpenResult();
   const open = Math.abs(positionsOpen) > 0.004 ? positionsOpen : syncedOpen;
   const total = Number((closed + open).toFixed(2));
+  const hasRecentSnapshot = hasRecentXtbPositionsSnapshot();
   const source = Math.abs(open) > 0.004 && Math.abs(closed) > 0.004
     ? "cerradas + abierto XTB"
     : Math.abs(open) > 0.004
       ? "posicion abierta XTB"
       : Math.abs(closed) > 0.004
         ? "operaciones cerradas"
-        : hasRecentXtbPositionsSnapshot()
-          ? "sin posiciones abiertas/cerradas"
+        : hasRecentSnapshot
+          ? "sin resultado detectado por XTB"
           : "XTB no muestra cartera al bot";
-  return { closed, open, total, source };
+  return { closed, open, total, source, detected: Math.abs(open) > 0.004 || Math.abs(closed) > 0.004 };
 }
 
 function startedOperations() {
@@ -4717,6 +4734,8 @@ function renderSimpleDashboard() {
       ? "XTB servidor"
       : "Lectura directa XTB"
     : "Yahoo / ultimo precio";
+  const marketSession = latestMarketSession();
+  const marketSessionLabel = marketSession?.session || currentMarketPhaseLabel();
   const analysis = technicalAnalysisState();
   const analysisCanGraph = analysis.completed;
   const analysisGraphEnabled = analysis.graphEnabled;
@@ -4776,6 +4795,7 @@ function renderSimpleDashboard() {
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${focusSymbol}</span>
             <span class="simple-chip">${sourceLabel}</span>
+            <span class="simple-chip">Sesion ${marketSessionLabel}</span>
             <span class="simple-chip">Bot: ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}</span>
             <span class="simple-chip">Valor/punto ${money(profile.pointValue)}</span>
             <span class="simple-chip warn">Confirma CFD, spread y margen en XTB</span>
@@ -4938,10 +4958,11 @@ function renderSimpleDashboard() {
         <div class="auto-memory-grid">
           <div><span class="simple-label">Capital XTB</span><strong>${capital}</strong><small>Se actualiza desde la lectura del monitor.</small></div>
           <div><span class="simple-label">Resultado del dia</span><strong class="${dayTotal < 0 ? "bear" : dayTotal > 0 ? "bull" : ""}">${money(dayTotal)}</strong><small>${dayResult.source}. Cerrado ${money(dayResult.closed)} / abierto ${money(dayResult.open)}.</small></div>
+          <div><span class="simple-label">Sesion</span><strong>${marketSessionLabel}</strong><small>${marketSession?.ny_time ? `Hora NY ${marketSession.ny_time}` : "Se guarda con cada lectura del monitor."}</small></div>
           <div><span class="simple-label">Patron actual</span><strong>${profile.pattern.name}</strong><small>Usado como contexto, no como orden por si solo.</small></div>
           <div><span class="simple-label">Estado</span><strong>${analysis.startedAt ? "Bot leyendo" : "Bot pausado"}</strong><small>${analysis.startedAt ? "Mantiene memoria tecnica en segundo plano." : "Inicia la automatizacion para datos frescos."}</small></div>
         </div>
-        <div class="simple-actions compact"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
+        <div class="simple-actions compact"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas automaticas</button></div>
       </section>
 
     </div>
@@ -5140,7 +5161,6 @@ function bindSimpleDashboard() {
     }
     if (action === "export-excel") exportMonthlyReport();
     if (action === "enable-alerts") enableNotifications();
-    if (action === "test-alert") testNotifications();
     if (["slot-1", "slot-2", "slot-3", "slot-4"].includes(action)) calculate();
   });
 }
@@ -5240,7 +5260,7 @@ async function saveClosedXtbPosition(position) {
     actual_result: result,
     outcome: result > 0 ? "win" : result < 0 ? "loss" : "manual",
     confidence: us100StrategyProfile().confidence || 0,
-    market_phase: currentMarketPhaseLabel(),
+    market_phase: currentTradingSessionLabel(),
     notes: [
       "AUTO_XTB_CERRADA",
       `fuente=${position.source || "xtb"}`,
@@ -5272,6 +5292,8 @@ function applyXtbPositions(payload) {
   const positions = Array.isArray(payload?.positions) ? payload.positions : [];
   setLocalValue("decision_engine_xtb_positions_last", JSON.stringify({
     positions,
+    day_result: payload?.day_result || null,
+    market_session: payload?.market_session || null,
     updated_at: payload?.updated_at || new Date().toISOString(),
   }));
   positions.filter((position) => position.status === "open").forEach(rememberOpenXtbPosition);
@@ -5353,6 +5375,10 @@ function currentMarketPhaseLabel() {
   return "closed";
 }
 
+function currentTradingSessionLabel() {
+  return latestMarketSession()?.session || currentMarketPhaseLabel();
+}
+
 async function saveTradeLesson() {
   const activeRecipe = activeRecipeState();
   const profile = us100StrategyProfile();
@@ -5386,7 +5412,7 @@ async function saveTradeLesson() {
     actual_result: decimalValueById("lesson-result", 0),
     outcome: document.getElementById("lesson-outcome")?.value || "pending",
     confidence: Number(lessonSource.confidence || profile.confidence || 0),
-    market_phase: currentMarketPhaseLabel(),
+    market_phase: currentTradingSessionLabel(),
     notes: [activeNote, manualNotes].filter(Boolean).join(" || "),
   };
   updateLessonStatus("Aprendizaje: guardando...");
@@ -5421,7 +5447,7 @@ function autoLessonPayload(profile) {
     actual_result: 0,
     outcome: "pending",
     confidence: Number(profile.confidence || 0),
-    market_phase: currentMarketPhaseLabel(),
+    market_phase: currentTradingSessionLabel(),
     notes: [
       "AUTO",
       `estado=${profile.status}`,
@@ -5527,13 +5553,14 @@ async function exportMonthlyReport() {
       <tr>
         <td>${htmlEscape(item.trade_date)}</td>
         <td>${Number(item.balance || 0).toFixed(2)}</td>
-        <td>${Number(item.operation1_result || 0).toFixed(2)}</td>
-        <td>${Number(item.operation2_result || 0).toFixed(2)}</td>
         <td>${Number(item.daily_realized_result || 0).toFixed(2)}</td>
         <td>${htmlEscape(item.daily_result_status)}</td>
+        <td>${htmlEscape(item.market_phase || "")}</td>
         <td>${Number(item.target_profit || 0).toFixed(2)}</td>
         <td>${Number(item.max_loss || 0).toFixed(2)}</td>
         <td>${Number(item.risk_pct || 0).toFixed(2)}%</td>
+        <td>${Number(item.available_capital || 0).toFixed(2)}</td>
+        <td>${Number(item.open_profit || 0).toFixed(2)}</td>
         <td>${htmlEscape(item.notes)}</td>
       </tr>
     `).join("");
@@ -5566,16 +5593,17 @@ async function exportMonthlyReport() {
             <tr>
               <th>Fecha</th>
               <th>Capital</th>
-              <th>Operacion 1</th>
-              <th>Operacion 2</th>
               <th>Resultado dia</th>
               <th>Estado</th>
+              <th>Sesion/fase</th>
               <th>Meta dia</th>
               <th>Perdida maxima</th>
               <th>Riesgo %</th>
+              <th>Disponible</th>
+              <th>Resultado abierto</th>
               <th>Notas</th>
             </tr>
-            ${detailRows || '<tr><td colspan="10">Sin registros para este mes.</td></tr>'}
+            ${detailRows || '<tr><td colspan="11">Sin registros para este mes.</td></tr>'}
           </table>
         </body>
       </html>`;
@@ -5895,6 +5923,14 @@ function testNotifications() {
 
 function notifyIfNeeded() {
   if (!notificationsEnabled || !lastResult || !("Notification" in window)) return;
+  const profile = us100StrategyProfile();
+  const decision = buildOperateDecision(profile);
+  const plan = professionalDecisionPlan(profile, decision);
+  const trafficState = plan.status === "OPERAR"
+    ? "green"
+    : profile.status === "NO OPERAR" || profile.confidence < 45
+      ? "red"
+      : "yellow";
   const ai = buildAiConfirmation();
   const timing = marketTimingProfile();
   const management = tradeManagementProfile(lastResult);
@@ -5904,6 +5940,17 @@ function notifyIfNeeded() {
     if (sessionStorage.getItem("lastDecisionNotification") !== key) {
       sessionStorage.setItem("lastDecisionNotification", key);
       sendBrowserNotification("MyActions IA: gestionar operacion", body);
+    }
+    return;
+  }
+  if (trafficState === "yellow" && profile.direction !== "WAIT") {
+    const key = `ai-prepare:${focusSymbol}:${profile.direction}:${profile.confidence}:${Math.round(profile.entry || 0)}:${Math.round(profile.stopLoss || 0)}:${Math.round(profile.takeProfit || 0)}`;
+    if (sessionStorage.getItem("lastDecisionNotification") !== key) {
+      sessionStorage.setItem("lastDecisionNotification", key);
+      sendBrowserNotification(
+        "MyActions IA: preparate, aun no copies",
+        `${focusSymbol} ${profile.directionLabel}. Falta confirmacion final. Entrada ${priceText(profile.entry)}, stop ${priceText(profile.stopLoss)}, TP ${priceText(profile.takeProfit)}.`
+      );
     }
     return;
   }
@@ -6024,9 +6071,9 @@ function bindInputs() {
   });
   document.getElementById("calculate-btn").addEventListener("click", calculate);
   document.getElementById("toggle-favorite-btn").addEventListener("click", toggleFavorite);
-  document.getElementById("enable-notifications").addEventListener("click", enableNotifications);
-  document.getElementById("test-notifications").addEventListener("click", testNotifications);
-  document.getElementById("export-monthly-report").addEventListener("click", exportMonthlyReport);
+  document.getElementById("enable-notifications")?.addEventListener("click", enableNotifications);
+  document.getElementById("test-notifications")?.addEventListener("click", testNotifications);
+  document.getElementById("export-monthly-report")?.addEventListener("click", exportMonthlyReport);
   document.getElementById("save-day-close").addEventListener("click", saveDayClose);
   document.getElementById("clear-day-results").addEventListener("click", clearDayResults);
   document.getElementById("apply-capital-movement").addEventListener("click", applyCapitalMovement);
