@@ -4517,6 +4517,17 @@ function renderSimpleDashboard() {
       : `ESPERAR gatillo ${profile.directionLabel}`;
   const objectiveCaption = actionableOrder ? "Orden" : "Plan si confirma";
   const objectiveWarning = professionalPlan.plainRule;
+  const trafficState = professionalPlan.status === "OPERAR"
+    ? "green"
+    : profile.status === "NO OPERAR" || profile.confidence < 45
+      ? "red"
+      : "yellow";
+  const trafficLabel = trafficState === "green" ? "OPERAR" : trafficState === "yellow" ? "ESPERAR" : "NO OPERAR";
+  const trafficHint = trafficState === "green"
+    ? "Mapa 4H, confirmacion 15M, gatillo 1M, no perseguir y margen estan alineados."
+    : trafficState === "yellow"
+      ? "Hay lectura parcial, pero falta al menos una confirmacion. No copies niveles todavia."
+      : "La lectura no tiene ventaja suficiente o esta invalidada. Proteger capital.";
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -4640,7 +4651,7 @@ function renderSimpleDashboard() {
       </section>
 
       <section class="simple-ops recipe-decision-grid">
-        <article class="simple-operation active">
+        <div class="strategy-decision-strip">
           <div class="strategy-summary-card compact ${professionalPlan.status === "OPERAR" ? "ok" : "warn"}">
             <div>
               <span class="simple-label">Mesa profesional</span>
@@ -4648,6 +4659,18 @@ function renderSimpleDashboard() {
               <small>${professionalPlan.action}</small>
             </div>
             <p>${professionalPlan.plainRule}</p>
+          </div>
+          <div class="operation-traffic-light ${trafficState}">
+            <div class="traffic-bulbs" aria-label="Semaforo de operacion">
+              <span class="${trafficState === "red" ? "active" : ""}"></span>
+              <span class="${trafficState === "yellow" ? "active" : ""}"></span>
+              <span class="${trafficState === "green" ? "active" : ""}"></span>
+            </div>
+            <div>
+              <span class="simple-label">Semaforo para operar</span>
+              <strong>${trafficLabel}</strong>
+              <small>${trafficHint}</small>
+            </div>
           </div>
           <div class="strategy-core-grid compact">
             ${professionalPlan.checks.map((check) => `
@@ -4659,6 +4682,8 @@ function renderSimpleDashboard() {
               </div>
             `).join("")}
           </div>
+        </div>
+        <article class="simple-operation active">
           <div class="simple-head">
             <h2>Objetivo tecnico</h2>
             <span class="simple-badge">${profile.status}</span>
