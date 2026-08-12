@@ -261,11 +261,40 @@ body {
   border-left-color: rgb(55 235 157 / 0.5);
 }
 
+.strategy-summary-card.compact {
+  grid-template-columns: 1fr;
+  margin-top: 0;
+  margin-bottom: 12px;
+  padding: 13px;
+}
+
+.strategy-summary-card.compact strong {
+  font-size: clamp(22px, 2.4vw, 32px);
+}
+
+.strategy-summary-card.compact p {
+  border-left: 0;
+  border-top: 1px solid rgb(255 207 92 / 0.24);
+  padding-top: 10px;
+  padding-left: 0;
+}
+
+.strategy-summary-card.compact.ok p {
+  border-top-color: rgb(55 235 157 / 0.34);
+}
+
 .strategy-core-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+.strategy-core-grid.compact {
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  overflow-x: auto;
+  margin-bottom: 16px;
+  padding-bottom: 4px;
 }
 
 .strategy-core-grid > div {
@@ -322,6 +351,14 @@ body {
   margin-top: 7px;
   color: #9cb8af;
   font-size: 11px;
+  line-height: 1.35;
+}
+
+.chart-frame-controls small {
+  display: block;
+  margin-top: 5px;
+  color: #9cb8af;
+  font-size: 12px;
   line-height: 1.35;
 }
 

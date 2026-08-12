@@ -1081,11 +1081,12 @@ function recordLiveQuoteCandle(quote) {
   liveCandleBars[symbol] = mergeCandleRows(rows).slice(-240);
 }
 
-function mergedBarsForSymbol(symbol) {
+function mergedBarsForSymbol(symbol, frameKeyOverride = null) {
   const normalized = String(symbol || "").trim().toUpperCase();
-  const key = marketFrameKey(normalized);
+  const key = marketFrameKey(normalized, frameKeyOverride || chartFrameKey());
+  const frame = chartFrameOptions[frameKeyOverride || chartFrameKey()] || chartFrameConfig();
   const storedRows = marketBarsByFrame[key] || marketBars[normalized] || [];
-  const liveRows = chartFrameConfig().interval === "1m" ? (liveCandleBars[normalized] || []) : [];
+  const liveRows = frame.interval === "1m" ? (liveCandleBars[normalized] || []) : [];
   return mergeCandleRows([...storedRows, ...liveRows]);
 }
 
@@ -2136,8 +2137,8 @@ function buildChartCandles(zones, direction) {
 }
 
 function realCandlesForItem(item, frameOverride = null) {
-  const rows = mergedBarsForSymbol(item.asset.symbol);
   const frame = frameOverride || chartFrameConfig();
+  const rows = mergedBarsForSymbol(item.asset.symbol, frame.key);
   const visibleRows = frame.aggregateHours ? aggregateCandlesByHours(rows, frame.aggregateHours) : rows;
   const candles = visibleRows.slice(-frame.limit)
     .map((bar) => ({
@@ -3444,7 +3445,8 @@ function us100StrategyProfile() {
   const asset = findAsset(focusSymbol);
   const quote = liveQuotes[focusSymbol] || {};
   const price = decimalValueById("xtb-price", 0) || decimalValueById("market-price", 0) || Number(quote.price || asset.marketPrice || 0);
-  const bars = realCandlesForItem({ asset, zones: { price } }).slice(-30);
+  const triggerFrame = chartFrameOptions["1m"];
+  const bars = realCandlesForItem({ asset, zones: { price } }, triggerFrame).slice(-30);
   const pattern = detectCandlePattern(bars);
   const imbalance = detectGapFvgBag(bars);
   const trend = detectTrendProfile(bars, asset);
@@ -4550,24 +4552,6 @@ function renderSimpleDashboard() {
             <strong>${profile.confidence}%</strong>
           </div>
         </div>
-        <div class="strategy-summary-card ${professionalPlan.status === "OPERAR" ? "ok" : "warn"}">
-          <div>
-            <span class="simple-label">Mesa profesional</span>
-            <strong>${professionalPlan.title}</strong>
-            <small>${professionalPlan.action}</small>
-          </div>
-          <p>${professionalPlan.plainRule}</p>
-        </div>
-        <div class="strategy-core-grid">
-          ${professionalPlan.checks.map((check) => `
-            <div class="${check.ok ? "ok" : "blocked"}">
-              <span>${check.ok ? "OK" : "FALTA"}</span>
-              <strong>${check.label}</strong>
-              <em>${check.short}</em>
-              <small>${check.detail}</small>
-            </div>
-          `).join("")}
-        </div>
         <div class="day-thesis-card ${profile.dayThesis.invalidated ? "danger" : profile.dayThesis.stable ? "ok" : "warn"}">
           <div>
             <span class="simple-label">Tesis fija del dia</span>
@@ -4645,6 +4629,7 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Temporalidad grafica</span>
             <strong>${selectedChartFrame.description}</strong>
+            <small>Solo cambia la grafica visible. La receta siempre usa Mapa 4H + Confirmacion 15M + Gatillo 1M.</small>
           </div>
           <div class="chart-frame-buttons">
             ${Object.values(chartFrameOptions).map((frame) => `
@@ -4656,6 +4641,24 @@ function renderSimpleDashboard() {
 
       <section class="simple-ops recipe-decision-grid">
         <article class="simple-operation active">
+          <div class="strategy-summary-card compact ${professionalPlan.status === "OPERAR" ? "ok" : "warn"}">
+            <div>
+              <span class="simple-label">Mesa profesional</span>
+              <strong>${professionalPlan.title}</strong>
+              <small>${professionalPlan.action}</small>
+            </div>
+            <p>${professionalPlan.plainRule}</p>
+          </div>
+          <div class="strategy-core-grid compact">
+            ${professionalPlan.checks.map((check) => `
+              <div class="${check.ok ? "ok" : "blocked"}">
+                <span>${check.ok ? "OK" : "FALTA"}</span>
+                <strong>${check.label}</strong>
+                <em>${check.short}</em>
+                <small>${check.detail}</small>
+              </div>
+            `).join("")}
+          </div>
           <div class="simple-head">
             <h2>Objetivo tecnico</h2>
             <span class="simple-badge">${profile.status}</span>
