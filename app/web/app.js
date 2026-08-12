@@ -4595,9 +4595,6 @@ function renderSimpleDashboard() {
   const traceSummary = technicalTraceSummary(focusSymbol);
   const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
   const dayTotal = Number(totalOperationResult().toFixed(2));
-  const result = document.getElementById("operation1-result")?.value || "0";
-  const movement = document.getElementById("capital-movement")?.value || "";
-  const lessonNotes = document.getElementById("lesson-notes")?.value || "";
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
   const quoteSource = String(liveQuotes[focusSymbol]?.source || "");
   const sourceLabel = quoteSource.startsWith("xtb")
@@ -4639,19 +4636,20 @@ function renderSimpleDashboard() {
   const objectiveWarning = trafficState === "red"
     ? trafficHint
     : trafficState === "yellow"
-      ? `${trafficHint} Lectura tecnica ${profile.confidence}%, pero operabilidad bloqueada.`
+      ? `${trafficHint} Puedes preparar estos niveles, pero espera el gatillo antes de copiarlos en XTB.`
       : professionalPlan.plainRule;
   const recipeUnlocked = trafficState === "green";
-  const blockedRecipeText = trafficState === "yellow" ? "BLOQUEADO" : "NO COPIAR";
-  const recipeVolumeText = recipeUnlocked ? formatVolumeForXtb(profile.volume, profile.asset) : "--";
-  const recipeEntryText = recipeUnlocked ? priceText(profile.entry) : blockedRecipeText;
-  const recipeStopText = recipeUnlocked ? priceText(profile.stopLoss) : blockedRecipeText;
-  const recipeTakeProfitText = recipeUnlocked ? priceText(profile.takeProfit) : blockedRecipeText;
-  const recipeMarginText = recipeUnlocked ? money(profile.marginRequired) : "--";
-  const recipeOperabilityText = recipeUnlocked ? `${profile.confidence}%` : trafficState === "yellow" ? "BLOQUEADO" : "0%";
-  const recipeRiskText = recipeUnlocked
-    ? `Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
-    : "Niveles bloqueados: Mapa 4H, Confirmacion 15M y Gatillo 1M deben quedar OK antes de copiar entrada, stop o take profit.";
+  const recipePreview = trafficState === "green" || trafficState === "yellow";
+  const blockedRecipeText = "NO COPIAR";
+  const recipeVolumeText = recipePreview ? formatVolumeForXtb(profile.volume, profile.asset) : "--";
+  const recipeEntryText = recipePreview ? priceText(profile.entry) : blockedRecipeText;
+  const recipeStopText = recipePreview ? priceText(profile.stopLoss) : blockedRecipeText;
+  const recipeTakeProfitText = recipePreview ? priceText(profile.takeProfit) : blockedRecipeText;
+  const recipeMarginText = recipePreview ? money(profile.marginRequired) : "--";
+  const recipeOperabilityText = recipePreview ? `${profile.confidence}%` : "0%";
+  const recipeRiskText = recipePreview
+    ? `${recipeUnlocked ? "Receta habilitada" : "Preparacion, aun no ejecutar"}: puntos a meta ${numberText(profile.takePoints)}, puntos al escudo ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
+    : "Niveles no operables: Mapa 4H, Confirmacion 15M y Gatillo 1M deben mejorar antes de preparar entrada, stop o take profit.";
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -4703,26 +4701,10 @@ function renderSimpleDashboard() {
             <strong>${profile.dayThesis.stable ? "Mantener tesis" : "No forzar entrada"}</strong>
             <small>La vela 1M solo confirma gatillo. No cambia la estrategia diaria por si sola.</small>
           </div>
-          <div class="day-thesis-controls">
-            <label>
-              <span class="simple-label">Modo lectura</span>
-              <select data-thesis-control="mode">
-                <option value="rolling" ${thesis.mode === "rolling" ? "selected" : ""}>Ultimas ${thesis.blockHours}h en vivo</option>
-                <option value="fixed" ${thesis.mode === "fixed" ? "selected" : ""}>Desde hora elegida</option>
-              </select>
-            </label>
-            <label>
-              <span class="simple-label">Inicio NY</span>
-              <input type="time" value="${thesis.startTime}" data-thesis-control="start" />
-            </label>
-            <label>
-              <span class="simple-label">Rango</span>
-              <select data-thesis-control="hours">
-                <option value="2" ${thesis.blockHours === 2 ? "selected" : ""}>2 horas</option>
-                <option value="4" ${thesis.blockHours === 4 ? "selected" : ""}>4 horas</option>
-                <option value="6" ${thesis.blockHours === 6 ? "selected" : ""}>6 horas</option>
-              </select>
-            </label>
+          <div class="day-thesis-auto">
+            <span class="simple-label">Lectura del bot</span>
+            <strong>Automatica</strong>
+            <small>El monitor mantiene la tesis con el rango activo: ${thesis.mode === "fixed" ? `desde ${thesis.startTime} NY` : `ultimas ${thesis.blockHours}h en vivo`}. La receta no cambia por tocar la grafica.</small>
           </div>
         </div>
         <div class="analysis-control-card">
@@ -4830,33 +4812,21 @@ function renderSimpleDashboard() {
         ${renderFibOnlyCard(primaryDisplay)}
       </section>
 
-      <section class="simple-panel">
+      <section class="simple-panel auto-memory-panel">
         <div class="simple-head">
           <div>
-            <h2>Cierre del dia</h2>
-            <p class="simple-subtitle">Registra cuanto ganaste o perdiste. Se guarda en base de datos y queda listo para exportar.</p>
+            <h2>Memoria automatica</h2>
+            <p class="simple-subtitle">El bot lee XTB, actualiza capital/precio y guarda contexto. Solo conserva acciones utiles.</p>
           </div>
-          <span class="simple-badge">${money(dayTotal)}</span>
+          <span class="simple-badge">automatico</span>
         </div>
-        <div class="simple-form-grid">
-          <label class="simple-field"><span class="simple-label">Resultado USD</span><input id="simple-active-result" type="text" inputmode="decimal" value="${result}" data-sync-target="operation1-result" placeholder="-50 o 100" /></label>
-          <div class="simple-field"><span class="simple-label">Estado</span><span class="simple-value">${dayTotal > 0 ? "Gano" : dayTotal < 0 ? "Perdio" : "Pendiente"}</span><span class="simple-tiny">Meta ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}.</span></div>
-          <div class="simple-field"><span class="simple-label">Accion</span><button type="button" data-simple-action="save-close">Guardar cierre</button></div>
+        <div class="auto-memory-grid">
+          <div><span class="simple-label">Capital XTB</span><strong>${capital}</strong><small>Se actualiza desde la lectura del monitor.</small></div>
+          <div><span class="simple-label">Resultado del dia</span><strong>${money(dayTotal)}</strong><small>Se completa con historial/posiciones cuando el bot lo detecta.</small></div>
+          <div><span class="simple-label">Patron actual</span><strong>${profile.pattern.name}</strong><small>Usado como contexto, no como orden por si solo.</small></div>
+          <div><span class="simple-label">Estado</span><strong>${analysis.startedAt ? "Bot leyendo" : "Bot pausado"}</strong><small>${analysis.startedAt ? "Mantiene memoria tecnica en segundo plano." : "Inicia la automatizacion para datos frescos."}</small></div>
         </div>
-      </section>
-
-      <section class="simple-panel">
-        <div class="simple-head"><div><h2>Aprendizaje y capital</h2><p class="simple-subtitle">Retiro/deposito, nota del dia, alertas y exportacion.</p></div><span class="simple-badge">memoria</span></div>
-        <div class="simple-form-grid">
-          <label class="simple-field"><span class="simple-label">Movimiento de capital</span><input type="text" inputmode="decimal" value="${movement}" placeholder="-100 retiro / 100 deposito" data-sync-target="capital-movement" /></label>
-          <label class="simple-field"><span class="simple-label">Patron leido</span><input value="${profile.pattern.name}" readonly /></label>
-          <div class="simple-field"><span class="simple-label">Capital actual</span><span class="simple-value">${capital}</span></div>
-          <div class="simple-field"><span class="simple-label">Acciones capital</span><button type="button" data-simple-action="apply-capital">Aplicar movimiento</button></div>
-          <div class="simple-field"><span class="simple-label">Resultado aprendizaje</span><span class="simple-value">${money(dayTotal)}</span></div>
-          <div class="simple-field"><span class="simple-label">Aprendizaje</span><button type="button" class="secondary" data-simple-action="save-lesson">Guardar aprendizaje</button></div>
-          <label class="simple-field simple-wide"><span class="simple-label">Nota breve</span><textarea data-sync-target="lesson-notes" placeholder="Ej: entre tarde, patron falso, rechazo en soporte...">${lessonNotes}</textarea></label>
-        </div>
-        <div class="simple-actions"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
+        <div class="simple-actions compact"><button type="button" class="secondary" data-simple-action="export-excel">Exportar Excel</button><button type="button" class="secondary" data-simple-action="enable-alerts">Activar alertas</button><button type="button" class="secondary" data-simple-action="test-alert">Probar alerta</button></div>
       </section>
 
     </div>

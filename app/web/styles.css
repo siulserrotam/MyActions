@@ -561,6 +561,20 @@ body {
   font-weight: 900;
 }
 
+.day-thesis-auto {
+  display: grid;
+  align-content: center;
+  min-height: 100%;
+  border: 1px solid rgb(56 227 156 / 0.22);
+  border-radius: 14px;
+  background: rgb(13 38 29 / 0.42);
+  padding: 12px;
+}
+
+.day-thesis-auto strong {
+  color: #7df7b0;
+}
+
 .operate-decision-card {
   display: grid;
   grid-template-columns: minmax(210px, 0.8fr) minmax(0, 1.8fr);
@@ -828,6 +842,46 @@ body {
 
 .recipe-decision-grid {
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+}
+
+.auto-memory-panel {
+  border-color: rgb(90 160 255 / 0.24);
+}
+
+.auto-memory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auto-memory-grid > div {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.04);
+  padding: 12px;
+}
+
+.auto-memory-grid strong,
+.auto-memory-grid small {
+  display: block;
+}
+
+.auto-memory-grid strong {
+  margin-top: 6px;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.auto-memory-grid small {
+  margin-top: 6px;
+  color: #9db7b1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.simple-actions.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .dual-recipes-card {
@@ -2068,6 +2122,7 @@ body {
   .recipe-decision-grid,
   .recipe-options,
   .technical-trace-grid,
+  .auto-memory-grid,
   .simple-top-list,
   .simple-guide {
     grid-template-columns: 1fr;
