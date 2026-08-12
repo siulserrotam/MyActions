@@ -4527,7 +4527,22 @@ function renderSimpleDashboard() {
       ? `ESPERAR confirmacion ${profile.directionLabel}`
       : "NO OPERAR";
   const objectiveCaption = trafficState === "green" ? "Orden" : trafficState === "yellow" ? "Plan si confirma" : "Decision";
-  const objectiveWarning = trafficState === "red" ? trafficHint : professionalPlan.plainRule;
+  const objectiveWarning = trafficState === "red"
+    ? trafficHint
+    : trafficState === "yellow"
+      ? `${trafficHint} Lectura tecnica ${profile.confidence}%, pero operabilidad bloqueada.`
+      : professionalPlan.plainRule;
+  const recipeUnlocked = trafficState === "green";
+  const blockedRecipeText = trafficState === "yellow" ? "BLOQUEADO" : "NO COPIAR";
+  const recipeVolumeText = recipeUnlocked ? formatVolumeForXtb(profile.volume, profile.asset) : "--";
+  const recipeEntryText = recipeUnlocked ? priceText(profile.entry) : blockedRecipeText;
+  const recipeStopText = recipeUnlocked ? priceText(profile.stopLoss) : blockedRecipeText;
+  const recipeTakeProfitText = recipeUnlocked ? priceText(profile.takeProfit) : blockedRecipeText;
+  const recipeMarginText = recipeUnlocked ? money(profile.marginRequired) : "--";
+  const recipeOperabilityText = recipeUnlocked ? `${profile.confidence}%` : trafficState === "yellow" ? "BLOQUEADO" : "0%";
+  const recipeRiskText = recipeUnlocked
+    ? `Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
+    : "Niveles bloqueados: Mapa 4H, Confirmacion 15M y Gatillo 1M deben quedar OK antes de copiar entrada, stop o take profit.";
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -4690,17 +4705,17 @@ function renderSimpleDashboard() {
           </div>
           <div class="simple-numbers">
             <div class="simple-number"><span class="simple-label">${objectiveCaption}</span><strong>${objectiveOrderLabel}</strong></div>
-            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${formatVolumeForXtb(profile.volume, profile.asset)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${priceText(profile.entry)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Stop</span><strong>${priceText(profile.stopLoss)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Take profit</span><strong>${priceText(profile.takeProfit)}</strong></div>
-            <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${money(profile.marginRequired)}</strong></div>
+            <div class="simple-number"><span class="simple-label">Volumen</span><strong>${recipeVolumeText}</strong></div>
+            <div class="simple-number"><span class="simple-label">Entrada</span><strong>${recipeEntryText}</strong></div>
+            <div class="simple-number"><span class="simple-label">Stop</span><strong>${recipeStopText}</strong></div>
+            <div class="simple-number"><span class="simple-label">Take profit</span><strong>${recipeTakeProfitText}</strong></div>
+            <div class="simple-number"><span class="simple-label">Margen aprox</span><strong>${recipeMarginText}</strong></div>
             <div class="simple-number"><span class="simple-label">CFD hoy</span><strong class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</strong></div>
-            <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${profile.confidence}%</strong></div>
+            <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${recipeOperabilityText}</strong></div>
           </div>
           <p class="simple-warning">${objectiveWarning}</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
-          <p class="simple-tiny">Puntos a meta: ${numberText(profile.takePoints)}. Puntos al escudo: ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.</p>
+          <p class="simple-tiny">${recipeRiskText}</p>
         </article>
         ${renderFibOnlyCard(primaryDisplay)}
       </section>
