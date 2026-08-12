@@ -315,9 +315,49 @@ function extractPositionFromFragment(fragment, status) {
   return position;
 }
 
+function extractClosedPositionsFromHistoryList(text) {
+  const cleaned = normalize(text);
+  const todayMatch = cleaned.match(/\b(Today|Hoy)\b/i);
+  if (!todayMatch || !/Historial|Posiciones\s+cerradas|Mis\s+Operaciones/i.test(cleaned)) return [];
+
+  const afterToday = cleaned.slice(todayMatch.index + todayMatch[0].length);
+  const nextDayMatch = afterToday.match(/\b(Ayer|Yesterday)\b|\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b/i);
+  const todayFragment = nextDayMatch ? afterToday.slice(0, nextDayMatch.index) : afterToday;
+  const rows = todayFragment.split(/(?=US100\s+CFD)/i);
+
+  return rows.flatMap((row) => {
+    if (!/US100\s+CFD/i.test(row)) return [];
+    const directionText = row.match(/\b(Comprar|Vender)\b/i)?.[1] || '';
+    const volume = numberMatch(row, /\b(?:Comprar|Vender)\s*,?\s+([0-9]+(?:[.,][0-9]+)?)/i);
+    const closePrice = numberMatch(row, /@\s*([0-9]{1,3}(?:[\s.,][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)/i)
+      ?? numberMatch(row, /Precio\s+del\s+cierre\s+([0-9.,\s]+)/i);
+    const usdResults = Array.from(row.matchAll(/([+-]?[0-9]+(?:[.,][0-9]+)?)\s*USD\b/gi))
+      .map((match) => parseMoney(match[1]))
+      .filter((value) => Number.isFinite(value));
+    const result = usdResults.find((value) => Math.abs(value) > 0.004);
+    if (!directionText || !Number.isFinite(result)) return [];
+
+    const position = {
+      symbol: 'US100',
+      status: 'closed',
+      direction: /^Comprar$/i.test(directionText) ? 'LONG' : 'SHORT',
+      volume: Number.isFinite(volume) ? Math.abs(volume) : null,
+      entry_price: closePrice,
+      close_price: closePrice,
+      actual_result: Number(result.toFixed(2)),
+      stop_loss: null,
+      take_profit: null,
+      source: 'xtb-visible-history-list',
+      detected_at: new Date().toISOString()
+    };
+    position.id = textHash(buildPositionId(position));
+    return [position];
+  });
+}
+
 function extractXtbPositions(text) {
   const cleaned = normalize(text);
-  const positions = [];
+  const positions = extractClosedPositionsFromHistoryList(cleaned);
 
   if (/Detalles\s+de\s+la\s+posici[oó]n/i.test(cleaned) && /US100\s+CFD/i.test(cleaned)) {
     const detailStart = cleaned.search(/Detalles\s+de\s+la\s+posici[oó]n/i);
@@ -338,6 +378,17 @@ function extractXtbPositions(text) {
 
 function extractXtbDayHistoryResult(text) {
   const cleaned = normalize(text);
+  const todayClosedPositions = extractClosedPositionsFromHistoryList(cleaned);
+  if (todayClosedPositions.length) {
+    const closedResult = todayClosedPositions.reduce((total, position) => total + Number(position.actual_result || 0), 0);
+    return {
+      closed_result: Number(closedResult.toFixed(2)),
+      closed_count: todayClosedPositions.length,
+      source: 'xtb-visible-history-list',
+      detected_at: new Date().toISOString()
+    };
+  }
+
   const looksLikeHistory = /Historial\s+de\s+la\s+cuenta|Posiciones\s+cerradas|Precio\s+del\s+cierre|Beneficio\s+neto/i.test(cleaned);
   if (!looksLikeHistory) return null;
 

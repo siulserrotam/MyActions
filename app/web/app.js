@@ -4617,6 +4617,12 @@ function latestXtbClosedResult() {
   }
 }
 
+function hasRecentXtbHistorySnapshot() {
+  const snapshot = latestXtbPositionsSnapshot();
+  const source = String(snapshot?.day_result?.source || "");
+  return Boolean(source) || latestXtbClosedResult() !== 0;
+}
+
 function liveDayResult() {
   const manualClosed = Number(totalOperationResult().toFixed(2));
   const xtbClosed = latestXtbClosedResult();
@@ -4626,6 +4632,7 @@ function liveDayResult() {
   const open = Math.abs(positionsOpen) > 0.004 ? positionsOpen : syncedOpen;
   const total = Number((closed + open).toFixed(2));
   const hasRecentSnapshot = hasRecentXtbPositionsSnapshot();
+  const hasHistory = hasRecentXtbHistorySnapshot();
   const source = Math.abs(open) > 0.004 && Math.abs(closed) > 0.004
     ? "cerradas + abierto XTB"
     : Math.abs(open) > 0.004
@@ -4633,9 +4640,11 @@ function liveDayResult() {
       : Math.abs(closed) > 0.004
         ? "operaciones cerradas"
         : hasRecentSnapshot
-          ? "sin resultado detectado por XTB"
+          ? hasHistory
+            ? "sin resultado detectado por XTB"
+            : "historial XTB no visible"
           : "XTB no muestra cartera al bot";
-  return { closed, open, total, source, detected: Math.abs(open) > 0.004 || Math.abs(closed) > 0.004 };
+  return { closed, open, total, source, detected: Math.abs(open) > 0.004 || Math.abs(closed) > 0.004, hasHistory };
 }
 
 function startedOperations() {
@@ -4957,7 +4966,7 @@ function renderSimpleDashboard() {
         </div>
         <div class="auto-memory-grid">
           <div><span class="simple-label">Capital XTB</span><strong>${capital}</strong><small>Se actualiza desde la lectura del monitor.</small></div>
-          <div><span class="simple-label">Resultado del dia</span><strong class="${dayTotal < 0 ? "bear" : dayTotal > 0 ? "bull" : ""}">${money(dayTotal)}</strong><small>${dayResult.source}. Cerrado ${money(dayResult.closed)} / abierto ${money(dayResult.open)}.</small></div>
+          <div><span class="simple-label">Resultado del dia</span><strong class="${dayTotal < 0 ? "bear" : dayTotal > 0 ? "bull" : ""}">${dayResult.detected || dayResult.hasHistory ? money(dayTotal) : "Pendiente"}</strong><small>${dayResult.source}. Cerrado ${money(dayResult.closed)} / abierto ${money(dayResult.open)}.</small></div>
           <div><span class="simple-label">Sesion</span><strong>${marketSessionLabel}</strong><small>${marketSession?.ny_time ? `Hora NY ${marketSession.ny_time}` : "Se guarda con cada lectura del monitor."}</small></div>
           <div><span class="simple-label">Patron actual</span><strong>${profile.pattern.name}</strong><small>Usado como contexto, no como orden por si solo.</small></div>
           <div><span class="simple-label">Estado</span><strong>${analysis.startedAt ? "Bot leyendo" : "Bot pausado"}</strong><small>${analysis.startedAt ? "Mantiene memoria tecnica en segundo plano." : "Inicia la automatizacion para datos frescos."}</small></div>
