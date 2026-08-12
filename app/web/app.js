@@ -971,6 +971,30 @@ function us100TargetVolume(targetUsd) {
   return 0.2;
 }
 
+function botUs100SizingPolicy(confidence, marginVolume, asset) {
+  const score = Number(confidence || 0);
+  const tiers = [
+    { min: 88, targetUsd: 200, stopUsd: 100, volume: 0.35, label: "Agresivo: lectura institucional muy fuerte." },
+    { min: 78, targetUsd: 150, stopUsd: 75, volume: 0.3, label: "Fuerte: buena lectura, sin usar el maximo." },
+    { min: 65, targetUsd: 100, stopUsd: 50, volume: 0.25, label: "Normal: operabilidad clara con relacion 1:2." },
+    { min: 0, targetUsd: 50, stopUsd: 50, volume: 0.2, label: "Conservador/base: preparar niveles, no forzar." },
+  ];
+  const tier = tiers.find((item) => score >= item.min) || tiers.at(-1);
+  const maxByMargin = Number(marginVolume || 0);
+  const rawVolume = maxByMargin > 0 ? Math.min(tier.volume, maxByMargin) : tier.volume;
+  const volume = roundVolumeForXtb(rawVolume, asset);
+  const marginLimited = maxByMargin > 0 && volume < tier.volume;
+  return {
+    ...tier,
+    volume,
+    requestedVolume: tier.volume,
+    marginLimited,
+    note: marginLimited
+      ? `${tier.label} El margen disponible baja el volumen de ${formatVolumeForXtb(tier.volume, asset)} a ${formatVolumeForXtb(volume, asset)}.`
+      : `${tier.label} El bot decide meta ${money(tier.targetUsd)}, escudo ${money(tier.stopUsd)} y volumen ${formatVolumeForXtb(volume, asset)}.`,
+  };
+}
+
 function preferredUs100Volume(confidence, marginVolume, targetUsd, asset) {
   const desired = us100TargetVolume(targetUsd);
   const confidenceCapped = confidence < 50 ? Math.min(desired, 0.2) : desired;
@@ -2761,7 +2785,7 @@ function renderFibOnlyCard(item) {
     return `
       <article class="simple-operation fib-only-card">
         <div class="simple-head">
-          <h2>Zona Fibonacci</h2>
+          <h2>Filtro Fibonacci 15M</h2>
           <span class="simple-badge">15M fijo</span>
         </div>
         <div class="fib-empty">Aun no hay suficientes velas 15M para dibujar la ultima reaccion.</div>
@@ -2824,7 +2848,7 @@ function renderFibOnlyCard(item) {
   return `
     <article class="simple-operation fib-only-card">
       <div class="simple-head">
-        <h2>Zona Fibonacci</h2>
+        <h2>Filtro Fibonacci 15M</h2>
         <span class="simple-badge ${badgeClass}">${statusLabel}</span>
       </div>
       <div class="fib-focus-copy">
@@ -2848,7 +2872,7 @@ function renderFibOnlyCard(item) {
       ${resetNote}
       ${recipeRows}
       <p class="simple-warning">${actionLabel}</p>
-      <p class="simple-tiny">Esta tarjeta siempre usa 15M para Fibonacci. Cambiar la grafica visible a 1M o 4H no cambia esta zona.</p>
+      <p class="simple-tiny">Utilidad: ayuda a ver si el retroceso 15M mejora la entrada. No decide sola; la decision final la manda el semaforo.</p>
     </article>
   `;
 }
@@ -3508,11 +3532,19 @@ function us100StrategyProfile() {
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
   const dataFreshnessScore = dataFreshness.fresh ? 10 : dataFreshness.manualFallback ? -8 : -45;
   const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore + 10), 0, 95);
-  const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
-  const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
-  const targetUsd = targetPolicy.target;
-  const stopUsd = automaticStopUsdForTarget(targetUsd);
-  const volume = preferredUs100Volume(preliminaryConfidence, marginVolume, targetUsd, asset);
+  const sizingPolicy = botUs100SizingPolicy(preliminaryConfidence, marginVolume, asset);
+  const requestedTargetUsd = sizingPolicy.targetUsd;
+  const targetPolicy = {
+    allowedTargets: allowedTargetsForConfidence(preliminaryConfidence),
+    cap: sizingPolicy.targetUsd,
+    target: sizingPolicy.targetUsd,
+    requested: sizingPolicy.targetUsd,
+    capped: false,
+    text: sizingPolicy.note,
+  };
+  const targetUsd = sizingPolicy.targetUsd;
+  const stopUsd = sizingPolicy.stopUsd;
+  const volume = sizingPolicy.volume;
   const pointValue = volume * asset.multiplier;
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
@@ -3523,13 +3555,14 @@ function us100StrategyProfile() {
   const volumeScore = volume > 0 ? 10 : -30;
   const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore), 0, 95);
   const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, movementBudget, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
+  const fibContextOk = !fibSetup.rejected && (fibSetup.ready || fibSetup.touchedZone || fibSetup.status === "ESPERAR FIB");
   const status = !dataFreshness.usable || dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
-    : playbook.allowed && fibSetup.ready && antiChase.ok && movementBudget.ok && dayThesis.stable
+    : playbook.allowed && fibContextOk && antiChase.ok && movementBudget.ok && dayThesis.stable
       ? "OPERABLE"
-      : confidence >= 50
-        ? "ESPERAR"
-        : "NO OPERAR";
+    : confidence >= 50
+      ? "ESPERAR"
+      : "NO OPERAR";
   const confidenceBreakdown = {
     pattern: Math.round(pattern.score),
     trend: Math.round(trend.score),
@@ -3548,18 +3581,12 @@ function us100StrategyProfile() {
   };
   const volumePolicy = {
     preferred_min: 0.2,
-    preferred_max: 0.25,
+    preferred_max: 0.35,
     margin_max: marginVolume,
     chosen: volume,
     note: volume < 0.2
       ? "Bajo 0.20 solo si el margen disponible no deja abrir ese tamano."
-      : targetUsd >= 200
-        ? "Meta extrema: usa 0.35 como volumen objetivo."
-        : targetUsd >= 150
-          ? "Meta fuerte: usa 0.30 como volumen objetivo."
-          : targetUsd >= 100
-            ? "Meta alta: usa 0.25 como volumen objetivo."
-            : "Meta conservadora: usa 0.20 como volumen objetivo.",
+      : sizingPolicy.note,
   };
   const agent = agentControlPlan({
     status,
@@ -3609,6 +3636,7 @@ function us100StrategyProfile() {
     learning,
     xtbContext,
     volumePolicy,
+    sizingPolicy,
     targetPolicy,
     playbook,
     dataFreshness,
@@ -4005,8 +4033,10 @@ function us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, anti
   else blockers.push("GAP/FVG/BAG contradice la operacion.");
   if (cfdOk) rules.push("Movimiento CFD no va en contra.");
   else blockers.push("Movimiento CFD va contra la operacion.");
-  if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso profundo 80-90 con rechazo.");
-  else blockers.push(fibSetup?.detail || "Fibonacci 15M no confirma entrada.");
+  if (fibSetup?.rejected) blockers.push(fibSetup?.detail || "Fibonacci 15M invalido la lectura.");
+  else if (fibSetup?.ready) rules.push("Fibonacci 15M confirma retroceso profundo 80-90 con rechazo.");
+  else if (fibSetup?.touchedZone) rules.push("Fibonacci 15M esta en zona: sirve como contexto, falta gatillo 1M.");
+  else rules.push("Fibonacci 15M queda pendiente como filtro de entrada, no bloquea la preparacion.");
   if (antiChase?.ok) rules.push("No estas persiguiendo una vela extendida.");
   else blockers.push(antiChase?.detail || "Riesgo de entrada tardia.");
   if (movementBudget?.ok) rules.push("Aun queda recorrido razonable en la ventana.");
@@ -4167,10 +4197,12 @@ function buildOperateDecision(profile) {
     },
     {
       label: "Fibonacci 15M",
-      ok: Boolean(profile.fibSetup?.ready && !profile.fibSetup?.rejected),
+      ok: !profile.fibSetup?.rejected,
       detail: profile.fibSetup?.ready
         ? "Zona 80-90 tocada y rechazo confirmado."
-        : profile.fibSetup?.detail || "Falta rechazo Fib 15M.",
+        : profile.fibSetup?.touchedZone
+        ? "Zona tocada: usar como contexto y esperar gatillo 1M."
+        : profile.fibSetup?.detail || "Filtro pendiente; no bloquea por si solo.",
     },
     {
       label: "No perseguir",
@@ -4244,9 +4276,9 @@ function professionalDecisionPlan(profile, operateDecision) {
     {
       key: "confirmation",
       label: "Confirmacion 15M",
-      ok: direction !== "WAIT" && confirmTrace?.bias === direction && profile.fibSetup?.ready,
-      short: profile.fibSetup?.ready ? "Fib rechazo" : profile.fibSetup?.status || "esperar",
-      detail: "La entrada profesional nace del retroceso 80-90 y rechazo, no de perseguir velas.",
+      ok: direction !== "WAIT" && confirmTrace?.bias === direction && !profile.fibSetup?.rejected,
+      short: profile.fibSetup?.rejected ? "Fib invalida" : confirmTrace?.bias === direction ? "15M alineado" : "esperar",
+      detail: "El 15M confirma la direccion. Fibonacci ayuda a mejorar precio, pero no decide solo.",
     },
     {
       key: "trigger",
@@ -4502,6 +4534,20 @@ function totalOperationResult() {
   return [1, 2, 3, 4].reduce((total, slot) => total + operationResultValue(slot), 0);
 }
 
+function liveDayResult() {
+  const closed = Number(totalOperationResult().toFixed(2));
+  const open = decimalValueById("open-profit", 0);
+  const total = Number((closed + open).toFixed(2));
+  const source = Math.abs(open) > 0.004 && Math.abs(closed) > 0.004
+    ? "cerradas + abierto XTB"
+    : Math.abs(open) > 0.004
+      ? "beneficio abierto XTB"
+      : Math.abs(closed) > 0.004
+        ? "operaciones cerradas"
+        : "sin resultado detectado";
+  return { closed, open, total, source };
+}
+
 function startedOperations() {
   try {
     return JSON.parse(getLocalValue("decision_engine_started_operations") || "{}") || {};
@@ -4589,7 +4635,8 @@ function renderSimpleDashboard() {
   const primaryDisplay = buildAssetOpportunity(profile.asset);
   const traceSummary = technicalTraceSummary(focusSymbol);
   const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
-  const dayTotal = Number(totalOperationResult().toFixed(2));
+  const dayResult = liveDayResult();
+  const dayTotal = dayResult.total;
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
   const quoteSource = String(liveQuotes[focusSymbol]?.source || "");
   const sourceLabel = quoteSource.startsWith("xtb")
@@ -4656,6 +4703,7 @@ function renderSimpleDashboard() {
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${focusSymbol}</span>
             <span class="simple-chip">${sourceLabel}</span>
+            <span class="simple-chip">Bot: ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}</span>
             <span class="simple-chip">Valor/punto ${money(profile.pointValue)}</span>
             <span class="simple-chip warn">Confirma CFD, spread y margen en XTB</span>
           </div>
@@ -4784,7 +4832,7 @@ function renderSimpleDashboard() {
         </div>
         <article class="simple-operation active">
           <div class="simple-head">
-            <h2>Objetivo tecnico</h2>
+            <h2>Receta del bot</h2>
             <span class="simple-badge">${trafficLabel}</span>
           </div>
           <div class="simple-numbers">
@@ -4798,6 +4846,7 @@ function renderSimpleDashboard() {
             <div class="simple-number"><span class="simple-label">Operabilidad</span><strong>${recipeOperabilityText}</strong></div>
           </div>
           <p class="simple-warning">${objectiveWarning}</p>
+          <p class="simple-tiny">${profile.sizingPolicy.note}</p>
           <p class="simple-tiny">${profile.cfdMove.detail} ${profile.xtbContext.detail}</p>
           <p class="simple-tiny">${recipeRiskText}</p>
           ${renderActiveRecipeLearningCard(profile, activeRecipeState())}
@@ -4815,7 +4864,7 @@ function renderSimpleDashboard() {
         </div>
         <div class="auto-memory-grid">
           <div><span class="simple-label">Capital XTB</span><strong>${capital}</strong><small>Se actualiza desde la lectura del monitor.</small></div>
-          <div><span class="simple-label">Resultado del dia</span><strong>${money(dayTotal)}</strong><small>Se completa con historial/posiciones cuando el bot lo detecta.</small></div>
+          <div><span class="simple-label">Resultado del dia</span><strong class="${dayTotal < 0 ? "bear" : dayTotal > 0 ? "bull" : ""}">${money(dayTotal)}</strong><small>${dayResult.source}. Cerrado ${money(dayResult.closed)} / abierto ${money(dayResult.open)}.</small></div>
           <div><span class="simple-label">Patron actual</span><strong>${profile.pattern.name}</strong><small>Usado como contexto, no como orden por si solo.</small></div>
           <div><span class="simple-label">Estado</span><strong>${analysis.startedAt ? "Bot leyendo" : "Bot pausado"}</strong><small>${analysis.startedAt ? "Mantiene memoria tecnica en segundo plano." : "Inicia la automatizacion para datos frescos."}</small></div>
         </div>
