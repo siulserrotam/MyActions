@@ -5202,12 +5202,17 @@ function setSyncedNumericInput(id, value, decimals = 2) {
   return true;
 }
 
+function optionalSyncNumber(value) {
+  if (value === null || value === undefined || value === "") return NaN;
+  return Number(value);
+}
+
 function applyXtbAccount(payload = {}) {
   const account = {
-    total_equity: Number(payload.total_equity),
-    available_capital: Number(payload.available_capital),
-    open_profit: Number(payload.open_profit),
-    margin_level_pct: Number(payload.margin_level_pct),
+    total_equity: optionalSyncNumber(payload.total_equity),
+    available_capital: optionalSyncNumber(payload.available_capital),
+    open_profit: optionalSyncNumber(payload.open_profit),
+    margin_level_pct: optionalSyncNumber(payload.margin_level_pct),
     updated_at: payload.updated_at || payload.detected_at || new Date().toISOString(),
   };
   const syncKey = JSON.stringify({

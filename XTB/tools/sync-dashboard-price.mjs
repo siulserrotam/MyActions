@@ -163,6 +163,63 @@ function extractXtbAccount(text) {
   return hasData ? account : null;
 }
 
+async function getAccessibleText(page) {
+  try {
+    const session = await page.context().newCDPSession(page);
+    const tree = await session.send('Accessibility.getFullAXTree');
+    return (tree.nodes || [])
+      .flatMap((node) => [node.name?.value, node.value?.value])
+      .filter(Boolean)
+      .map((value) => normalize(value))
+      .filter(Boolean)
+      .join('\n');
+  } catch {
+    return '';
+  }
+}
+
+function parseAccessibleValueAfter(lines, label) {
+  const labelIndex = lines.findIndex((line) => line.toLowerCase() === label.toLowerCase());
+  if (labelIndex < 0) return null;
+  for (const line of lines.slice(labelIndex + 1, labelIndex + 6)) {
+    const value = parseMoney(line);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function parseSelectedAccountBalance(lines) {
+  const accountCombo = lines.find((line) => /#\s*\d{5,}.*USD/i.test(line));
+  if (!accountCombo) return null;
+  const match = accountCombo.match(/#\s*\d{5,}\s+([0-9.,\s]+)\s*USD/i);
+  return match ? parseMoney(match[1]) : null;
+}
+
+function extractXtbAccountFromAccessibleText(text) {
+  const lines = String(text || '')
+    .split('\n')
+    .map((line) => normalize(line))
+    .filter(Boolean);
+  if (!lines.length) return null;
+
+  const accountMatch = text.match(/\b#\s*(\d{5,})\b/i) || text.match(/\bREAL\s*(\d{5,})\b/i);
+  const selectedBalance = parseSelectedAccountBalance(lines);
+  const account = {
+    account: accountMatch?.[1] || null,
+    total_equity: parseAccessibleValueAfter(lines, 'Valor de Mis Operaciones') ?? selectedBalance,
+    available_capital: parseAccessibleValueAfter(lines, 'Capital disponible'),
+    open_profit: parseAccessibleValueAfter(lines, 'Beneficio'),
+    margin_level_pct: parseAccessibleValueAfter(lines, 'Nivel de margen'),
+    source: 'xtb-accessibility-account',
+    detected_at: new Date().toISOString()
+  };
+  const hasData = account.total_equity !== null
+    || account.available_capital !== null
+    || account.open_profit !== null
+    || account.margin_level_pct !== null;
+  return hasData ? account : null;
+}
+
 function numberMatch(text, pattern) {
   const match = text.match(pattern);
   return match ? parseMoney(match[1]) : null;
@@ -548,7 +605,8 @@ async function syncOnce() {
     const xtbSnapshots = await Promise.all(xtbPages.map(async (page) => ({
       page,
       url: page.url(),
-      text: await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+      text: await page.evaluate(() => document.body?.innerText || '').catch(() => ''),
+      accessibleText: await getAccessibleText(page)
     })));
     const snapshotQuotes = xtbSnapshots.map((snapshot) => ({
       ...snapshot,
@@ -566,7 +624,8 @@ async function syncOnce() {
     const ticket = extractXtbTicket(xtbText);
     const account = xtbSnapshots
       .map((snapshot) => {
-        const extracted = extractXtbAccount(snapshot.text);
+        const extracted = extractXtbAccount(snapshot.text)
+          || extractXtbAccountFromAccessibleText(snapshot.accessibleText);
         return extracted ? { ...extracted, source_url: snapshot.url } : null;
       })
       .find(Boolean) || null;
@@ -602,9 +661,15 @@ async function syncOnce() {
     const applied = quoteBatch.applied && priceMatchesXtb
       ? dashboardAppliedPrice.toFixed(2)
       : await setDashboardPrice(dashboardPage, syncSymbol, price);
+    await dashboardPage.waitForTimeout(100);
+    const finalDashboardState = await dashboardPage.evaluate(() => ({
+      symbol: document.querySelector('#symbol')?.value || '',
+      marketPrice: document.querySelector('#market-price')?.value || '',
+      xtbPrice: document.querySelector('#xtb-price')?.value || ''
+    }));
     const result = {
       timestamp: new Date().toISOString(),
-      symbol: afterBatchState.symbol?.trim().toUpperCase() || syncSymbol,
+      symbol: finalDashboardState.symbol?.trim().toUpperCase() || syncSymbol,
       dashboard_symbol_before: selectedSymbol,
       active_xtb_symbol: activeSymbol,
       visible_xtb_symbols: quoteBatch.items.map((item) => item.symbol),
@@ -618,8 +683,8 @@ async function syncOnce() {
       applied_xtb_price: applied,
       dashboard_market_price_before: dashboardState.marketPrice,
       dashboard_xtb_price_before: dashboardState.xtbPrice,
-      dashboard_symbol_after: afterBatchState.symbol,
-      dashboard_xtb_price_after: afterBatchState.xtbPrice
+      dashboard_symbol_after: finalDashboardState.symbol,
+      dashboard_xtb_price_after: finalDashboardState.xtbPrice
     };
 
     console.log(JSON.stringify(result, null, 2));
