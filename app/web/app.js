@@ -4475,29 +4475,24 @@ function renderActiveRecipeCard(activeRecipe) {
 
 function renderActiveRecipeLearningCard(profile, activeRecipe) {
   const current = activeRecipe || activeRecipeState();
+  const autoStatus = current
+    ? activeRecipeProgress(current)
+    : null;
   if (!current) {
-    const canMark = profile?.direction === "LONG" || profile?.direction === "SHORT";
-    const buttonText = canMark ? `Marcar que opere ${profile.directionLabel}` : "Sin direccion para marcar";
     return `
-      <div class="active-recipe-card idle simple-wide">
-        <span class="simple-label">Receta operada</span>
-        <strong>Sin operacion marcada</strong>
-        <small>Cuando abras en XTB, pulsa este boton. La app no compra ni vende: solo enlaza tu resultado con la receta para aprendizaje.</small>
-        <button type="button" class="secondary" data-simple-action="start-current-recipe" ${canMark ? "" : "disabled"}>${buttonText}</button>
+      <div class="active-recipe-card idle simple-wide auto-read">
+        <span class="simple-label">Seguimiento XTB</span>
+        <strong>Lectura automatica</strong>
+        <small>Si abres una posicion, el monitor debe leerla desde XTB y asociarla al contexto tecnico. Ya no necesitas marcarla manualmente.</small>
       </div>
     `;
   }
-  const progress = activeRecipeProgress(current);
   return `
-    <div class="active-recipe-card running simple-wide">
+    <div class="active-recipe-card running simple-wide auto-read">
       <div>
-        <span class="simple-label">Receta operada para aprendizaje</span>
+        <span class="simple-label">Operacion detectada para aprendizaje</span>
         <strong>${current.symbol || focusSymbol} ${current.label}</strong>
-        <small id="active-recipe-status">${progress.action}. Tiempo ${progress.elapsedMinutes}m / ${current.maxMinutes}m. El cierre del dia se guardara con esta receta.</small>
-      </div>
-      <div class="active-recipe-actions">
-        <button type="button" class="secondary" data-simple-action="finish-active-recipe">Marcar cerrada</button>
-        <button type="button" class="danger" data-simple-action="clear-active-recipe">Cancelar registro</button>
+        <small id="active-recipe-status">${autoStatus.action}. Tiempo ${autoStatus.elapsedMinutes}m / ${current.maxMinutes}m. El bot actualiza estado con XTB.</small>
       </div>
     </div>
   `;
@@ -4711,12 +4706,10 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Analisis automatico</span>
             <strong id="analysis-timer">${analysis.startedAt ? "ACTIVO" : "SIN INICIAR"}</strong>
-            <small id="analysis-status">${analysisStatus}. Playwright lee XTB, guarda velas y aprendizaje; no compra ni vende solo.</small>
+            <small id="analysis-status">${analysisStatus}. El monitor lee XTB, guarda velas/capital y alimenta la decision. No requiere graficar ni limpiar manualmente.</small>
           </div>
           <div class="simple-agent-actions">
-            <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Actualizar" : "Iniciar analisis"}</button>
-            <button id="analysis-chart-btn" type="button" class="secondary" data-simple-action="analysis-chart">Graficar</button>
-            <button type="button" class="secondary" data-simple-action="analysis-reset">Limpiar</button>
+            <button type="button" class="permit" data-simple-action="analysis-start">${analysis.startedAt ? "Reiniciar lectura" : "Iniciar lectura"}</button>
           </div>
         </div>
         <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" || traceSummary.clarity === "PREPARAR" ? "warn" : "danger"}">
