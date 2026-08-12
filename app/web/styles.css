@@ -285,13 +285,13 @@ body {
 
 .strategy-core-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
 
 .strategy-core-grid.compact {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   overflow-x: visible;
   margin-bottom: 16px;
   padding-bottom: 4px;

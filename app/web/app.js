@@ -1245,6 +1245,47 @@ function activeMarketPriceFor(asset) {
   return xtbPriceValue() || Number(document.getElementById("market-price")?.value || 0) || Number(asset.marketPrice || 0);
 }
 
+function latestXtbQuoteFor(symbol = focusSymbol) {
+  const normalized = String(symbol || focusSymbol).toUpperCase();
+  return liveQuotes[normalized] || null;
+}
+
+function formatDataAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "sin lectura";
+  if (ms < 1000) return "ahora";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h`;
+}
+
+function xtbFreshnessState(symbol = focusSymbol) {
+  const quote = latestXtbQuoteFor(symbol);
+  const source = String(quote?.signal_source || quote?.source || "");
+  const sourceLower = source.toLowerCase();
+  const updatedAtRaw = quote?.updated_at || quote?.timestamp || quote?.time;
+  const updatedAt = updatedAtRaw ? Date.parse(updatedAtRaw) : NaN;
+  const ageMs = Number.isFinite(updatedAt) ? Date.now() - updatedAt : Infinity;
+  const hasXtbSource = sourceLower.includes("xtb") || sourceLower.includes("xstation");
+  const hasExecutablePrice = Number(quote?.bid || 0) > 0 || Number(quote?.ask || 0) > 0 || Number(quote?.price || 0) > 0;
+  const freshLimitMs = isMarketOpenNow() ? 20_000 : 3 * 60_000;
+  const fresh = Boolean(hasXtbSource && hasExecutablePrice && ageMs >= 0 && ageMs <= freshLimitMs);
+  const ageText = formatDataAge(ageMs);
+  const sourceText = hasXtbSource ? "XTB" : source ? source : "sin fuente";
+  return {
+    fresh,
+    ageMs,
+    ageText,
+    source: sourceText,
+    short: fresh ? `actual ${ageText}` : `viejo ${ageText}`,
+    detail: fresh
+      ? `Lectura XTB fresca (${ageText}). La receta puede usar precio real.`
+      : `Lectura XTB no fresca (${ageText}). Reinicia monitor o no copies niveles.`,
+  };
+}
+
 function renderPriceGapStatus() {
   const box = document.getElementById("price-gap-status");
   if (!box) return;
@@ -3445,6 +3486,7 @@ function us100StrategyProfile() {
   const asset = findAsset(focusSymbol);
   const quote = liveQuotes[focusSymbol] || {};
   const price = decimalValueById("xtb-price", 0) || decimalValueById("market-price", 0) || Number(quote.price || asset.marketPrice || 0);
+  const dataFreshness = xtbFreshnessState(focusSymbol);
   const triggerFrame = chartFrameOptions["1m"];
   const bars = realCandlesForItem({ asset, zones: { price } }, triggerFrame).slice(-30);
   const pattern = detectCandlePattern(bars);
@@ -3476,7 +3518,8 @@ function us100StrategyProfile() {
   const antiChase = antiChaseCheck(bars, levelDirection, price);
   const movementBudget = movementBudgetCheck(bars, levelDirection, price);
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
-  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + 10), 0, 95);
+  const dataFreshnessScore = dataFreshness.fresh ? 10 : -45;
+  const preliminaryConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore + 10), 0, 95);
   const requestedTargetUsd = automaticTargetUsdForOperability(preliminaryConfidence);
   const targetPolicy = targetPolicyForOperability(requestedTargetUsd, preliminaryConfidence);
   const targetUsd = targetPolicy.target;
@@ -3490,9 +3533,9 @@ function us100StrategyProfile() {
   const positionValue = level.entry * asset.multiplier * volume;
   const marginRequired = positionValue * cfdMarginPct(asset) / 100;
   const volumeScore = volume > 0 ? 10 : -30;
-  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore), 0, 95);
+  const confidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + volumeScore + cfdMove.score + learning.score + xtbContext.score + fibSetup.score + antiChase.score + movementBudget.score + thesisScore + dataFreshnessScore), 0, 95);
   const playbook = us100FixedPlaybook({ pattern, trend, imbalance, cfdMove, fibSetup, antiChase, movementBudget, direction, confidence, price, entry: level.entry, stopLoss, takeProfit, volume });
-  const status = dayThesis.invalidated || fibSetup.rejected
+  const status = !dataFreshness.fresh || dayThesis.invalidated || fibSetup.rejected
     ? "NO OPERAR"
     : playbook.allowed && fibSetup.ready && antiChase.ok && movementBudget.ok && dayThesis.stable
       ? "OPERABLE"
@@ -3509,10 +3552,11 @@ function us100StrategyProfile() {
     cfd: cfdMove.score,
     antiChase: antiChase.score,
     movementBudget: movementBudget.score,
+    dataFreshness: dataFreshnessScore,
     learning: learning.score,
     xtbContext: xtbContext.score,
     total: confidence,
-    text: `Tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + no perseguir ${antiChase.score} + recorrido ${movementBudget.score} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
+    text: `Lectura XTB ${dataFreshnessScore} + tesis diaria ${Math.round(thesisScore)} + patron ${Math.round(pattern.score)} + tendencia ${Math.round(trend.score)} + GAP/FVG/BAG ${Math.round(imbalance.score)} + Fib 15M ${Math.round(fibSetup.score)} + no perseguir ${antiChase.score} + recorrido ${movementBudget.score} + CFD ${cfdMove.score} + contexto ${xtbContext.score} + aprendizaje ${learning.score} + volumen ${volumeScore} = ${confidence}%`,
   };
   const volumePolicy = {
     preferred_min: 0.2,
@@ -3579,6 +3623,7 @@ function us100StrategyProfile() {
     volumePolicy,
     targetPolicy,
     playbook,
+    dataFreshness,
     status,
     agent,
     explanation: buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, status),
@@ -4121,6 +4166,11 @@ function buildUs100Explanation(pattern, trend, imbalance, fibSetup, direction, s
 function buildOperateDecision(profile) {
   const checks = [
     {
+      label: "Lectura XTB",
+      ok: Boolean(profile.dataFreshness?.fresh),
+      detail: profile.dataFreshness?.detail || "Sin lectura XTB reciente.",
+    },
+    {
       label: "Tesis del dia",
       ok: Boolean(profile.dayThesis?.stable && !profile.dayThesis?.invalidated),
       detail: profile.dayThesis?.stable
@@ -4189,6 +4239,13 @@ function professionalDecisionPlan(profile, operateDecision) {
   const triggerTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "1m");
   const direction = profile.direction;
   const checks = [
+    {
+      key: "data",
+      label: "Lectura XTB",
+      ok: Boolean(profile.dataFreshness?.fresh),
+      short: profile.dataFreshness?.short || "sin lectura",
+      detail: profile.dataFreshness?.detail || "Sin dato fresco no hay receta accionable.",
+    },
     {
       key: "context",
       label: "Mapa 4H",
