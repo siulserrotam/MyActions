@@ -4510,13 +4510,6 @@ function renderSimpleDashboard() {
   const operateDecision = buildOperateDecision(profile);
   const professionalPlan = professionalDecisionPlan(profile, operateDecision);
   const actionableOrder = professionalPlan.status === "OPERAR";
-  const objectiveOrderLabel = actionableOrder
-    ? profile.directionLabel
-    : profile.direction === "WAIT"
-      ? "ESPERAR"
-      : `ESPERAR gatillo ${profile.directionLabel}`;
-  const objectiveCaption = actionableOrder ? "Orden" : "Plan si confirma";
-  const objectiveWarning = professionalPlan.plainRule;
   const trafficState = professionalPlan.status === "OPERAR"
     ? "green"
     : profile.status === "NO OPERAR" || profile.confidence < 45
@@ -4528,6 +4521,13 @@ function renderSimpleDashboard() {
     : trafficState === "yellow"
       ? "Hay lectura parcial, pero falta al menos una confirmacion. No copies niveles todavia."
       : "La lectura no tiene ventaja suficiente o esta invalidada. Proteger capital.";
+  const objectiveOrderLabel = trafficState === "green"
+    ? profile.directionLabel
+    : trafficState === "yellow" && profile.direction !== "WAIT"
+      ? `ESPERAR confirmacion ${profile.directionLabel}`
+      : "NO OPERAR";
+  const objectiveCaption = trafficState === "green" ? "Orden" : trafficState === "yellow" ? "Plan si confirma" : "Decision";
+  const objectiveWarning = trafficState === "red" ? trafficHint : professionalPlan.plainRule;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
@@ -4686,7 +4686,7 @@ function renderSimpleDashboard() {
         <article class="simple-operation active">
           <div class="simple-head">
             <h2>Objetivo tecnico</h2>
-            <span class="simple-badge">${profile.status}</span>
+            <span class="simple-badge">${trafficLabel}</span>
           </div>
           <div class="simple-numbers">
             <div class="simple-number"><span class="simple-label">${objectiveCaption}</span><strong>${objectiveOrderLabel}</strong></div>
