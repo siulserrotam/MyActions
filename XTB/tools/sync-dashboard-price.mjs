@@ -124,6 +124,45 @@ function extractXtbTicket(text) {
   };
 }
 
+function extractXtbAccount(text) {
+  const cleaned = normalize(text);
+  const raw = String(text || '');
+  const accountCandidates = [
+    ...cleaned.matchAll(/\bREAL\s*(\d{5,})\b/gi),
+    ...cleaned.matchAll(/\b#\s*(\d{5,})\b/gi),
+    ...cleaned.matchAll(/\b(?:account|cuenta)\D{0,25}(\d{5,})\b/gi),
+    ...raw.matchAll(/\bREAL\s*(\d{5,})\b/gi),
+    ...raw.matchAll(/\b#\s*(\d{5,})\b/gi),
+    ...raw.matchAll(/\b(?:account|cuenta)\D{0,25}(\d{5,})\b/gi)
+  ];
+  const accountUsdCandidates = [
+    ...cleaned.matchAll(/\b#?\d{5,}\s+([0-9.,\s]+)\s*USD\b/gi),
+    ...cleaned.matchAll(/\bMis\s+cuentas\s+([0-9.,\s]+)\s*USD\b/gi)
+  ];
+  const equityMatch = cleaned.match(/(?:total\s*equity|equity|patrimonio\s+total|valor\s+de\s+mis\s+operaciones|mis\s+cuentas)\D{0,35}([0-9.,\s]+)\s*USD/i)
+    || accountUsdCandidates[0];
+  const capitalMatch = cleaned.match(/(?:available\s*capital|capital\s+disponible|saldo\s+disponible)\D{0,35}([0-9.,\s]+)\s*USD/i)
+    || cleaned.match(/Capital\s+Disponible\s+([0-9.,\s]+)\s+Beneficio/i);
+  const profitMatch = cleaned.match(/(?:open\s*profit|beneficio\s+abierto)\D{0,35}([-0-9.,\s]+)\s*USD/i)
+    || cleaned.match(/\bBeneficio\s+([-0-9.,\s]+)\s*USD\b/i)
+    || cleaned.match(/Capital\s+Disponible\s+[0-9.,\s]+\s+Beneficio\s+([-0-9.,\s]+)\s+Nivel\s+de\s+margen/i);
+  const marginLevelMatch = cleaned.match(/(?:nivel\s+de\s+margen|margin\s+level)\D{0,35}([0-9.,\s]+)\s*%/i);
+  const account = {
+    account: accountCandidates[0]?.[1] || null,
+    total_equity: equityMatch ? parseMoney(equityMatch[1]) : null,
+    available_capital: capitalMatch ? parseMoney(capitalMatch[1]) : null,
+    open_profit: profitMatch ? parseMoney(profitMatch[1]) : null,
+    margin_level_pct: marginLevelMatch ? parseMoney(marginLevelMatch[1]) : null,
+    source: 'xtb-visible-account',
+    detected_at: new Date().toISOString()
+  };
+  const hasData = account.total_equity !== null
+    || account.available_capital !== null
+    || account.open_profit !== null
+    || account.margin_level_pct !== null;
+  return hasData ? account : null;
+}
+
 function numberMatch(text, pattern) {
   const match = text.match(pattern);
   return match ? parseMoney(match[1]) : null;
@@ -302,6 +341,20 @@ async function sendPositionsToDashboard(page, positions) {
   }, positions);
 }
 
+async function sendAccountToDashboard(page, account) {
+  if (!account) return false;
+  return page.evaluate((accountPayload) => {
+    if (typeof window.dispatchEvent !== 'function') return false;
+    window.dispatchEvent(new CustomEvent('xtb-account', {
+      detail: {
+        ...accountPayload,
+        updated_at: new Date().toISOString()
+      }
+    }));
+    return true;
+  }, account);
+}
+
 async function readDashboardOrderRequest(page) {
   return page.evaluate(() => {
     try {
@@ -478,10 +531,10 @@ async function syncOnce() {
   const browser = await connectChrome();
   try {
     const context = pickBrowserContext(browser);
-    const xtbPage = context.pages().find((page) => classifyPage(page) === 'xtb');
+    const xtbPages = context.pages().filter((page) => classifyPage(page) === 'xtb');
     const dashboardPage = context.pages().find((page) => classifyPage(page) === 'dashboard');
 
-    if (!xtbPage || !dashboardPage) {
+    if (!xtbPages.length || !dashboardPage) {
       throw new Error('Faltan pestanas: abre XTB y MyActions/dashboard con npm.cmd run start.');
     }
 
@@ -492,12 +545,37 @@ async function syncOnce() {
     }));
     const selectedSymbol = dashboardState.symbol.trim().toUpperCase();
 
-    const xtbText = await xtbPage.evaluate(() => document.body?.innerText || '');
+    const xtbSnapshots = await Promise.all(xtbPages.map(async (page) => ({
+      page,
+      url: page.url(),
+      text: await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+    })));
+    const snapshotQuotes = xtbSnapshots.map((snapshot) => ({
+      ...snapshot,
+      quotes: extractXtbQuotes(snapshot.text)
+    }));
+    const quoteSnapshot = snapshotQuotes.find((snapshot) => snapshot.quotes[selectedSymbol])
+      || snapshotQuotes.find((snapshot) => snapshot.quotes.US100)
+      || snapshotQuotes.find((snapshot) => Object.keys(snapshot.quotes).length)
+      || snapshotQuotes[0];
+    const xtbPage = quoteSnapshot.page;
+    const xtbText = quoteSnapshot.text;
     const quotes = extractXtbQuotes(xtbText);
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
     const snapshotPublish = await publishQuoteSnapshot(quoteBatch.items);
     const ticket = extractXtbTicket(xtbText);
-    const positions = extractXtbPositions(xtbText);
+    const account = xtbSnapshots
+      .map((snapshot) => {
+        const extracted = extractXtbAccount(snapshot.text);
+        return extracted ? { ...extracted, source_url: snapshot.url } : null;
+      })
+      .find(Boolean) || null;
+    const accountApplied = await sendAccountToDashboard(dashboardPage, account);
+    const positions = Array.from(new Map(
+      xtbSnapshots
+        .flatMap((snapshot) => extractXtbPositions(snapshot.text))
+        .map((position) => [position.id, position])
+    ).values());
     const positionsApplied = await sendPositionsToDashboard(dashboardPage, positions);
     await dashboardPage.waitForTimeout(100);
     const afterBatchState = await dashboardPage.evaluate(() => ({
@@ -533,6 +611,7 @@ async function syncOnce() {
       side: SIDE,
       xtb: quote || null,
       xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
+      xtb_account: account ? { ...account, applied: accountApplied } : null,
       xtb_positions: { detected: positions.length, applied: positionsApplied },
       snapshot_publish: snapshotPublish,
       order_preparation: orderPreparation,

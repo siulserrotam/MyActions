@@ -97,6 +97,7 @@ let autoLearningTimer = null;
 let analysisCountdownTimer = null;
 let activeRecipeTimer = null;
 let lastAutoLessonKey = "";
+let lastXtbAccountSyncKey = "";
 let lessonMemorySummary = null;
 const us100SessionStartMinute = 6 * 60;
 
@@ -5189,6 +5190,52 @@ function applyXtbPositions(payload) {
   });
 }
 
+function setSyncedNumericInput(id, value, decimals = 2) {
+  const input = document.getElementById(id);
+  const parsed = Number(value);
+  if (!input || !Number.isFinite(parsed)) return false;
+  const current = decimalNumber(input.value, NaN);
+  if (Number.isFinite(current) && Math.abs(current - parsed) < 0.005) return false;
+  input.value = parsed.toFixed(decimals);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+}
+
+function applyXtbAccount(payload = {}) {
+  const account = {
+    total_equity: Number(payload.total_equity),
+    available_capital: Number(payload.available_capital),
+    open_profit: Number(payload.open_profit),
+    margin_level_pct: Number(payload.margin_level_pct),
+    updated_at: payload.updated_at || payload.detected_at || new Date().toISOString(),
+  };
+  const syncKey = JSON.stringify({
+    total_equity: Number.isFinite(account.total_equity) ? account.total_equity.toFixed(2) : null,
+    available_capital: Number.isFinite(account.available_capital) ? account.available_capital.toFixed(2) : null,
+    open_profit: Number.isFinite(account.open_profit) ? account.open_profit.toFixed(2) : null,
+    margin_level_pct: Number.isFinite(account.margin_level_pct) ? account.margin_level_pct.toFixed(2) : null,
+  });
+  if (syncKey === lastXtbAccountSyncKey) return;
+  lastXtbAccountSyncKey = syncKey;
+
+  const changed = [
+    setSyncedNumericInput("account-balance", account.total_equity),
+    setSyncedNumericInput("available-capital", account.available_capital),
+    setSyncedNumericInput("open-profit", account.open_profit),
+    setSyncedNumericInput("margin-level-pct", account.margin_level_pct),
+  ].some(Boolean);
+  if (!changed) return;
+
+  setLocalValue("decision_engine_xtb_account_last", JSON.stringify(payload));
+  saveConfigLocal();
+  schedulePostback();
+  calculate();
+  const balanceText = Number.isFinite(account.total_equity) ? money(account.total_equity) : "--";
+  const availableText = Number.isFinite(account.available_capital) ? money(account.available_capital) : "--";
+  updatePostbackStatus(`XTB cuenta sincronizada: capital ${balanceText}, disponible ${availableText}.`, "ok");
+}
+
 function currentMarketPhaseLabel() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -5892,6 +5939,7 @@ function bindInputs() {
   window.addEventListener("xtb-ticket", (event) => applyXtbTicketValidation(event.detail || {}));
   window.addEventListener("xtb-order-request-status", (event) => applyXtbOrderRequestStatus(event.detail || {}));
   window.addEventListener("xtb-positions", (event) => applyXtbPositions(event.detail || {}));
+  window.addEventListener("xtb-account", (event) => applyXtbAccount(event.detail || {}));
 }
 
 async function initDashboard() {
