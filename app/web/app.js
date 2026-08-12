@@ -4534,17 +4534,90 @@ function totalOperationResult() {
   return [1, 2, 3, 4].reduce((total, slot) => total + operationResultValue(slot), 0);
 }
 
+function latestXtbPositionsSnapshot() {
+  try {
+    return JSON.parse(getLocalValue("decision_engine_xtb_positions_last") || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function sumPositionResults(positions = [], status = "") {
+  return positions
+    .filter((position) => !status || position.status === status)
+    .reduce((total, position) => {
+      const value = Number(position.actual_result ?? position.open_profit ?? position.profit ?? 0);
+      return Number.isFinite(value) ? total + value : total;
+    }, 0);
+}
+
+function latestXtbOpenResult() {
+  const snapshot = latestXtbPositionsSnapshot();
+  const positions = Array.isArray(snapshot.positions) ? snapshot.positions : [];
+  return Number(sumPositionResults(positions, "open").toFixed(2));
+}
+
+function hasRecentXtbPositionsSnapshot() {
+  const snapshot = latestXtbPositionsSnapshot();
+  if (!snapshot.updated_at) return false;
+  const updatedMs = new Date(snapshot.updated_at).getTime();
+  return Number.isFinite(updatedMs) && Date.now() - updatedMs < 5 * 60 * 1000;
+}
+
+function rememberClosedXtbPositionLocal(position) {
+  if (!position || position.status !== "closed") return;
+  const result = Number(position.actual_result);
+  if (!Number.isFinite(result)) return;
+  const key = xtbPositionStorageKey(position);
+  let stored = [];
+  try {
+    stored = JSON.parse(getLocalValue("decision_engine_xtb_closed_positions_today") || "[]") || [];
+  } catch {
+    stored = [];
+  }
+  if (stored.some((item) => item.key === key)) return;
+  stored.push({
+    key,
+    trade_date: todayKey(),
+    symbol: position.symbol || focusSymbol,
+    result,
+    detected_at: position.detected_at || new Date().toISOString(),
+  });
+  setLocalValue("decision_engine_xtb_closed_positions_today", JSON.stringify(stored.slice(-40)));
+}
+
+function latestXtbClosedResult() {
+  try {
+    const stored = JSON.parse(getLocalValue("decision_engine_xtb_closed_positions_today") || "[]") || [];
+    return Number(stored
+      .filter((item) => item.trade_date === todayKey())
+      .reduce((total, item) => {
+        const value = Number(item.result);
+        return Number.isFinite(value) ? total + value : total;
+      }, 0)
+      .toFixed(2));
+  } catch {
+    return 0;
+  }
+}
+
 function liveDayResult() {
-  const closed = Number(totalOperationResult().toFixed(2));
-  const open = decimalValueById("open-profit", 0);
+  const manualClosed = Number(totalOperationResult().toFixed(2));
+  const xtbClosed = latestXtbClosedResult();
+  const closed = Math.abs(xtbClosed) > 0.004 ? xtbClosed : manualClosed;
+  const syncedOpen = decimalValueById("open-profit", 0);
+  const positionsOpen = latestXtbOpenResult();
+  const open = Math.abs(positionsOpen) > 0.004 ? positionsOpen : syncedOpen;
   const total = Number((closed + open).toFixed(2));
   const source = Math.abs(open) > 0.004 && Math.abs(closed) > 0.004
     ? "cerradas + abierto XTB"
     : Math.abs(open) > 0.004
-      ? "beneficio abierto XTB"
+      ? "posicion abierta XTB"
       : Math.abs(closed) > 0.004
         ? "operaciones cerradas"
-        : "sin resultado detectado";
+        : hasRecentXtbPositionsSnapshot()
+          ? "sin posiciones abiertas/cerradas"
+          : "XTB no muestra cartera al bot";
   return { closed, open, total, source };
 }
 
@@ -5150,6 +5223,7 @@ async function saveClosedXtbPosition(position) {
   if (!position || position.status !== "closed") return;
   const result = Number(position.actual_result);
   if (!Number.isFinite(result)) return;
+  rememberClosedXtbPositionLocal(position);
   const key = `decision_engine_saved_${xtbPositionStorageKey(position)}`;
   if (getLocalValue(key)) return;
   const pointValue = us100PointValue(position.volume || 0);
@@ -5196,10 +5270,15 @@ async function saveClosedXtbPosition(position) {
 
 function applyXtbPositions(payload) {
   const positions = Array.isArray(payload?.positions) ? payload.positions : [];
+  setLocalValue("decision_engine_xtb_positions_last", JSON.stringify({
+    positions,
+    updated_at: payload?.updated_at || new Date().toISOString(),
+  }));
   positions.filter((position) => position.status === "open").forEach(rememberOpenXtbPosition);
   positions.filter((position) => position.status === "closed").forEach((position) => {
     saveClosedXtbPosition(position);
   });
+  calculate();
 }
 
 function setSyncedNumericInput(id, value, decimals = 2) {
