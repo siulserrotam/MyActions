@@ -4369,7 +4369,7 @@ function activeRecipeLessonNote(recipe) {
 
 function setActiveRecipe(recipe) {
   setLocalValue("us100_active_recipe", JSON.stringify({
-    symbol: recipe.asset?.symbol || focusSymbol,
+    symbol: recipe.symbol || recipe.asset?.symbol || focusSymbol,
     direction: recipe.direction,
     label: recipe.label,
     entry: Number(recipe.entry || 0),
@@ -5082,6 +5082,113 @@ function applyXtbOrderRequestStatus(payload) {
   updateLessonStatus(`XTB orden asistida: ${payload.status}. ${payload.message || ""}`, tone);
 }
 
+function xtbPositionStorageKey(position) {
+  return [
+    "xtb_position",
+    position?.status || "",
+    position?.symbol || focusSymbol,
+    position?.direction || "",
+    numberText(position?.volume || 0),
+    numberText(position?.entry_price || 0),
+    numberText(position?.close_price || 0),
+    numberText(position?.actual_result || 0),
+    position?.id || "",
+  ].join(":");
+}
+
+function positionDirectionLabel(direction) {
+  return direction === "SHORT" ? "SHORT / SELL STOP" : "LONG / BUY STOP";
+}
+
+function rememberOpenXtbPosition(position) {
+  if (!position || position.status !== "open") return;
+  const key = xtbPositionStorageKey(position);
+  const previousKey = getLocalValue("decision_engine_xtb_open_position_key");
+  setLocalValue("decision_engine_xtb_open_position_key", key);
+  setLocalValue("decision_engine_xtb_open_position", JSON.stringify(position));
+  if (previousKey === key) return;
+  updateLessonStatus(
+    `XTB detecto operacion abierta: ${position.symbol || focusSymbol} ${positionDirectionLabel(position.direction)} vol ${numberText(position.volume)} @ ${priceText(position.entry_price)}. Se enlaza para aprendizaje.`,
+    "ok"
+  );
+  const stopLoss = Number(position.stop_loss || 0);
+  const takeProfit = Number(position.take_profit || 0);
+  if (stopLoss > 0 && takeProfit > 0) {
+    setActiveRecipe({
+      symbol: position.symbol || focusSymbol,
+      direction: position.direction,
+      label: positionDirectionLabel(position.direction),
+      entry: Number(position.entry_price || 0),
+      stopLoss,
+      takeProfit,
+      volume: Number(position.volume || 0),
+      pointValue: us100PointValue(position.volume || 0),
+      marginRequired: xtbTicketValidation?.margin_usd || 0,
+      targetUsd: Math.abs((takeProfit - position.entry_price) * us100PointValue(position.volume || 0)),
+      stopUsd: Math.abs((position.entry_price - stopLoss) * us100PointValue(position.volume || 0)),
+      confidence: us100StrategyProfile().confidence || 0,
+      status: "XTB DETECTADA",
+      note: "Operacion abierta detectada automaticamente desde XTB.",
+    });
+  }
+}
+
+async function saveClosedXtbPosition(position) {
+  if (!position || position.status !== "closed") return;
+  const result = Number(position.actual_result);
+  if (!Number.isFinite(result)) return;
+  const key = `decision_engine_saved_${xtbPositionStorageKey(position)}`;
+  if (getLocalValue(key)) return;
+  const pointValue = us100PointValue(position.volume || 0);
+  const payload = {
+    trade_date: todayKey(),
+    symbol: position.symbol || focusSymbol,
+    direction: position.direction,
+    planned_volume: Number(position.volume || 0),
+    entry_price: Number(position.entry_price || 0),
+    stop_price: Number(position.stop_loss || 0),
+    take_profit_price: Number(position.take_profit || 0),
+    expected_loss: Math.abs((Number(position.entry_price || 0) - Number(position.stop_loss || 0)) * pointValue),
+    expected_profit: Math.abs((Number(position.take_profit || 0) - Number(position.entry_price || 0)) * pointValue),
+    actual_result: result,
+    outcome: result > 0 ? "win" : result < 0 ? "loss" : "manual",
+    confidence: us100StrategyProfile().confidence || 0,
+    market_phase: currentMarketPhaseLabel(),
+    notes: [
+      "AUTO_XTB_CERRADA",
+      `fuente=${position.source || "xtb"}`,
+      `precio_cierre=${numberText(position.close_price || 0)}`,
+      `id=${position.id || ""}`,
+      `detectada=${position.detected_at || ""}`,
+    ].join(" | "),
+  };
+  try {
+    const response = await fetch("/lessons/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    setLocalValue(key, new Date().toISOString());
+    removeLocalValue("decision_engine_xtb_open_position_key");
+    removeLocalValue("decision_engine_xtb_open_position");
+    clearActiveRecipe();
+    updateLessonStatus(`XTB guardo cierre automatico: ${payload.symbol} ${payload.direction} ${money(payload.actual_result)}.`, payload.actual_result >= 0 ? "ok" : "error");
+    await loadLessonSummary();
+    renderSimpleDashboard();
+  } catch {
+    updateLessonStatus("XTB detecto cierre, pero no pudo guardar aprendizaje. Revisa DB.", "error");
+  }
+}
+
+function applyXtbPositions(payload) {
+  const positions = Array.isArray(payload?.positions) ? payload.positions : [];
+  positions.filter((position) => position.status === "open").forEach(rememberOpenXtbPosition);
+  positions.filter((position) => position.status === "closed").forEach((position) => {
+    saveClosedXtbPosition(position);
+  });
+}
+
 function currentMarketPhaseLabel() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -5784,6 +5891,7 @@ function bindInputs() {
   window.addEventListener("xtb-quotes", (event) => applyXtbQuoteBatch(event.detail?.items || []));
   window.addEventListener("xtb-ticket", (event) => applyXtbTicketValidation(event.detail || {}));
   window.addEventListener("xtb-order-request-status", (event) => applyXtbOrderRequestStatus(event.detail || {}));
+  window.addEventListener("xtb-positions", (event) => applyXtbPositions(event.detail || {}));
 }
 
 async function initDashboard() {

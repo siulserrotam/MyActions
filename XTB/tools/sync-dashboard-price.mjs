@@ -124,6 +124,85 @@ function extractXtbTicket(text) {
   };
 }
 
+function numberMatch(text, pattern) {
+  const match = text.match(pattern);
+  return match ? parseMoney(match[1]) : null;
+}
+
+function textHash(value) {
+  let hash = 0;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function buildPositionId(position) {
+  return [
+    position.symbol,
+    position.status,
+    position.direction,
+    position.volume,
+    position.entry_price,
+    position.close_price,
+    position.actual_result,
+    position.stop_loss,
+    position.take_profit
+  ].map((part) => String(part ?? '')).join('|');
+}
+
+function extractPositionFromFragment(fragment, status) {
+  const directionText = fragment.match(/\b(Comprar|Vender)\b/i)?.[1] || '';
+  const direction = /^Comprar$/i.test(directionText) ? 'LONG' : /^Vender$/i.test(directionText) ? 'SHORT' : '';
+  const volume = numberMatch(fragment, /Volumen\s+(-?[0-9]+(?:[.,][0-9]+)?)/i);
+  const entryFromAt = numberMatch(fragment, /@\s*([0-9]{1,3}(?:[\s.,][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)/i);
+  const entryFromLabel = numberMatch(fragment, /Precio\s+de\s+apertura\s+([0-9.,\s]+)/i);
+  const closePrice = numberMatch(fragment, /Precio\s+del\s+cierre\s+([0-9.,\s]+)/i);
+  const result = numberMatch(fragment, /Beneficio\s+neto(?:\/P[eé]rdida)?\s+(-?[0-9.,\s]+)\s*USD/i);
+  const stopLoss = numberMatch(fragment, /Stop\s+Loss\s+([0-9.,\s-]+)/i);
+  const takeProfit = numberMatch(fragment, /Take\s+Profit\s+([0-9.,\s-]+)/i);
+  const entryPrice = entryFromLabel ?? entryFromAt;
+  if (!direction || volume === null || entryPrice === null) return null;
+  const position = {
+    symbol: 'US100',
+    status,
+    direction,
+    volume: Math.abs(volume),
+    entry_price: entryPrice,
+    close_price: closePrice,
+    actual_result: result,
+    stop_loss: stopLoss,
+    take_profit: takeProfit,
+    source: status === 'closed' ? 'xtb-visible-history' : 'xtb-visible-open-position',
+    detected_at: new Date().toISOString()
+  };
+  position.id = textHash(buildPositionId(position));
+  return position;
+}
+
+function extractXtbPositions(text) {
+  const cleaned = normalize(text);
+  const positions = [];
+
+  if (/Detalles\s+de\s+la\s+posici[oó]n/i.test(cleaned) && /US100\s+CFD/i.test(cleaned)) {
+    const detailStart = cleaned.search(/Detalles\s+de\s+la\s+posici[oó]n/i);
+    const detail = cleaned.slice(detailStart, detailStart + 1800);
+    const closed = extractPositionFromFragment(detail, 'closed');
+    if (closed && closed.close_price !== null && closed.actual_result !== null) positions.push(closed);
+  }
+
+  if (/Posiciones\s+abiertas/i.test(cleaned) && /US100\s+CFD/i.test(cleaned)) {
+    const us100Index = cleaned.search(/US100\s+CFD/i);
+    const openFragment = cleaned.slice(Math.max(0, us100Index - 400), us100Index + 1600);
+    const openPosition = extractPositionFromFragment(openFragment, 'open');
+    if (openPosition) positions.push(openPosition);
+  }
+
+  return positions;
+}
+
 async function setDashboardPrice(page, symbol, value) {
   const formatted = value.toFixed(2);
   await page.evaluate(({ nextSymbol, price }) => {
@@ -207,6 +286,20 @@ async function sendTicketToDashboard(page, ticket, symbol) {
     }));
     return true;
   }, { ticketPayload: ticket, ticketSymbol: symbol });
+}
+
+async function sendPositionsToDashboard(page, positions) {
+  if (!positions?.length) return false;
+  return page.evaluate((positionItems) => {
+    if (typeof window.dispatchEvent !== 'function') return false;
+    window.dispatchEvent(new CustomEvent('xtb-positions', {
+      detail: {
+        positions: positionItems,
+        updated_at: new Date().toISOString()
+      }
+    }));
+    return true;
+  }, positions);
 }
 
 async function readDashboardOrderRequest(page) {
@@ -404,6 +497,8 @@ async function syncOnce() {
     const quoteBatch = await sendQuoteBatchToDashboard(dashboardPage, quotes);
     const snapshotPublish = await publishQuoteSnapshot(quoteBatch.items);
     const ticket = extractXtbTicket(xtbText);
+    const positions = extractXtbPositions(xtbText);
+    const positionsApplied = await sendPositionsToDashboard(dashboardPage, positions);
     await dashboardPage.waitForTimeout(100);
     const afterBatchState = await dashboardPage.evaluate(() => ({
       symbol: document.querySelector('#symbol')?.value || '',
@@ -438,6 +533,7 @@ async function syncOnce() {
       side: SIDE,
       xtb: quote || null,
       xtb_ticket: ticket ? { ...ticket, applied: ticketApplied } : null,
+      xtb_positions: { detected: positions.length, applied: positionsApplied },
       snapshot_publish: snapshotPublish,
       order_preparation: orderPreparation,
       applied_xtb_price: applied,
