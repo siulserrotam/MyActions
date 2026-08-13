@@ -4382,6 +4382,27 @@ function directionStability(candles, bias, frameKey) {
   };
 }
 
+function dominantCandleSignal(candles, frameKey) {
+  const last = candles[candles.length - 1];
+  if (!last) return null;
+  const candleRange = Math.max(Math.abs(last.h - last.l), 0.000001);
+  const candleBody = Math.abs(last.c - last.o);
+  const bodyPct = candleBody / candleRange * 100;
+  const movePct = last.o > 0 ? (last.c - last.o) / last.o * 100 : 0;
+  const limits = frameKey === "4h"
+    ? { bodyPct: 42, movePct: 0.16 }
+    : frameKey === "15m"
+      ? { bodyPct: 48, movePct: 0.04 }
+      : { bodyPct: 45, movePct: 0.012 };
+  if (bodyPct < limits.bodyPct || Math.abs(movePct) < limits.movePct) return null;
+  return {
+    bias: movePct > 0 ? "LONG" : "SHORT",
+    bodyPct,
+    movePct,
+    note: `vela viva fuerte: cuerpo ${numberText(bodyPct)}%, movimiento ${numberText(movePct)}%`,
+  };
+}
+
 function traceFrame(symbol, frameKey) {
   const frame = chartFrameOptions[frameKey];
   const candles = candlesForFrame(symbol, frameKey);
@@ -4398,7 +4419,11 @@ function traceFrame(symbol, frameKey) {
   const shortVotes = biasVotes.filter((bias) => bias === "SHORT").length;
   const rawBias = longVotes > shortVotes ? "LONG" : shortVotes > longVotes ? "SHORT" : "WAIT";
   const stability = directionStability(candles, rawBias, frameKey);
-  const bias = rawBias === "WAIT" || stability.confirmed ? rawBias : "WAIT";
+  const dominant = dominantCandleSignal(candles, frameKey);
+  let bias = rawBias === "WAIT" || stability.confirmed ? rawBias : "WAIT";
+  if (frameKey === "4h" && dominant && (rawBias === "WAIT" || rawBias === dominant.bias)) {
+    bias = dominant.bias;
+  }
   return {
     key: frameKey,
     label: frame.label,
@@ -4406,6 +4431,7 @@ function traceFrame(symbol, frameKey) {
     candles: candles.length,
     bias,
     rawBias,
+    dominant,
     stability,
     movePct,
     pattern,
@@ -4422,6 +4448,9 @@ function traceDirectionNote(trace) {
       : "Presion vendedora";
   const move = numberText(trace.movePct);
   if (trace.candles < 3) return `${trace.role}: faltan velas reales para leer este marco.`;
+  if (trace.key === "4h" && trace.dominant && trace.bias !== "WAIT") {
+    return `${trace.role}: ${trace.bias} en formacion por ${trace.dominant.note}. No autoriza entrada sin 15M y 1M.`;
+  }
   return `${trace.role}: ${biasText}. ${trace.stability?.note || ""}. Patron ${trace.pattern.name}. Tendencia ${trace.trend.direction}. Movimiento ${move}%.`;
 }
 
@@ -4711,6 +4740,14 @@ function professionalDecisionPlan(profile, operateDecision) {
   const fibConfirmed = Boolean(profile.fibSetup?.ready);
   const fibRejected = Boolean(profile.fibSetup?.rejected);
   const fibWaiting = !fibConfirmed && !fibRejected;
+  const mapShort = mapTrace?.bias === "WAIT"
+    ? "sin direccion"
+    : mapTrace?.dominant
+      ? `${mapTrace.bias} en formacion`
+      : mapTrace?.bias || "sin datos";
+  const mapDetail = mapTrace?.dominant && mapTrace?.bias !== "WAIT"
+    ? "4H ya marca lado por vela fuerte. Es mapa del dia; 15M y 1M todavia autorizan o bloquean la entrada."
+    : "Marca el lado grande del dia. Si no coincide, no se fuerza entrada.";
   const checks = [
     {
       key: "data",
@@ -4723,8 +4760,8 @@ function professionalDecisionPlan(profile, operateDecision) {
       key: "context",
       label: "Mapa 4H",
       ok: direction !== "WAIT" && mapTrace?.bias === direction,
-      short: mapTrace?.bias === "WAIT" ? "sin direccion" : mapTrace?.bias || "sin datos",
-      detail: "Marca el lado grande del dia. Si no coincide, no se fuerza entrada.",
+      short: mapShort,
+      detail: mapDetail,
     },
     {
       key: "confirmation",
