@@ -123,12 +123,14 @@ function currentTradingSession(now = new Date()) {
   const minute = Number(parts.minute);
   const total = hour * 60 + minute;
   const active = [];
-  const asia = total >= 18 * 60 || total < 3 * 60;
-  const london = total >= 3 * 60 && total < 11 * 60 + 30;
+  const overnight = total >= 18 * 60 || total < 3 * 60;
+  const london = total >= 3 * 60 && total < 9 * 60 + 30;
   const ny = total >= 9 * 60 + 30 && total < 16 * 60;
-  if (asia) active.push('Asia');
-  if (london) active.push('London');
-  if (ny) active.push('NY');
+  const postNy = total >= 16 * 60 && total < 18 * 60;
+  if (overnight) active.push('Globex nocturno');
+  if (london) active.push('Pre-NY/London');
+  if (ny) active.push('NY regular');
+  if (postNy) active.push('Post-NY');
   const session = active.length ? active.join('/') : 'Fuera de sesion principal';
   return {
     session,

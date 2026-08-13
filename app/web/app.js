@@ -1699,25 +1699,30 @@ function professionalCfdWatchlist() {
 
 function sessionBiasForAsset(asset, sessionLabel = currentTradingSessionLabel()) {
   const session = String(sessionLabel || "").toLowerCase();
-  if (session.includes("ny") || ["golden-window", "morning", "midday", "close-window"].includes(session)) {
+  if (session.includes("ny regular") || session.includes("ny") || ["golden-window", "morning", "midday", "close-window"].includes(session)) {
     if (asset.symbol === focusSymbol || asset.symbol === "US500" || asset.category === "stocks") return 18;
     if (asset.symbol === "OIL" || asset.symbol === "GOLD") return 10;
     if (asset.category === "forex") return 6;
     if (asset.category === "crypto") return -8;
   }
-  if (session.includes("london")) {
+  if (session.includes("london") || session.includes("pre-ny")) {
     if (asset.category === "forex") return 18;
     if (asset.symbol === "GOLD" || asset.symbol === "OIL") return 12;
     if (asset.symbol === focusSymbol || asset.symbol === "US500") return 6;
     if (asset.category === "crypto") return -8;
   }
-  if (session.includes("asia")) {
-    if (asset.symbol === "GOLD") return 16;
-    if (asset.category === "forex") return 10;
+  if (session.includes("globex") || session.includes("overnight") || session.includes("asia")) {
+    if (asset.symbol === focusSymbol || asset.symbol === "US500") return 8;
+    if (asset.symbol === "GOLD") return 10;
+    if (asset.category === "forex") return 8;
     if (asset.category === "crypto") return 4;
-    if (asset.symbol === focusSymbol || asset.symbol === "US500") return -4;
   }
-  if (session.includes("closed") || session === "closed") {
+  if (session.includes("post-ny")) {
+    if (asset.symbol === focusSymbol || asset.symbol === "US500") return 3;
+    if (asset.category === "crypto") return 4;
+    return -6;
+  }
+  if (session.includes("closed") || session === "closed" || session.includes("fuera")) {
     return asset.category === "crypto" ? 5 : -10;
   }
   return 0;
@@ -1939,11 +1944,13 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
     : "Radar: sin CFD abierto/fresco";
   const bestTone = best?.score >= 75 ? "ok" : best?.score >= 55 ? "warn" : "danger";
   const sessionLabel = currentTradingSessionLabel();
-  const sessionText = sessionLabel.includes("Asia")
-    ? "Asia: prioriza GOLD, divisas y cripto liquida; US100 solo si hay continuidad clara."
-    : sessionLabel.includes("London")
-      ? "London: prioriza Forex, GOLD y OIL; evita perseguir indices antes de NY."
-      : sessionLabel.includes("NY") || ["golden-window", "morning", "midday", "close-window"].includes(sessionLabel)
+  const sessionText = sessionLabel.includes("Globex")
+    ? "Globex nocturno: US100 puede cotizar, pero con menos liquidez; vigila spread y continuidad, no persigas precio."
+    : sessionLabel.includes("London") || sessionLabel.includes("Pre-NY")
+      ? "Pre-NY/London: prepara mapa; US100 solo si hay continuidad clara y spread sano antes de NY."
+      : sessionLabel.includes("Post-NY")
+        ? "Post-NY: lectura de contexto; evita entradas nuevas salvo setup excepcional con liquidez visible."
+        : sessionLabel.includes("NY") || ["golden-window", "morning", "midday", "close-window"].includes(sessionLabel)
         ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
         : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
   const activeNote = best && best.symbol !== activeSymbol
