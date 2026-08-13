@@ -1419,25 +1419,24 @@ function xtbTradabilityState(assetOrSymbol, options = {}) {
   const ask = Number(quote.ask || 0);
   const rawPrice = Number(quote.price || quote.provider_price || asset?.marketPrice || 0);
   const hasExecutablePrice = bid > 0 || ask > 0 || rawPrice > 0;
+  const phaseBlocksTrading = /pre|post|closed|cerrado|halt|suspend|offline|disabled|paus|awaiting/.test(phaseLower);
   const explicitlyClosed = quote.is_open === false
     || quote.tradable === false
     || quote.market_open === false
-    || /closed|cerrado|halt|suspend|offline|disabled|paus/.test(phaseLower);
+    || phaseBlocksTrading;
   const freshLimitMs = Number(options.freshLimitMs || 90_000);
   const fresh = Boolean(hasXtbSource && hasExecutablePrice && ageMs >= 0 && ageMs <= freshLimitMs);
   const activeSymbol = String(document.getElementById("symbol")?.value || selectedAsset?.symbol || focusSymbol).toUpperCase();
   const manualFallback = Boolean(options.allowManual && symbol === activeSymbol && xtbPriceValue() > 0);
-  const open = Boolean((fresh && !explicitlyClosed) || manualFallback);
-  const price = manualFallback ? xtbPriceValue() : rawPrice;
-  const reason = manualFallback
-    ? "manual XTB aceptable"
-    : !hasXtbSource
+  const open = Boolean(fresh && !explicitlyClosed);
+  const price = rawPrice > 0 ? rawPrice : manualFallback ? xtbPriceValue() : 0;
+  const reason = !hasXtbSource
       ? "sin lectura XTB"
       : explicitlyClosed
         ? "mercado cerrado en XTB"
         : !fresh
           ? `lectura XTB vieja ${ageText}`
-          : `XTB fresco ${ageText}`;
+          : `XTB operable fresco ${ageText}`;
   return {
     open,
     fresh,
@@ -1603,8 +1602,9 @@ function pickBestCfdOpportunity(symbols = []) {
 
 function professionalCfdWatchlist() {
   const preferred = [
-    ...favoriteSymbols(),
+    focusSymbol,
     ...professionalCoreSymbols,
+    ...favoriteSymbols(),
   ];
   const allowedCategories = new Set(["indices", "commodities", "forex", "stocks", "crypto"]);
   return Array.from(new Set(preferred.map((symbol) => String(symbol).toUpperCase())))
@@ -1669,7 +1669,7 @@ function movementQualityForAsset(asset, movePct) {
 function scoreProfessionalCfd(asset) {
   const quote = liveQuotes[asset.symbol] || {};
   const activeSymbol = String(document.getElementById("symbol")?.value || selectedAsset?.symbol || focusSymbol).toUpperCase();
-  const tradability = xtbTradabilityState(asset, { allowManual: asset.symbol === activeSymbol });
+  const tradability = xtbTradabilityState(asset, { allowManual: false });
   const price = Number(tradability.price || quote.price || quote.provider_price || asset.marketPrice || 0);
   const movePct = Number(quote.change_pct ?? asset.liveChangePct ?? 0);
   const fresh = tradability.open;
@@ -1687,6 +1687,8 @@ function scoreProfessionalCfd(asset) {
   let score = 45 + movement.score + sessionScore;
   if (fresh) score += 15;
   else score -= 55;
+  if (tradability.open && asset.symbol === focusSymbol) score += 18;
+  if (!tradability.open && asset.symbol === activeSymbol) score -= 20;
   if (direction === "WAIT") score -= 14;
   if (!marginOk) score -= 35;
   if (!spreadOk) score -= 35;
@@ -1707,6 +1709,7 @@ function scoreProfessionalCfd(asset) {
     tradability.reason,
     marginOk ? `margen minimo aprox ${money(marginRequired)}` : `margen minimo ${money(marginRequired)} supera disponible`,
   ];
+  if (tradability.open && asset.symbol === focusSymbol) reasonParts.push("US100 abierto en XTB tiene prioridad base");
   if (!spreadOk) reasonParts.push(`spread estimado ${money(spreadCost)} consume la meta`);
   return {
     asset,
@@ -1826,9 +1829,10 @@ function pickBestWatchlistOpportunity() {
 function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
   const activeSymbol = activeProfile?.asset?.symbol || selectedAsset?.symbol || focusSymbol;
   const ranking = professionalCfdRanking(activeSymbol);
-  const best = ranking.find((item) => item.symbol !== activeSymbol) || ranking[0];
+  const activeInRadar = ranking.find((item) => item.symbol === activeSymbol);
+  const best = activeInRadar || ranking[0];
   const activeScore = ranking.find((item) => item.symbol === activeSymbol) || scoreProfessionalCfd(findAsset(activeSymbol));
-  const bestIsRecipeAsset = best?.symbol === activeSymbol;
+  const bestIsRecipeAsset = Boolean(activeInRadar && best?.symbol === activeSymbol);
   const bestLabel = best
     ? `${bestIsRecipeAsset ? "CFD activo" : "Radar"}: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
     : "Radar: sin CFD abierto/fresco";
@@ -1842,7 +1846,7 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
         ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
         : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
   const activeNote = best && best.symbol !== activeSymbol
-    ? `${activeSymbol} sigue siendo tu receta activa. ${best.symbol} solo es radar para vigilar; toca la tarjeta si decides cambiar.`
+    ? `${activeSymbol} no esta operable/fresco ahora; ${best.symbol} es el mejor CFD abierto para vigilar. Toca la tarjeta si decides cambiar.`
     : activeScore.tradability?.open
       ? `${activeSymbol} queda como CFD activo; la receta solo se habilita si mapa 4H, filtro 15M y gatillo 1M confirman.`
       : `${activeSymbol} no entra al radar porque falta lectura XTB fresca/operable. Dejalo visible en XTB o reinicia monitor.`;
@@ -1879,7 +1883,7 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
           </div>
         `}
       </div>
-      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Al seleccionar una tarjeta, cambia el CFD activo y se recalcula todo.</p>
+      <p class="simple-tiny">Criterio: solo CFDs con lectura XTB fresca y operable; favoritos cerrados o preapertura no entran. US100 queda como candidato base cuando XTB lo lee abierto.</p>
       <p class="simple-tiny">CFD activo ${activeSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
     </section>
   `;
