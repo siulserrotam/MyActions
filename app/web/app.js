@@ -60,6 +60,20 @@ const categoryLabels = {
 const defaultAccountBalance = 2016;
 const defaultRiskPct = 0.5;
 const focusSymbol = "US100";
+const operationalSymbols = [focusSymbol];
+const observationSymbols = [
+  "US100",
+  "US500",
+  "GOLD",
+  "OIL",
+  "NATGAS",
+  "EURUSD",
+  "GBPUSD",
+  "NVDA.US",
+  "AAPL.US",
+  "TSM.US",
+  "AMD.US",
+];
 const professionalCoreSymbols = [
   "US100",
   "US500",
@@ -1540,7 +1554,7 @@ function renderPriceGapStatus() {
 }
 
 async function refreshLivePrices({ resetSelected = false } = {}) {
-  const symbols = professionalCfdWatchlist().map((asset) => asset.symbol).join(",");
+  const symbols = operationalSymbols.join(",");
   try {
     const snapshotApplied = await refreshXtbSnapshotFromServer();
     updateLiveStatus(snapshotApplied
@@ -1554,16 +1568,16 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     const liveItems = payload.items || [];
     liveItems.forEach(applyLiveQuote);
     await saveQuoteBars(liveItems, "yfinance_1m");
-    await loadMarketBars([selectedAsset?.symbol || focusSymbol]);
+    await loadMarketBars([focusSymbol]);
     if (resetSelected) {
       const operable = pickBestCfdOpportunity();
       const watch = pickBestWatchlistOpportunity();
       const best = operable || watch;
-      if (latestXtbQuoteFor(selectedAsset.symbol)) {
-        selectedAsset = findAsset(selectedAsset.symbol);
+      if (latestXtbQuoteFor(focusSymbol)) {
+        selectedAsset = findAsset(focusSymbol);
         resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       }
-      if (best) updateLiveStatus(`Radar actualizado: ${best.symbol} ${best.directionLabel}. Tu receta sigue en ${selectedAsset.symbol}.`, "ok");
+      if (best) updateLiveStatus(`Radar actualizado. Tu receta operativa sigue fija en ${focusSymbol}.`, "ok");
     }
     updateLiveStatus(`Radar CFD actualizado desde yfinance (${liveItems.length || 0} lectura(s)).`, "ok");
     renderAssets();
@@ -1675,11 +1689,7 @@ function pickBestCfdOpportunity(symbols = []) {
 }
 
 function professionalCfdWatchlist() {
-  const preferred = [
-    focusSymbol,
-    ...professionalCoreSymbols,
-    ...favoriteSymbols(),
-  ];
+  const preferred = observationSymbols;
   const allowedCategories = new Set(["indices", "commodities", "forex", "stocks", "crypto"]);
   return Array.from(new Set(preferred.map((symbol) => String(symbol).toUpperCase())))
     .map(findAsset)
@@ -1917,7 +1927,7 @@ function pickBestWatchlistOpportunity() {
 }
 
 function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
-  const activeSymbol = activeProfile?.asset?.symbol || selectedAsset?.symbol || focusSymbol;
+  const activeSymbol = focusSymbol;
   const ranking = professionalCfdRanking(activeSymbol);
   const displayRanking = professionalCfdDisplayRanking(activeSymbol);
   const activeInRadar = displayRanking.find((item) => item.symbol === activeSymbol);
@@ -1925,7 +1935,7 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
   const activeScore = displayRanking.find((item) => item.symbol === activeSymbol) || scoreProfessionalCfd(findAsset(activeSymbol));
   const bestIsRecipeAsset = Boolean(activeInRadar && best?.symbol === activeSymbol);
   const bestLabel = best
-    ? `${bestIsRecipeAsset ? "CFD activo" : "Radar"}: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
+    ? `Radar: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
     : "Radar: sin CFD abierto/fresco";
   const bestTone = best?.score >= 75 ? "ok" : best?.score >= 55 ? "warn" : "danger";
   const sessionLabel = currentTradingSessionLabel();
@@ -1937,10 +1947,10 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
         ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
         : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
   const activeNote = best && best.symbol !== activeSymbol
-    ? `${activeSymbol} no esta operable/fresco ahora; ${best.symbol} es el mejor CFD abierto para vigilar. Toca la tarjeta si decides cambiar.`
+    ? `${best.symbol} se muestra solo como contexto. La receta operativa queda fija en ${focusSymbol} para evitar lecturas cruzadas.`
     : activeScore.tradability?.open
-      ? `${activeSymbol} queda como CFD activo; la receta solo se habilita si mapa 4H, filtro 15M y gatillo 1M confirman.`
-      : `${activeSymbol} no entra al radar porque falta lectura XTB fresca/operable. Dejalo visible en XTB o reinicia monitor.`;
+      ? `${focusSymbol} es el unico CFD operativo. La receta solo se habilita si mapa 4H, filtro 15M y gatillo 1M confirman.`
+      : `${focusSymbol} no tiene lectura XTB fresca/operable. Dejalo visible en XTB o reinicia monitor.`;
   return `
     <section class="simple-panel cfd-desk ${bestTone}">
       <div class="simple-head">
@@ -1960,12 +1970,12 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
       </div>
       <div class="professional-cfd-grid">
         ${displayRanking.length ? displayRanking.slice(0, 4).map((item, index) => `
-          <button type="button" class="${item.symbol === activeSymbol ? "active" : ""}" data-simple-top-symbol="${item.symbol}">
-            <span class="simple-label">${item.symbol === activeSymbol ? "CFD activo" : `#${index + 1}`} ${item.symbol}</span>
+          <div class="${item.symbol === activeSymbol ? "active" : ""}">
+            <span class="simple-label">${item.symbol === activeSymbol ? "CFD operativo" : `Observacion #${index + 1}`} ${item.symbol}</span>
             <strong>${item.directionLabel}</strong>
             <small>${numberText(item.movePct)}% - ${item.tradability?.open ? item.status : "OBSERVAR"} ${item.score}% - ${priceText(item.price)}</small>
             <em>${item.reason}</em>
-          </button>
+          </div>
         `).join("") : `
           <div>
             <span class="simple-label">Radar</span>
@@ -1974,7 +1984,7 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
           </div>
         `}
       </div>
-      <p class="simple-tiny">Criterio: primero CFDs con lectura XTB fresca y operable; si ninguno califica, se muestran candidatos en observacion para abrirlos en XTB o reiniciar monitor.</p>
+      <p class="simple-tiny">Criterio: US100 es el unico operativo. El radar solo observa otros CFDs para contexto; no cambia receta, grafica ni riesgo.</p>
       <p class="simple-tiny">CFD activo ${activeSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
     </section>
   `;
@@ -1982,12 +1992,17 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
 
 function applySelectedOpportunity(opportunity, source = "auto") {
   if ((source === "live" || source === "xtb") && isManualOpportunityLocked()) return;
+  const requestedSymbol = String(opportunity?.asset?.symbol || opportunity?.symbol || focusSymbol).toUpperCase();
+  if (requestedSymbol !== focusSymbol) {
+    updateLiveStatus(`${requestedSymbol} queda solo como observacion. La receta operativa se mantiene en ${focusSymbol}.`, "warn");
+    return;
+  }
   if (source === "manual") lockManualOpportunitySelection();
-  selectedAsset = findAsset(opportunity?.asset?.symbol || opportunity?.symbol || selectedAsset?.symbol || focusSymbol);
+  selectedAsset = findAsset(focusSymbol);
   const symbolInput = document.getElementById("symbol");
   const marketInput = document.getElementById("market-price");
   const xtbInput = document.getElementById("xtb-price");
-  const quotePrice = Number(latestXtbQuoteFor(selectedAsset.symbol)?.price || opportunity?.asset?.marketPrice || selectedAsset.marketPrice || 0);
+  const quotePrice = Number(latestXtbQuoteFor(focusSymbol)?.price || opportunity?.asset?.marketPrice || selectedAsset.marketPrice || 0);
   if (symbolInput) symbolInput.value = selectedAsset.symbol;
   if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
   if (xtbInput && quotePrice) xtbInput.value = formatPriceForAsset(quotePrice, selectedAsset);
@@ -2136,8 +2151,8 @@ function applyAiAggressiveTargets(asset) {
 
 function selectedAssetFromForm() {
   const symbolInput = document.getElementById("symbol");
-  const symbol = String(symbolInput?.value || selectedAsset?.symbol || focusSymbol).trim().toUpperCase();
-  if (symbolInput) symbolInput.value = symbol;
+  const symbol = focusSymbol;
+  if (symbolInput) symbolInput.value = focusSymbol;
   const baseAsset = findAsset(symbol);
   const marketInput = Number(document.getElementById("market-price").value || 0);
   const xtbInput = xtbPriceValue();
@@ -5172,7 +5187,10 @@ function renderSimpleDashboard() {
   const target = document.getElementById("simple-dashboard");
   if (!target) return;
   {
-  const activeAsset = selectedAssetFromForm?.() || selectedAsset || findAsset(focusSymbol);
+  selectedAsset = findAsset(focusSymbol);
+  const symbolInput = document.getElementById("symbol");
+  if (symbolInput) symbolInput.value = focusSymbol;
+  const activeAsset = selectedAssetFromForm?.() || selectedAsset;
   const profile = us100StrategyProfile(activeAsset);
   const activeSymbol = profile.asset.symbol;
   const hiddenTarget = document.getElementById("target-profit-usd");
@@ -5264,7 +5282,7 @@ function renderSimpleDashboard() {
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>${activeSymbol} Decision Desk</h1>
-          <p class="simple-subtitle">Un CFD activo a la vez. El radar puede proponer alternativas; al elegir una, la receta, grafica y riesgo se recalculan con ese activo.</p>
+          <p class="simple-subtitle">Operacion fija en US100. El radar solo observa otros CFDs como contexto para no mezclar precios ni retrasar la receta.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${activeSymbol}</span>
@@ -5544,22 +5562,13 @@ function bindSimpleDashboard() {
     }
     const topButton = event.target?.closest?.("[data-simple-top-symbol]");
     if (topButton) {
-      const symbol = topButton.dataset.simpleTopSymbol;
-      const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()]
-        .find((item) => item.asset.symbol === symbol)
-        || { asset: findAsset(symbol), symbol };
-      applySelectedOpportunity(picked, "manual");
+      updateLiveStatus(`Radar solo observacion. La receta operativa se mantiene en ${focusSymbol}.`, "warn");
       return;
     }
     const chartFrameButton = event.target?.closest?.("[data-chart-frame]");
     if (chartFrameButton) {
       setChartFrame(chartFrameButton.dataset.chartFrame);
-      const symbols = [
-        selectedAsset.symbol,
-        ...buildTopOpportunities().map((item) => item.asset.symbol),
-        ...buildOpeningWatchlist().slice(0, 3).map((item) => item.asset.symbol),
-      ];
-      loadMarketBars(symbols).then(() => renderSimpleDashboard());
+      loadMarketBars([focusSymbol]).then(() => renderSimpleDashboard());
       return;
     }
     const action = event.target?.dataset?.simpleAction;
