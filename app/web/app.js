@@ -5057,6 +5057,15 @@ function renderSimpleDashboard() {
   const operateDecision = buildOperateDecision(profile);
   const professionalPlan = professionalDecisionPlan(profile, operateDecision);
   const actionableOrder = professionalPlan.status === "OPERAR";
+  const planCheckOk = (key) => Boolean(professionalPlan.checks.find((check) => check.key === key)?.ok);
+  const preparatoryRecipe =
+    planCheckOk("data") &&
+    planCheckOk("context") &&
+    planCheckOk("confirmation") &&
+    Number(profile.volume) > 0 &&
+    Number(profile.entry) > 0 &&
+    Number(profile.stopLoss) > 0 &&
+    Number(profile.takeProfit) > 0;
   const trafficState = professionalPlan.status === "OPERAR"
     ? "green"
     : profile.status === "NO OPERAR" || profile.confidence < 45
@@ -5070,7 +5079,9 @@ function renderSimpleDashboard() {
       : "La lectura no tiene ventaja suficiente o esta invalidada. Proteger capital.";
   const objectiveOrderLabel = trafficState === "green"
     ? profile.directionLabel
-    : trafficState === "yellow" && profile.direction !== "WAIT"
+    : preparatoryRecipe
+      ? `PREPARAR ${profile.directionLabel}`
+      : trafficState === "yellow" && profile.direction !== "WAIT"
       ? professionalPlan.blocker
         ? `ESPERAR: falta ${professionalPlan.blocker.label}`
         : `ESPERAR confirmacion ${profile.directionLabel}`
@@ -5078,21 +5089,23 @@ function renderSimpleDashboard() {
   const objectiveCaption = trafficState === "green" ? "Orden" : trafficState === "yellow" ? "Plan si confirma" : "Decision";
   const objectiveWarning = trafficState === "red"
     ? trafficHint
-    : trafficState === "yellow"
+    : preparatoryRecipe && trafficState === "yellow"
+      ? "Receta preparatoria visible: 4H y 15M/Fibonacci estan OK. No enviar orden hasta que el gatillo 1M y no perseguir tambien queden OK."
+      : trafficState === "yellow"
       ? `${trafficHint} No copies entrada, stop, take ni volumen mientras el semaforo no este en verde.`
       : professionalPlan.plainRule;
   const recipeUnlocked = trafficState === "green";
-  const recipePreview = recipeUnlocked;
+  const recipePreview = recipeUnlocked || preparatoryRecipe;
   const blockedRecipeText = "NO COPIAR";
   const recipeVolumeText = recipePreview ? formatVolumeForXtb(profile.volume, profile.asset) : "--";
   const recipeEntryText = recipePreview ? priceText(profile.entry) : blockedRecipeText;
   const recipeStopText = recipePreview ? priceText(profile.stopLoss) : blockedRecipeText;
   const recipeTakeProfitText = recipePreview ? priceText(profile.takeProfit) : blockedRecipeText;
   const recipeMarginText = recipePreview ? money(profile.marginRequired) : "--";
-  const recipeOperabilityText = recipePreview ? `${profile.confidence}%` : "BLOQUEADA";
+  const recipeOperabilityText = recipePreview ? `${profile.confidence}%${recipeUnlocked ? "" : " prep"}` : "BLOQUEADA";
   const recipeRiskText = recipePreview
-    ? `${recipeUnlocked ? "Receta habilitada" : "Preparacion, aun no ejecutar"}: puntos a meta ${numberText(profile.takePoints)}, puntos al escudo ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
-    : `Niveles bloqueados: falta ${professionalPlan.blocker?.label || "confirmacion final"}. La app puede tener sesgo, pero solo entrega receta cuando Mapa 4H, Confirmacion 15M/Fibonacci, Gatillo 1M, no perseguir y margen estan OK.`;
+    ? `${recipeUnlocked ? "Receta habilitada" : "Preparacion visible por 4H + 15M/Fib OK, aun no ejecutar"}: puntos a meta ${numberText(profile.takePoints)}, puntos al escudo ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
+    : `Niveles bloqueados: falta ${professionalPlan.blocker?.label || "confirmacion final"}. La app solo muestra receta cuando al menos Mapa 4H y Confirmacion 15M/Fibonacci estan OK.`;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
