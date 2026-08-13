@@ -75,6 +75,69 @@ const professionalCoreSymbols = [
   "BTCUSD",
   "AVAX",
 ];
+
+const xtbQuoteAliases = {
+  "TSM.US": ["TSMC", "TSM", "TSMC.US"],
+  "NVDA.US": ["NVIDIA", "NVDA"],
+  "AAPL.US": ["APPLE", "AAPL"],
+  "MSFT.US": ["MICROSOFT", "MSFT"],
+  "TSLA.US": ["TESLA", "TSLA"],
+  "AMD.US": ["AMD"],
+  "US100": ["NASDAQ100", "NAS100", "NASDAQ 100"],
+  "US500": ["SP500", "SPX500", "S&P500", "S&P 500"],
+  "US30": ["DOW", "DJ30"],
+  "DE40": ["DAX", "GER40"],
+  "GOLD": ["XAUUSD", "XAU"],
+  "OIL": ["WTI", "WTICOIL", "CL"],
+  "NATGAS": ["NATURALGAS", "NATURAL GAS"],
+  "BTCUSD": ["BITCOIN", "BTC", "BTC-USD"],
+  "ETHUSD": ["ETHEREUM", "ETH", "ETH-USD"],
+  "AVAX": ["AVALANCHE", "AVAXUSD", "AVAX-USD"],
+  "SOL": ["SOLANA", "SOLUSD", "SOL-USD"],
+  "XRP": ["RIPPLE", "XRPUSD", "XRP-USD"],
+};
+
+function normalizeQuoteKey(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9.]/g, "");
+}
+
+function canonicalQuoteSymbol(value) {
+  const key = normalizeQuoteKey(value);
+  if (!key) return "";
+  const directAsset = uniqueAssets().find((asset) => normalizeQuoteKey(asset.symbol) === key);
+  if (directAsset) return directAsset.symbol;
+
+  for (const [symbol, aliases] of Object.entries(xtbQuoteAliases)) {
+    const keys = [symbol, ...aliases].map(normalizeQuoteKey);
+    if (keys.includes(key)) return symbol;
+  }
+
+  const stockAlias = uniqueAssets().find((asset) => {
+    const compactSymbol = normalizeQuoteKey(asset.symbol.replace(/\.US$/, ""));
+    return asset.symbol.endsWith(".US") && compactSymbol === key;
+  });
+  return stockAlias?.symbol || key;
+}
+
+function quoteAliasKeys(symbol) {
+  const canonical = canonicalQuoteSymbol(symbol);
+  const keys = new Set([normalizeQuoteKey(symbol), normalizeQuoteKey(canonical)]);
+  if (canonical.endsWith(".US")) keys.add(normalizeQuoteKey(canonical.replace(/\.US$/, "")));
+  (xtbQuoteAliases[canonical] || []).forEach((alias) => keys.add(normalizeQuoteKey(alias)));
+  return Array.from(keys).filter(Boolean);
+}
+
+function quoteForSymbol(symbol) {
+  for (const key of quoteAliasKeys(symbol)) {
+    if (liveQuotes[key]) return liveQuotes[key];
+  }
+  return null;
+}
+
 const defaultTargetProfitUsd = 100;
 const defaultStopRiskUsd = 100;
 const minAiRiskPct = 0.25;
@@ -1200,21 +1263,29 @@ function mergedBarsForSymbol(symbol, frameKeyOverride = null) {
 }
 
 function applyLiveQuote(quote) {
-  const price = Number(quote.price || 0);
-  if (!price) return;
-  liveQuotes[quote.symbol] = { ...(liveQuotes[quote.symbol] || {}), ...quote };
-  recordLiveQuoteCandle({ ...quote, price });
-  if (String(quote.source || "").startsWith("yfinance")) {
-    liveQuotes[quote.symbol].provider_price = price;
+  const symbol = canonicalQuoteSymbol(quote.symbol);
+  const price = Number(quote.price || quote.bid || quote.ask || 0);
+  if (!price || !symbol) return;
+  const previous = quoteForSymbol(symbol) || {};
+  const normalizedQuote = { ...previous, ...quote, symbol, raw_symbol: quote.raw_symbol || quote.symbol, price };
+  quoteAliasKeys(symbol).forEach((key) => {
+    liveQuotes[key] = { ...(liveQuotes[key] || {}), ...normalizedQuote };
+  });
+  recordLiveQuoteCandle({ ...normalizedQuote, price });
+  if (String(normalizedQuote.source || "").startsWith("yfinance")) {
+    quoteAliasKeys(symbol).forEach((key) => {
+      liveQuotes[key].provider_price = price;
+    });
   }
+  const storedQuote = quoteForSymbol(symbol) || normalizedQuote;
   Object.values(assetGroups).flat().forEach((asset) => {
-    if (asset.symbol === quote.symbol) {
+    if (asset.symbol === symbol) {
       asset.marketPrice = price;
-      asset.liveChangePct = liveQuotes[quote.symbol].change_pct;
-      asset.liveSource = liveQuotes[quote.symbol].source;
-      asset.signal_source = liveQuotes[quote.symbol].signal_source;
-      asset.liveMarketPhase = liveQuotes[quote.symbol].market_phase;
-      asset.liveUpdatedAt = liveQuotes[quote.symbol].updated_at;
+      asset.liveChangePct = storedQuote.change_pct;
+      asset.liveSource = storedQuote.source;
+      asset.signal_source = storedQuote.signal_source;
+      asset.liveMarketPhase = storedQuote.market_phase;
+      asset.liveUpdatedAt = storedQuote.updated_at;
     }
   });
 }
@@ -1296,11 +1367,12 @@ function hasFreshMarketQuote(asset) {
 }
 
 function providerPriceFor(symbol) {
-  return Number(liveQuotes[symbol]?.provider_price || liveQuotes[symbol]?.price || findAsset(symbol).marketPrice || 0);
+  const quote = latestXtbQuoteFor(symbol) || {};
+  return Number(quote.provider_price || quote.price || findAsset(symbol).marketPrice || 0);
 }
 
 function providerXtbGapPct(asset) {
-  const quote = liveQuotes[asset.symbol] || {};
+  const quote = latestXtbQuoteFor(asset.symbol) || {};
   const providerPrice = Number(quote.provider_price || 0);
   const xtbPrice = Number(quote.source === "xtb" ? quote.price : 0);
   if (!providerPrice || !xtbPrice) return 0;
@@ -1308,7 +1380,7 @@ function providerXtbGapPct(asset) {
 }
 
 function estimatedSpreadCost(asset, volume) {
-  const quote = liveQuotes[asset.symbol] || {};
+  const quote = latestXtbQuoteFor(asset.symbol) || {};
   const bid = Number(quote.bid || 0);
   const ask = Number(quote.ask || 0);
   if (!bid || !ask || ask <= bid || !volume) return 0;
@@ -1355,8 +1427,7 @@ function activeMarketPriceFor(asset) {
 }
 
 function latestXtbQuoteFor(symbol = focusSymbol) {
-  const normalized = String(symbol || focusSymbol).toUpperCase();
-  return liveQuotes[normalized] || null;
+  return quoteForSymbol(symbol || focusSymbol);
 }
 
 function formatDataAge(ms) {
@@ -1488,7 +1559,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
       const operable = pickBestCfdOpportunity();
       const watch = pickBestWatchlistOpportunity();
       const best = operable || watch;
-      if (liveQuotes[selectedAsset.symbol]) {
+      if (latestXtbQuoteFor(selectedAsset.symbol)) {
         selectedAsset = findAsset(selectedAsset.symbol);
         resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       }
@@ -1540,18 +1611,21 @@ function applyXtbQuoteBatch(items = [], options = {}) {
   const source = options.source || "xtb";
   const validQuotes = items
     .map((item) => {
-      const symbol = String(item.symbol || "").trim().toUpperCase();
-      if (!findAsset(symbol)) return null;
-      const direction = effectiveDirectionForSlot(findAsset(symbol));
+      const rawSymbol = String(item.symbol || "").trim().toUpperCase();
+      const symbol = canonicalQuoteSymbol(rawSymbol);
+      if (!symbol) return null;
+      const asset = findAsset(symbol);
+      const direction = effectiveDirectionForSlot(asset);
       const price = xtbExecutablePriceFromQuote(item, direction);
       if (!symbol || !price) return null;
-      const previousProviderQuote = liveQuotes[symbol] || {};
+      const previousProviderQuote = latestXtbQuoteFor(symbol) || {};
       const previousSignalSource = previousProviderQuote.signal_source || previousProviderQuote.source || "";
       const shouldKeepProviderMove = !isMarketOpenNow() && String(previousSignalSource).startsWith("yfinance");
       const shouldIgnoreXtbMove = !isMarketOpenNow() && !shouldKeepProviderMove;
       const xtbChangePct = Number(item.change_pct || 0);
       return {
         symbol,
+        raw_symbol: rawSymbol,
         price,
         bid: Number(item.bid || 0) || null,
         ask: Number(item.ask || 0) || null,
@@ -1667,7 +1741,7 @@ function movementQualityForAsset(asset, movePct) {
 }
 
 function scoreProfessionalCfd(asset) {
-  const quote = liveQuotes[asset.symbol] || {};
+  const quote = latestXtbQuoteFor(asset.symbol) || {};
   const activeSymbol = String(document.getElementById("symbol")?.value || selectedAsset?.symbol || focusSymbol).toUpperCase();
   const tradability = xtbTradabilityState(asset, { allowManual: false });
   const price = Number(tradability.price || quote.price || quote.provider_price || asset.marketPrice || 0);
@@ -1740,6 +1814,22 @@ function professionalCfdRanking(activeSymbol = null) {
     .map((symbol) => available.find((item) => item.symbol === symbol))
     .filter(Boolean);
   return [...forced, ...sorted]
+    .filter((item, index, arr) => arr.findIndex((other) => other.symbol === item.symbol) === index)
+    .slice(0, 5);
+}
+
+function professionalCfdDisplayRanking(activeSymbol = null) {
+  const active = String(activeSymbol || selectedAsset?.symbol || focusSymbol).toUpperCase();
+  const operable = professionalCfdRanking(active);
+  if (operable.length) return operable;
+  const scored = professionalCfdWatchlist()
+    .map(scoreProfessionalCfd)
+    .sort((a, b) => b.score - a.score || Math.abs(b.movePct) - Math.abs(a.movePct));
+  const forced = [active, focusSymbol]
+    .filter((symbol, index, arr) => symbol && arr.indexOf(symbol) === index)
+    .map((symbol) => scored.find((item) => item.symbol === symbol))
+    .filter(Boolean);
+  return [...forced, ...scored]
     .filter((item, index, arr) => arr.findIndex((other) => other.symbol === item.symbol) === index)
     .slice(0, 5);
 }
@@ -1829,9 +1919,10 @@ function pickBestWatchlistOpportunity() {
 function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
   const activeSymbol = activeProfile?.asset?.symbol || selectedAsset?.symbol || focusSymbol;
   const ranking = professionalCfdRanking(activeSymbol);
-  const activeInRadar = ranking.find((item) => item.symbol === activeSymbol);
-  const best = activeInRadar || ranking[0];
-  const activeScore = ranking.find((item) => item.symbol === activeSymbol) || scoreProfessionalCfd(findAsset(activeSymbol));
+  const displayRanking = professionalCfdDisplayRanking(activeSymbol);
+  const activeInRadar = displayRanking.find((item) => item.symbol === activeSymbol);
+  const best = activeInRadar || displayRanking[0];
+  const activeScore = displayRanking.find((item) => item.symbol === activeSymbol) || scoreProfessionalCfd(findAsset(activeSymbol));
   const bestIsRecipeAsset = Boolean(activeInRadar && best?.symbol === activeSymbol);
   const bestLabel = best
     ? `${bestIsRecipeAsset ? "CFD activo" : "Radar"}: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
@@ -1868,11 +1959,11 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
         <strong>${sessionText}</strong>
       </div>
       <div class="professional-cfd-grid">
-        ${ranking.length ? ranking.slice(0, 4).map((item, index) => `
+        ${displayRanking.length ? displayRanking.slice(0, 4).map((item, index) => `
           <button type="button" class="${item.symbol === activeSymbol ? "active" : ""}" data-simple-top-symbol="${item.symbol}">
             <span class="simple-label">${item.symbol === activeSymbol ? "CFD activo" : `#${index + 1}`} ${item.symbol}</span>
             <strong>${item.directionLabel}</strong>
-            <small>${numberText(item.movePct)}% - ${item.status} ${item.score}% - ${priceText(item.price)}</small>
+            <small>${numberText(item.movePct)}% - ${item.tradability?.open ? item.status : "OBSERVAR"} ${item.score}% - ${priceText(item.price)}</small>
             <em>${item.reason}</em>
           </button>
         `).join("") : `
@@ -1883,7 +1974,7 @@ function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
           </div>
         `}
       </div>
-      <p class="simple-tiny">Criterio: solo CFDs con lectura XTB fresca y operable; favoritos cerrados o preapertura no entran. US100 queda como candidato base cuando XTB lo lee abierto.</p>
+      <p class="simple-tiny">Criterio: primero CFDs con lectura XTB fresca y operable; si ninguno califica, se muestran candidatos en observacion para abrirlos en XTB o reiniciar monitor.</p>
       <p class="simple-tiny">CFD activo ${activeSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
     </section>
   `;
@@ -1896,7 +1987,7 @@ function applySelectedOpportunity(opportunity, source = "auto") {
   const symbolInput = document.getElementById("symbol");
   const marketInput = document.getElementById("market-price");
   const xtbInput = document.getElementById("xtb-price");
-  const quotePrice = Number(liveQuotes[selectedAsset.symbol]?.price || opportunity?.asset?.marketPrice || selectedAsset.marketPrice || 0);
+  const quotePrice = Number(latestXtbQuoteFor(selectedAsset.symbol)?.price || opportunity?.asset?.marketPrice || selectedAsset.marketPrice || 0);
   if (symbolInput) symbolInput.value = selectedAsset.symbol;
   if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
   if (xtbInput && quotePrice) xtbInput.value = formatPriceForAsset(quotePrice, selectedAsset);
@@ -2394,7 +2485,7 @@ function triggerReadiness(asset, entry, takeProfit, currentPrice = activeMarketP
 }
 
 function quoteRangeForAsset(asset) {
-  const quote = liveQuotes[asset.symbol] || {};
+  const quote = latestXtbQuoteFor(asset.symbol) || {};
   const price = Number(asset.marketPrice || quote.price || providerPriceFor(asset.symbol) || 0);
   const open = Number(quote.open || price || 0);
   const high = Number(quote.high || Math.max(price, open) || 0);
@@ -3782,7 +3873,7 @@ function learningAdjustmentForProfile(symbol) {
 }
 
 function xtbContextAdjustment(asset, direction, price) {
-  const quote = liveQuotes[asset.symbol] || {};
+  const quote = latestXtbQuoteFor(asset.symbol) || {};
   const lowRaw = document.getElementById("xtb-day-low")?.value;
   const highRaw = document.getElementById("xtb-day-high")?.value;
   const buyersRaw = document.getElementById("xtb-media-buyers")?.value;
@@ -5095,7 +5186,8 @@ function renderSimpleDashboard() {
   const dayResult = liveDayResult();
   const dayTotal = dayResult.total;
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
-  const quoteSource = String(liveQuotes[activeSymbol]?.source || "");
+  const activeQuote = latestXtbQuoteFor(activeSymbol) || {};
+  const quoteSource = String(activeQuote.source || "");
   const sourceLabel = quoteSource.startsWith("xtb")
     ? quoteSource === "xtb_server_snapshot"
       ? "XTB servidor"
@@ -5112,7 +5204,7 @@ function renderSimpleDashboard() {
       ? "Lectura completa"
       : "Analizando";
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
-  const quoteSideLabel = liveQuotes[activeSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[activeSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
+  const quoteSideLabel = activeQuote.executable_side === "ask" ? "COMPRA/ask" : activeQuote.executable_side === "bid" ? "VENTA/bid" : "ultimo";
   const thesis = profile.dayThesis;
   const operateDecision = buildOperateDecision(profile);
   const professionalPlan = professionalDecisionPlan(profile, operateDecision);
