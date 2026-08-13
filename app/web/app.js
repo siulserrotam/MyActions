@@ -1716,8 +1716,9 @@ function renderProfessionalCfdDesk() {
   const ranking = professionalCfdRanking();
   const best = ranking[0];
   const activeScore = ranking.find((item) => item.symbol === focusSymbol) || scoreProfessionalCfd(findAsset(focusSymbol));
+  const bestIsRecipeAsset = best?.symbol === focusSymbol;
   const bestLabel = best
-    ? `${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
+    ? `${bestIsRecipeAsset ? "Receta" : "Radar"}: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
     : "SIN CFD CLARO";
   const bestTone = best?.score >= 75 ? "ok" : best?.score >= 55 ? "warn" : "danger";
   const sessionLabel = currentTradingSessionLabel();
@@ -1729,13 +1730,13 @@ function renderProfessionalCfdDesk() {
         ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
         : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
   const activeNote = best && best.symbol !== focusSymbol
-    ? `Hoy no conviene casarse con US100: ${best.symbol} tiene mejor lectura para vigilar. La receta sigue bloqueada hasta semaforo verde.`
-    : "US100 sigue como CFD principal solo si mapa 4H, filtro 15M y gatillo 1M confirman.";
+    ? `${best.symbol} tiene mejor lectura de vigilancia, pero NO cambia la receta principal. La receta operable sigue siendo ${focusSymbol} y solo se desbloquea con semaforo verde.`
+    : `${focusSymbol} sigue como CFD principal solo si mapa 4H, filtro 15M y gatillo 1M confirman.`;
   return `
     <section class="simple-panel cfd-desk ${bestTone}">
       <div class="simple-head">
         <div>
-          <span class="simple-label">Selector profesional CFD</span>
+          <span class="simple-label">Radar profesional CFD</span>
           <h2>${bestLabel}</h2>
           <p class="simple-subtitle">${activeNote}</p>
         </div>
@@ -1764,8 +1765,8 @@ function renderProfessionalCfdDesk() {
           </div>
         `}
       </div>
-      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Noticias externas aun no estan conectadas como feed; cuando falten, el bot no inventa senal.</p>
-      <p class="simple-tiny">US100 ahora: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
+      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Este bloque solo prioriza vigilancia; no genera receta de entrada.</p>
+      <p class="simple-tiny">Receta principal ${focusSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
     </section>
   `;
 }
@@ -4471,6 +4472,9 @@ function professionalDecisionPlan(profile, operateDecision) {
   const confirmTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "15m");
   const triggerTrace = profile.frameSummary?.traces?.find((trace) => trace.key === "1m");
   const direction = profile.direction;
+  const fibConfirmed = Boolean(profile.fibSetup?.ready);
+  const fibRejected = Boolean(profile.fibSetup?.rejected);
+  const fibWaiting = !fibConfirmed && !fibRejected;
   const checks = [
     {
       key: "data",
@@ -4489,9 +4493,19 @@ function professionalDecisionPlan(profile, operateDecision) {
     {
       key: "confirmation",
       label: "Confirmacion 15M",
-      ok: direction !== "WAIT" && confirmTrace?.bias === direction && !profile.fibSetup?.rejected,
-      short: profile.fibSetup?.rejected ? "Fib invalida" : confirmTrace?.bias === direction ? "15M alineado" : "esperar",
-      detail: "El 15M confirma la direccion. Fibonacci ayuda a mejorar precio, pero no decide solo.",
+      ok: direction !== "WAIT" && confirmTrace?.bias === direction && fibConfirmed,
+      short: fibRejected
+        ? "Fib invalida"
+        : fibConfirmed
+          ? "15M + Fib OK"
+          : confirmTrace?.bias === direction
+            ? "esperar Fib"
+            : "esperar",
+      detail: fibRejected
+        ? profile.fibSetup?.detail || "Fibonacci 15M invalido la lectura."
+        : fibWaiting && confirmTrace?.bias === direction
+          ? profile.fibSetup?.detail || "El 15M esta alineado, pero falta rechazo claro en zona Fibonacci 80-90."
+          : "El 15M debe confirmar direccion y el filtro Fibonacci debe mostrar rechazo a favor.",
     },
     {
       key: "trigger",
@@ -4515,7 +4529,12 @@ function professionalDecisionPlan(profile, operateDecision) {
       detail: "El margen solo dice si cabe; el stop define cuanto puedes perder.",
     },
   ];
-  const blocker = checks.find((check) => !check.ok);
+  const blocker = checks.find((check) => !check.ok) || (operateDecision.status !== "OPERAR"
+    ? {
+        label: operateDecision.title?.replace(/^Esperar: falta\s*/i, "") || "confirmacion final",
+        detail: operateDecision.detail || "Falta confirmacion final para operar.",
+      }
+    : null);
   const canOperate = !blocker && operateDecision.status === "OPERAR" && profile.status === "OPERABLE";
   const title = canOperate
     ? `OPERAR ${profile.directionLabel}`
@@ -4980,7 +4999,7 @@ function renderSimpleDashboard() {
       : "yellow";
   const trafficLabel = trafficState === "green" ? "OPERAR" : trafficState === "yellow" ? "ESPERAR" : "NO OPERAR";
   const trafficHint = trafficState === "green"
-    ? "Mapa 4H, confirmacion 15M, gatillo 1M, no perseguir y margen estan alineados."
+    ? "Mapa 4H, confirmacion 15M con Fibonacci, gatillo 1M, no perseguir y margen estan alineados."
     : trafficState === "yellow"
       ? "Hay lectura parcial, pero falta al menos una confirmacion. No copies niveles todavia."
       : "La lectura no tiene ventaja suficiente o esta invalidada. Proteger capital.";
@@ -5008,14 +5027,14 @@ function renderSimpleDashboard() {
   const recipeOperabilityText = recipePreview ? `${profile.confidence}%` : "BLOQUEADA";
   const recipeRiskText = recipePreview
     ? `${recipeUnlocked ? "Receta habilitada" : "Preparacion, aun no ejecutar"}: puntos a meta ${numberText(profile.takePoints)}, puntos al escudo ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
-    : `Niveles bloqueados: falta ${professionalPlan.blocker?.label || "confirmacion final"}. La app puede tener sesgo, pero solo entrega receta cuando Mapa 4H, Confirmacion 15M, Gatillo 1M, no perseguir y margen estan OK.`;
+    : `Niveles bloqueados: falta ${professionalPlan.blocker?.label || "confirmacion final"}. La app puede tener sesgo, pero solo entrega receta cuando Mapa 4H, Confirmacion 15M/Fibonacci, Gatillo 1M, no perseguir y margen estan OK.`;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
       <div class="simple-hero">
         <section class="simple-panel">
           <h1>US100 Decision Desk</h1>
-          <p class="simple-subtitle">Un solo CFD. Mapa 4H, confirmacion 15M y gatillo 1M. Si una pieza falta, la respuesta profesional es esperar.</p>
+          <p class="simple-subtitle">Un solo CFD. Mapa 4H, confirmacion 15M + Fibonacci y gatillo 1M. Si una pieza falta, la respuesta profesional es esperar.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
             <span class="simple-chip">${focusSymbol}</span>
@@ -5105,7 +5124,7 @@ function renderSimpleDashboard() {
           <div>
             <span class="simple-label">Temporalidad grafica</span>
             <strong>${selectedChartFrame.description}</strong>
-            <small>Solo cambia la grafica visible. La receta siempre usa Mapa 4H + Confirmacion 15M + Gatillo 1M.</small>
+            <small>Solo cambia la grafica visible. La receta siempre usa Mapa 4H + Confirmacion 15M/Fibonacci + Gatillo 1M.</small>
           </div>
           <div class="chart-frame-buttons">
             ${Object.values(chartFrameOptions).map((frame) => `
