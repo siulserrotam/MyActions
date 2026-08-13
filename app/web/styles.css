@@ -1021,6 +1021,97 @@ body {
   border-color: rgb(255 90 102 / 0.55);
 }
 
+.cfd-desk {
+  border-color: rgb(255 188 72 / 0.34);
+}
+
+.cfd-desk.ok {
+  border-color: rgb(55 235 157 / 0.55);
+}
+
+.cfd-desk.warn {
+  border-color: rgb(255 188 72 / 0.5);
+}
+
+.cfd-desk.danger {
+  border-color: rgb(255 90 102 / 0.45);
+}
+
+.cfd-session-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  border: 1px solid rgb(255 207 92 / 0.24);
+  border-radius: 16px;
+  background: rgb(255 207 92 / 0.08);
+  padding: 10px 12px;
+}
+
+.cfd-session-note span {
+  border-radius: 999px;
+  background: rgb(255 207 92 / 0.18);
+  color: #fff4c2;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.cfd-session-note strong {
+  color: #eaf8f2;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.professional-cfd-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.professional-cfd-grid > div {
+  border: 1px solid rgb(190 255 229 / 0.12);
+  border-radius: 18px;
+  background: rgb(0 0 0 / 0.18);
+  padding: 13px;
+}
+
+.professional-cfd-grid > div.active {
+  border-color: rgb(55 235 157 / 0.5);
+  background: rgb(55 235 157 / 0.08);
+}
+
+.professional-cfd-grid strong,
+.professional-cfd-grid small,
+.professional-cfd-grid em {
+  display: block;
+}
+
+.professional-cfd-grid strong {
+  margin-top: 6px;
+  color: #fff;
+  font-size: 18px;
+}
+
+.professional-cfd-grid small {
+  margin-top: 6px;
+  color: #c8e4dc;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.professional-cfd-grid em {
+  margin-top: 9px;
+  color: #8fabab;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
 .simple-score {
   min-width: 118px;
   border: 1px solid rgb(255 255 255 / 0.1);
@@ -2232,6 +2323,14 @@ body {
 
   .simple-top-list {
     gap: 8px;
+  }
+
+  .professional-cfd-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cfd-session-note {
+    grid-template-columns: 1fr;
   }
 
   .simple-top-item,

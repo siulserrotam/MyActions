@@ -60,6 +60,21 @@ const categoryLabels = {
 const defaultAccountBalance = 2016;
 const defaultRiskPct = 0.5;
 const focusSymbol = "US100";
+const professionalCoreSymbols = [
+  "US100",
+  "US500",
+  "DE40",
+  "GOLD",
+  "OIL",
+  "NATGAS",
+  "EURUSD",
+  "GBPUSD",
+  "NVDA.US",
+  "AAPL.US",
+  "TSM.US",
+  "BTCUSD",
+  "AVAX",
+];
 const defaultTargetProfitUsd = 100;
 const defaultStopRiskUsd = 100;
 const minAiRiskPct = 0.25;
@@ -258,7 +273,17 @@ async function loadCurrentDashboardUser() {
 }
 
 function favoriteSymbols() {
-  return [focusSymbol];
+  try {
+    const stored = JSON.parse(getLocalValue("decision_engine_favorites") || "[]");
+    const clean = Array.isArray(stored)
+      ? stored
+        .map((symbol) => String(symbol || "").trim().toUpperCase())
+        .filter(Boolean)
+      : [];
+    return clean.length ? Array.from(new Set(clean)) : [focusSymbol];
+  } catch {
+    return [focusSymbol];
+  }
 }
 
 function setFavoriteSymbols(symbols) {
@@ -270,7 +295,9 @@ function getFavoriteAssets() {
 }
 
 function ensureDefaultFavorites() {
-  setFavoriteSymbols([focusSymbol]);
+  if (!getLocalValue("decision_engine_favorites")) {
+    setFavoriteSymbols([focusSymbol]);
+  }
 }
 
 function money(value) {
@@ -1336,13 +1363,12 @@ function renderPriceGapStatus() {
 }
 
 async function refreshLivePrices({ resetSelected = false } = {}) {
-  const symbols = focusSymbol;
+  const symbols = professionalCfdWatchlist().map((asset) => asset.symbol).join(",");
   try {
     const snapshotApplied = await refreshXtbSnapshotFromServer();
-    if (snapshotApplied) {
-      return;
-    }
-    updateLiveStatus("Live prices: actualizando...");
+    updateLiveStatus(snapshotApplied
+      ? "XTB sincronizado; completando radar CFD..."
+      : "Live prices: actualizando...");
     const response = await fetch(`/market/live?symbols=${encodeURIComponent(symbols)}&ts=${Date.now()}`, {
       cache: "no-store",
     });
@@ -1358,7 +1384,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
       const best = operable || watch;
       if (best) {
         applySelectedOpportunity(best, "live");
-        updateLiveStatus(`US100 actualizado: ${best.directionLabel} con ${payload.count || 0} lectura(s).`, "ok");
+        updateLiveStatus(`Radar actualizado: ${best.symbol} ${best.directionLabel} con ${payload.count || 0} lectura(s).`, "ok");
         return;
       }
       if (liveQuotes[selectedAsset.symbol]) {
@@ -1366,7 +1392,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
         resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
       }
     }
-    updateLiveStatus(`US100 actualizado desde yfinance.`, "ok");
+    updateLiveStatus(`Radar CFD actualizado desde yfinance (${liveItems.length || 0} lectura(s)).`, "ok");
     renderAssets();
     renderTopOpportunities();
     calculate();
@@ -1468,11 +1494,140 @@ function lockManualOpportunitySelection() {
 
 function pickBestCfdOpportunity(symbols = []) {
   const allowed = new Set(symbols.map((symbol) => String(symbol).toUpperCase()));
-  return uniqueAssets()
+  return professionalCfdWatchlist()
     .filter((asset) => !allowed.size || allowed.has(asset.symbol))
     .map((asset) => buildAssetOpportunity(asset, getEffectiveRiskPct()))
     .filter((item) => item.usable)
     .sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function professionalCfdWatchlist() {
+  const preferred = [
+    ...favoriteSymbols(),
+    ...professionalCoreSymbols,
+  ];
+  const allowedCategories = new Set(["indices", "commodities", "forex", "stocks", "crypto"]);
+  return Array.from(new Set(preferred.map((symbol) => String(symbol).toUpperCase())))
+    .map(findAsset)
+    .filter((asset) => allowedCategories.has(asset.category))
+    .filter((asset) => !["DOGE", "ADA", "DOT", "LINK"].includes(asset.symbol));
+}
+
+function sessionBiasForAsset(asset, sessionLabel = currentTradingSessionLabel()) {
+  const session = String(sessionLabel || "").toLowerCase();
+  if (session.includes("ny") || ["golden-window", "morning", "midday", "close-window"].includes(session)) {
+    if (asset.symbol === focusSymbol || asset.symbol === "US500" || asset.category === "stocks") return 18;
+    if (asset.symbol === "OIL" || asset.symbol === "GOLD") return 10;
+    if (asset.category === "forex") return 6;
+    if (asset.category === "crypto") return -8;
+  }
+  if (session.includes("london")) {
+    if (asset.category === "forex") return 18;
+    if (asset.symbol === "GOLD" || asset.symbol === "OIL") return 12;
+    if (asset.symbol === focusSymbol || asset.symbol === "US500") return 6;
+    if (asset.category === "crypto") return -8;
+  }
+  if (session.includes("asia")) {
+    if (asset.symbol === "GOLD") return 16;
+    if (asset.category === "forex") return 10;
+    if (asset.category === "crypto") return 4;
+    if (asset.symbol === focusSymbol || asset.symbol === "US500") return -4;
+  }
+  if (session.includes("closed") || session === "closed") {
+    return asset.category === "crypto" ? 5 : -10;
+  }
+  return 0;
+}
+
+function movementQualityForAsset(asset, movePct) {
+  const absMove = Math.abs(Number(movePct || 0));
+  const category = asset.category;
+  const symbol = asset.symbol;
+  const rules = symbol === "NATGAS"
+    ? { low: 0.35, clean: 2.5, hot: 5.5 }
+    : symbol === "OIL" || symbol === "GOLD"
+      ? { low: 0.2, clean: 1.8, hot: 3.5 }
+      : category === "forex"
+        ? { low: 0.05, clean: 0.45, hot: 1.2 }
+        : category === "crypto"
+          ? { low: 0.5, clean: 3.0, hot: 6.0 }
+          : category === "stocks"
+            ? { low: 0.35, clean: 1.8, hot: 3.5 }
+            : { low: 0.12, clean: 1.2, hot: 2.5 };
+  if (absMove < rules.low) {
+    return { score: -18, label: "sin fuerza", detail: `movimiento ${numberText(absMove)}% bajo para este CFD` };
+  }
+  if (absMove <= rules.clean) {
+    return { score: 26, label: "movimiento limpio", detail: `movimiento ${numberText(absMove)}% dentro de rango sano` };
+  }
+  if (absMove <= rules.hot) {
+    return { score: 8, label: "movimiento caliente", detail: `movimiento ${numberText(absMove)}%; esperar pullback, no perseguir` };
+  }
+  return { score: -28, label: "demasiada volatilidad", detail: `movimiento ${numberText(absMove)}% puede barrer stops` };
+}
+
+function scoreProfessionalCfd(asset) {
+  const quote = liveQuotes[asset.symbol] || {};
+  const price = Number(quote.price || quote.provider_price || asset.marketPrice || 0);
+  const movePct = Number(quote.change_pct ?? asset.liveChangePct ?? 0);
+  const fresh = hasFreshMarketQuote(asset) || Boolean(String(quote.source || "").toLowerCase().includes("xtb"));
+  const sessionLabel = currentTradingSessionLabel();
+  const movement = movementQualityForAsset(asset, movePct);
+  const sessionScore = sessionBiasForAsset(asset, sessionLabel);
+  const direction = directionFromMove(movePct);
+  const accountBalance = Number(document.getElementById("account-balance")?.value || defaultAccountBalance);
+  const availableCapital = Number(document.getElementById("available-capital")?.value || accountBalance);
+  const minVolume = asset.symbol === focusSymbol ? 0.2 : Number(asset.volumeStep || (asset.category === "stocks" ? 1 : 0.01));
+  const marginRequired = price * asset.multiplier * minVolume * cfdMarginPct(asset) / 100;
+  const marginOk = !price || !availableCapital || marginRequired <= availableCapital * 0.95;
+  const spreadCost = estimatedSpreadCost(asset, minVolume);
+  const spreadOk = !spreadCost || spreadCost <= buildDailyTradePlan().currentTradeRiskAmount;
+  let score = 45 + movement.score + sessionScore;
+  if (fresh) score += 15;
+  else score -= 22;
+  if (direction === "WAIT") score -= 14;
+  if (!marginOk) score -= 35;
+  if (!spreadOk) score -= 35;
+  if (asset.category === "crypto") score -= 12;
+  if (asset.symbol === "NATGAS") score -= 8;
+  score = clamp(Math.round(score), 0, 95);
+  const status = !marginOk || !spreadOk
+    ? "DESCARTAR"
+    : score >= 75
+      ? "VIGILAR"
+      : score >= 55
+        ? "PREPARAR"
+        : "ESPERAR";
+  const directionLabel = direction === "WAIT" ? "SIN DIRECCION" : labelFromDirection(direction);
+  const reasonParts = [
+    `${movement.label}: ${movement.detail}`,
+    `sesion ${sessionLabel}: ${sessionScore >= 10 ? "favorece" : sessionScore < 0 ? "penaliza" : "neutral"}`,
+    fresh ? "precio fresco" : "precio no fresco",
+    marginOk ? `margen minimo aprox ${money(marginRequired)}` : `margen minimo ${money(marginRequired)} supera disponible`,
+  ];
+  if (!spreadOk) reasonParts.push(`spread estimado ${money(spreadCost)} consume la meta`);
+  return {
+    asset,
+    symbol: asset.symbol,
+    price,
+    movePct,
+    direction,
+    directionLabel,
+    score,
+    status,
+    fresh,
+    marginOk,
+    marginRequired,
+    reason: reasonParts.join(". "),
+  };
+}
+
+function professionalCfdRanking() {
+  return professionalCfdWatchlist()
+    .map(scoreProfessionalCfd)
+    .filter((item) => item.status !== "DESCARTAR")
+    .sort((a, b) => b.score - a.score || Math.abs(b.movePct) - Math.abs(a.movePct))
+    .slice(0, 5);
 }
 
 function buildWatchlistOpportunity(asset) {
@@ -1546,7 +1701,7 @@ function buildWatchlistOpportunity(asset) {
 }
 
 function buildOpeningWatchlist() {
-  return [findAsset(focusSymbol)]
+  return professionalCfdWatchlist()
     .map(buildWatchlistOpportunity)
     .filter((item) => item.status !== "DESCARTAR")
     .sort((a, b) => b.confidence - a.confidence || Math.abs(Number(b.asset.liveChangePct || 0)) - Math.abs(Number(a.asset.liveChangePct || 0)))
@@ -1555,6 +1710,64 @@ function buildOpeningWatchlist() {
 
 function pickBestWatchlistOpportunity() {
   return buildOpeningWatchlist().find((item) => item.confidence >= 65) || buildOpeningWatchlist()[0] || null;
+}
+
+function renderProfessionalCfdDesk() {
+  const ranking = professionalCfdRanking();
+  const best = ranking[0];
+  const activeScore = ranking.find((item) => item.symbol === focusSymbol) || scoreProfessionalCfd(findAsset(focusSymbol));
+  const bestLabel = best
+    ? `${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
+    : "SIN CFD CLARO";
+  const bestTone = best?.score >= 75 ? "ok" : best?.score >= 55 ? "warn" : "danger";
+  const sessionLabel = currentTradingSessionLabel();
+  const sessionText = sessionLabel.includes("Asia")
+    ? "Asia: prioriza GOLD, divisas y cripto liquida; US100 solo si hay continuidad clara."
+    : sessionLabel.includes("London")
+      ? "London: prioriza Forex, GOLD y OIL; evita perseguir indices antes de NY."
+      : sessionLabel.includes("NY") || ["golden-window", "morning", "midday", "close-window"].includes(sessionLabel)
+        ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
+        : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
+  const activeNote = best && best.symbol !== focusSymbol
+    ? `Hoy no conviene casarse con US100: ${best.symbol} tiene mejor lectura para vigilar. La receta sigue bloqueada hasta semaforo verde.`
+    : "US100 sigue como CFD principal solo si mapa 4H, filtro 15M y gatillo 1M confirman.";
+  return `
+    <section class="simple-panel cfd-desk ${bestTone}">
+      <div class="simple-head">
+        <div>
+          <span class="simple-label">Selector profesional CFD</span>
+          <h2>${bestLabel}</h2>
+          <p class="simple-subtitle">${activeNote}</p>
+        </div>
+        <div class="simple-score">
+          <span>${best?.status || "ESPERAR"}</span>
+          <strong>${best?.score || 0}%</strong>
+        </div>
+      </div>
+      <div class="cfd-session-note">
+        <span>${sessionLabel}</span>
+        <strong>${sessionText}</strong>
+      </div>
+      <div class="professional-cfd-grid">
+        ${ranking.length ? ranking.slice(0, 4).map((item, index) => `
+          <div class="${item.symbol === focusSymbol ? "active" : ""}">
+            <span class="simple-label">#${index + 1} ${item.symbol}</span>
+            <strong>${item.directionLabel}</strong>
+            <small>${numberText(item.movePct)}% - ${item.status} ${item.score}% - ${priceText(item.price)}</small>
+            <em>${item.reason}</em>
+          </div>
+        `).join("") : `
+          <div>
+            <span class="simple-label">Radar</span>
+            <strong>Sin datos suficientes</strong>
+            <small>Ejecuta el monitor XTB o espera una lectura fresca.</small>
+          </div>
+        `}
+      </div>
+      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Noticias externas aun no estan conectadas como feed; cuando falten, el bot no inventa senal.</p>
+      <p class="simple-tiny">US100 ahora: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
+    </section>
+  `;
 }
 
 function applySelectedOpportunity(opportunity, source = "auto") {
@@ -2542,7 +2755,7 @@ function renderTradeChart(item, variant = "mini") {
     const endDate = candles[candles.length - 1]?.timestamp ? new Date(candles[candles.length - 1].timestamp) : barsMeta.endAt ? new Date(barsMeta.endAt) : null;
     if (!startDate || !endDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "";
     const windowMinutes = Number(barsMeta.windowMinutes || 0);
-    return `Fecha NY ${dateFormatter.format(endDate)} · ${hourFormatter.format(startDate)}-${hourFormatter.format(endDate)}${windowMinutes ? ` · ventana ${windowMinutes}m` : ""}`;
+    return `Fecha NY ${dateFormatter.format(endDate)} - ${hourFormatter.format(startDate)}-${hourFormatter.format(endDate)}${windowMinutes ? ` - ventana ${windowMinutes}m` : ""}`;
   })();
   const timeLabel = (timestamp) => {
     if (!timestamp) return "";
@@ -2765,7 +2978,7 @@ function renderTradeChart(item, variant = "mini") {
         ${variant === "main" ? `
           <text x="${plotLeft}" y="${plotTop - 10}" class="chart-label resistance">RESISTENCIA ${numberText(proZones.resistance)}</text>
           <text x="${plotLeft}" y="${plotBottom + 28}" class="chart-label support">SOPORTE ${numberText(proZones.support)}</text>
-          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas` : "Visual tactico"}${chartRangeText ? ` · ${chartRangeText}` : ""}</text>
+          <text x="${plotLeft}" y="${chartHeight - 8}" class="chart-time-label">${usingOhlcBars ? `${candles.length} velas OHLC reales ${chartInterval}` : usingRealCandles ? `${candles.length} lecturas` : "Visual tactico"}${chartRangeText ? ` - ${chartRangeText}` : ""}</text>
         ` : ""}
       </svg>
       ${variant !== "main" ? chartLegendMarkup : ""}
@@ -4815,7 +5028,7 @@ function renderSimpleDashboard() {
         </section>
         <section class="simple-metrics">
           <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${focusSymbol}</span></div>
-          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">${quoteSideLabel} · CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
+          <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">${quoteSideLabel} - CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
           <div class="simple-metric"><span class="simple-label">Decision</span><span class="simple-value">${profile.direction}</span></div>
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
         </section>
@@ -4868,7 +5081,7 @@ function renderSimpleDashboard() {
         <div class="technical-trace-card ${traceSummary.clarity === "CLARO" ? "ok" : traceSummary.clarity === "NO CLARO" || traceSummary.clarity === "PREPARAR" ? "warn" : "danger"}">
           <div>
             <span class="simple-label">Lectura multi-temporal</span>
-            <strong>${traceSummary.clarity} · ${traceSummary.direction === "WAIT" ? "ESPERAR" : traceSummary.direction}</strong>
+            <strong>${traceSummary.clarity} - ${traceSummary.direction === "WAIT" ? "ESPERAR" : traceSummary.direction}</strong>
             <small>${traceSummary.text}</small>
             <small>La app analiza 4H, 15M y 1M. La grafica visible abajo solo muestra la temporalidad seleccionada: ${selectedChartFrame.label}.</small>
           </div>
@@ -4901,6 +5114,8 @@ function renderSimpleDashboard() {
           </div>
         </div>
       </section>
+
+      ${renderProfessionalCfdDesk(profile)}
 
       <section class="simple-ops recipe-decision-grid">
         <div class="strategy-decision-strip">
