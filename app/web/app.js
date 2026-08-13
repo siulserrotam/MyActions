@@ -388,8 +388,12 @@ function stopRiskUsd() {
   return automaticStopUsdForTarget(targetProfitUsd());
 }
 
-function us100PointValue(volume) {
-  return Number(volume || 0) * findAsset(focusSymbol).multiplier;
+function pointValueForAsset(asset, volume) {
+  return Number(volume || 0) * Number(asset?.multiplier || 1);
+}
+
+function us100PointValue(volume, asset = findAsset(focusSymbol)) {
+  return pointValueForAsset(asset, volume);
 }
 
 function minimumStopPointsForAsset(asset) {
@@ -990,43 +994,96 @@ function targetContractVolume(asset, entry, balance) {
   return roundVolumeForXtb(rawVolume, asset);
 }
 
-function us100TargetVolume(targetUsd) {
-  const target = Number(targetUsd || 0);
-  if (target >= 200) return 0.35;
-  if (target >= 150) return 0.3;
-  if (target >= 100) return 0.25;
-  return 0.2;
+function accountCapitalForSizing() {
+  const fromInput = decimalValueById("account-balance", 0)
+    || decimalValueById("available-capital", 0)
+    || Number(document.getElementById("account-balance")?.value || 0);
+  return fromInput > 0 ? fromInput : defaultAccountBalance;
+}
+
+function targetRangeForCapital(capital = accountCapitalForSizing()) {
+  const value = Math.max(Number(capital || defaultAccountBalance), 100);
+  if (value <= 1000) {
+    const scale = Math.max(value / 1000, 0.3);
+    return {
+      standard: Number((30 * scale).toFixed(2)),
+      high: Number((50 * scale).toFixed(2)),
+      label: "Tramo base: cuenta pequena, prioridad a sobrevivir.",
+    };
+  }
+  if (value <= 3000) {
+    const ratio = (value - 1000) / 2000;
+    return {
+      standard: Number((30 + 20 * ratio).toFixed(2)),
+      high: Number((50 + 20 * ratio).toFixed(2)),
+      label: "Tramo medio: escala objetivo sin saltar riesgo.",
+    };
+  }
+  const extraThousands = (value - 3000) / 1000;
+  return {
+    standard: Number(Math.min(50 + extraThousands * 8, 120).toFixed(2)),
+    high: Number(Math.min(70 + extraThousands * 10, 160).toFixed(2)),
+    label: "Tramo alto: subir meta solo con lectura fuerte.",
+  };
+}
+
+function confidenceTargetUsd(confidence, capital = accountCapitalForSizing()) {
+  const range = targetRangeForCapital(capital);
+  const score = Number(confidence || 0);
+  const target = score >= 78 ? range.high : range.standard;
+  return { ...range, target, mode: score >= 78 ? "alta probabilidad" : "estandar" };
+}
+
+function probeVolumeForXtb(asset) {
+  return roundVolumeForXtb(Math.max(0.01, volumeStepForXtb(asset)), asset);
+}
+
+function preferredVolumeByCapital(confidence, marginVolume, targetUsd, asset, capital = accountCapitalForSizing()) {
+  const entry = activeMarketPriceFor(asset) || Number(asset?.marketPrice || 1);
+  const pointValueTarget = targetUsd >= 70 ? targetUsd / 20 : targetUsd / 15;
+  const rawByTarget = pointValueTarget / Number(asset?.multiplier || 1);
+  const rawByContract = targetContractVolume(asset, entry, Math.max(capital * 0.3, 1));
+  let desired = Math.max(probeVolumeForXtb(asset), Math.min(rawByTarget, rawByContract || rawByTarget));
+
+  if (asset?.symbol === "US100") {
+    if (capital >= 3000 && confidence >= 78) desired = Math.max(desired, 0.25);
+    else if (capital >= 3000) desired = Math.max(desired, 0.2);
+    else if (capital >= 1000) desired = Math.max(desired, 0.1);
+  }
+
+  const capByMargin = Number(marginVolume || 0);
+  if (capByMargin > 0) desired = Math.min(desired, capByMargin);
+  return roundVolumeForXtb(Math.max(0, desired), asset);
 }
 
 function botUs100SizingPolicy(confidence, marginVolume, asset) {
   const score = Number(confidence || 0);
-  const tiers = [
-    { min: 88, targetUsd: 200, stopUsd: 100, volume: 0.35, label: "Agresivo: lectura institucional muy fuerte." },
-    { min: 78, targetUsd: 150, stopUsd: 75, volume: 0.3, label: "Fuerte: buena lectura, sin usar el maximo." },
-    { min: 65, targetUsd: 100, stopUsd: 50, volume: 0.25, label: "Normal: operabilidad clara con relacion 1:2." },
-    { min: 0, targetUsd: 50, stopUsd: 50, volume: 0.2, label: "Conservador/base: preparar niveles, no forzar." },
-  ];
-  const tier = tiers.find((item) => score >= item.min) || tiers.at(-1);
-  const maxByMargin = Number(marginVolume || 0);
-  const rawVolume = maxByMargin > 0 ? Math.min(tier.volume, maxByMargin) : tier.volume;
-  const volume = roundVolumeForXtb(rawVolume, asset);
-  const marginLimited = maxByMargin > 0 && volume < tier.volume;
+  const capital = accountCapitalForSizing();
+  const range = confidenceTargetUsd(score, capital);
+  const stopUsd = score >= 78 ? Math.max(30, Math.round(range.target * 0.65)) : Math.max(25, Math.round(range.target * 0.8));
+  const targetUsd = Number(range.target.toFixed(2));
+  const requestedVolume = preferredVolumeByCapital(score, marginVolume, targetUsd, asset, capital);
+  const volume = roundVolumeForXtb(requestedVolume, asset);
+  const marginLimited = Number(marginVolume || 0) > 0 && volume < requestedVolume;
+  const probeVolume = probeVolumeForXtb(asset);
   return {
-    ...tier,
+    min: score >= 78 ? 78 : 0,
+    targetUsd,
+    stopUsd,
     volume,
-    requestedVolume: tier.volume,
+    requestedVolume,
+    probeVolume,
+    probeTargetUsd: Math.max(3, Math.min(10, Number((targetUsd * 0.15).toFixed(2)))),
+    capitalRange: range,
     marginLimited,
     note: marginLimited
-      ? `${tier.label} El margen disponible baja el volumen de ${formatVolumeForXtb(tier.volume, asset)} a ${formatVolumeForXtb(volume, asset)}.`
-      : `${tier.label} El bot decide meta ${money(tier.targetUsd)}, escudo ${money(tier.stopUsd)} y volumen ${formatVolumeForXtb(volume, asset)}.`,
+      ? `${range.label} El margen baja el volumen a ${formatVolumeForXtb(volume, asset)}.`
+      : `${range.label} Bot decide meta ${money(targetUsd)}, escudo ${money(stopUsd)} y volumen ${formatVolumeForXtb(volume, asset)}. Prueba minima opcional ${formatVolumeForXtb(probeVolume, asset)}.`,
   };
 }
 
 function preferredUs100Volume(confidence, marginVolume, targetUsd, asset) {
-  const desired = us100TargetVolume(targetUsd);
-  const confidenceCapped = confidence < 50 ? Math.min(desired, 0.2) : desired;
-  const capped = Math.min(confidenceCapped, marginVolume || confidenceCapped);
-  return roundVolumeForXtb(Math.max(0, capped), asset);
+  return preferredVolumeByCapital(confidence, marginVolume, targetUsd, asset);
 }
 
 function formatVolumeForXtb(volume, asset) {
@@ -1377,7 +1434,7 @@ async function refreshLivePrices({ resetSelected = false } = {}) {
     const liveItems = payload.items || [];
     liveItems.forEach(applyLiveQuote);
     await saveQuoteBars(liveItems, "yfinance_1m");
-    await loadMarketBars([focusSymbol]);
+    await loadMarketBars([selectedAsset?.symbol || focusSymbol]);
     if (resetSelected) {
       const operable = pickBestCfdOpportunity();
       const watch = pickBestWatchlistOpportunity();
@@ -1437,9 +1494,9 @@ async function refreshXtbSnapshotFromServer() {
 function applyXtbQuoteBatch(items = [], options = {}) {
   const source = options.source || "xtb";
   const validQuotes = items
-    .filter((item) => String(item.symbol || "").trim().toUpperCase() === focusSymbol)
     .map((item) => {
       const symbol = String(item.symbol || "").trim().toUpperCase();
+      if (!findAsset(symbol)) return null;
       const direction = effectiveDirectionForSlot(findAsset(symbol));
       const price = xtbExecutablePriceFromQuote(item, direction);
       if (!symbol || !price) return null;
@@ -1712,11 +1769,12 @@ function pickBestWatchlistOpportunity() {
   return buildOpeningWatchlist().find((item) => item.confidence >= 65) || buildOpeningWatchlist()[0] || null;
 }
 
-function renderProfessionalCfdDesk() {
+function renderProfessionalCfdDesk(activeProfile = us100StrategyProfile()) {
   const ranking = professionalCfdRanking();
   const best = ranking[0];
-  const activeScore = ranking.find((item) => item.symbol === focusSymbol) || scoreProfessionalCfd(findAsset(focusSymbol));
-  const bestIsRecipeAsset = best?.symbol === focusSymbol;
+  const activeSymbol = activeProfile?.asset?.symbol || selectedAsset?.symbol || focusSymbol;
+  const activeScore = ranking.find((item) => item.symbol === activeSymbol) || scoreProfessionalCfd(findAsset(activeSymbol));
+  const bestIsRecipeAsset = best?.symbol === activeSymbol;
   const bestLabel = best
     ? `${bestIsRecipeAsset ? "Receta" : "Radar"}: ${best.symbol} ${best.direction === "WAIT" ? "ESPERAR" : best.direction}`
     : "SIN CFD CLARO";
@@ -1729,9 +1787,9 @@ function renderProfessionalCfdDesk() {
       : sessionLabel.includes("NY") || ["golden-window", "morning", "midday", "close-window"].includes(sessionLabel)
         ? "NY: prioriza US100/US500 y acciones CFD; OIL/GOLD si tienen movimiento limpio."
         : "Mercado cerrado: preparar lista, no abrir salvo cripto con regla propia.";
-  const activeNote = best && best.symbol !== focusSymbol
-    ? `${best.symbol} tiene mejor lectura de vigilancia, pero NO cambia la receta principal. La receta operable sigue siendo ${focusSymbol} y solo se desbloquea con semaforo verde.`
-    : `${focusSymbol} sigue como CFD principal solo si mapa 4H, filtro 15M y gatillo 1M confirman.`;
+  const activeNote = best && best.symbol !== activeSymbol
+    ? `${best.symbol} tiene mejor lectura para vigilar. Toca esa tarjeta si quieres recalcular receta y grafica con ese CFD.`
+    : `${activeSymbol} queda como CFD activo solo si mapa 4H, filtro 15M y gatillo 1M confirman.`;
   return `
     <section class="simple-panel cfd-desk ${bestTone}">
       <div class="simple-head">
@@ -1751,12 +1809,12 @@ function renderProfessionalCfdDesk() {
       </div>
       <div class="professional-cfd-grid">
         ${ranking.length ? ranking.slice(0, 4).map((item, index) => `
-          <div class="${item.symbol === focusSymbol ? "active" : ""}">
+          <button type="button" class="${item.symbol === activeSymbol ? "active" : ""}" data-simple-top-symbol="${item.symbol}">
             <span class="simple-label">#${index + 1} ${item.symbol}</span>
             <strong>${item.directionLabel}</strong>
             <small>${numberText(item.movePct)}% - ${item.status} ${item.score}% - ${priceText(item.price)}</small>
             <em>${item.reason}</em>
-          </div>
+          </button>
         `).join("") : `
           <div>
             <span class="simple-label">Radar</span>
@@ -1765,8 +1823,8 @@ function renderProfessionalCfdDesk() {
           </div>
         `}
       </div>
-      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Este bloque solo prioriza vigilancia; no genera receta de entrada.</p>
-      <p class="simple-tiny">Receta principal ${focusSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
+      <p class="simple-tiny">Criterio: favoritos + radar curado, sesion ${sessionLabel}, precio XTB/Yahoo, movimiento sano, margen minimo y spread. Al seleccionar una tarjeta, cambia el CFD activo y se recalcula todo.</p>
+      <p class="simple-tiny">CFD activo ${activeSymbol}: ${activeScore.directionLabel}, ${activeScore.status} ${activeScore.score}%. ${activeScore.reason}</p>
     </section>
   `;
 }
@@ -1774,14 +1832,14 @@ function renderProfessionalCfdDesk() {
 function applySelectedOpportunity(opportunity, source = "auto") {
   if ((source === "live" || source === "xtb") && isManualOpportunityLocked()) return;
   if (source === "manual") lockManualOpportunitySelection();
-  selectedAsset = findAsset(focusSymbol);
+  selectedAsset = findAsset(opportunity?.asset?.symbol || opportunity?.symbol || selectedAsset?.symbol || focusSymbol);
   const symbolInput = document.getElementById("symbol");
   const marketInput = document.getElementById("market-price");
   const xtbInput = document.getElementById("xtb-price");
-  const quotePrice = Number(liveQuotes[selectedAsset.symbol]?.price || opportunity.asset.marketPrice || 0);
-  if (symbolInput) symbolInput.value = focusSymbol;
+  const quotePrice = Number(liveQuotes[selectedAsset.symbol]?.price || opportunity?.asset?.marketPrice || selectedAsset.marketPrice || 0);
+  if (symbolInput) symbolInput.value = selectedAsset.symbol;
   if (marketInput && quotePrice) marketInput.value = formatPriceForAsset(quotePrice, selectedAsset);
-  if (xtbInput && quotePrice) xtbInput.value = quotePrice.toFixed(2);
+  if (xtbInput && quotePrice) xtbInput.value = formatPriceForAsset(quotePrice, selectedAsset);
   resetOrderFieldsForAssetDirection(selectedAsset, effectiveDirectionForSlot(selectedAsset));
   applyAiAggressiveTargets(selectedAsset);
   loadMarketBars([selectedAsset.symbol]).then(() => renderSimpleDashboard());
@@ -1825,7 +1883,7 @@ function priceStepPct(asset) {
 }
 
 function resetOrderFieldsForAsset(asset) {
-  const profile = asset.symbol === focusSymbol ? us100StrategyProfile() : null;
+  const profile = us100StrategyProfile(asset);
   const direction = profile?.direction || document.getElementById("direction").value;
   const market = profile?.price || activeMarketPriceFor(asset) || Number(asset.marketPrice || 100);
   const step = priceStepPct(asset);
@@ -1926,8 +1984,9 @@ function applyAiAggressiveTargets(asset) {
 }
 
 function selectedAssetFromForm() {
-  const symbol = focusSymbol;
-  if (document.getElementById("symbol")) document.getElementById("symbol").value = focusSymbol;
+  const symbolInput = document.getElementById("symbol");
+  const symbol = String(symbolInput?.value || selectedAsset?.symbol || focusSymbol).trim().toUpperCase();
+  if (symbolInput) symbolInput.value = symbol;
   const baseAsset = findAsset(symbol);
   const marketInput = Number(document.getElementById("market-price").value || 0);
   const xtbInput = xtbPriceValue();
@@ -3288,9 +3347,9 @@ function renderTopOpportunities() {
 }
 
 async function calculate() {
-  const symbol = focusSymbol;
-  document.getElementById("symbol").value = focusSymbol;
-  selectedAsset = findAsset(focusSymbol);
+  selectedAsset = selectedAssetFromForm();
+  const symbol = selectedAsset.symbol;
+  document.getElementById("symbol").value = symbol;
   document.getElementById("available-capital").value = document.getElementById("account-balance").value || defaultAccountBalance;
   document.getElementById("risk-pct").value = "dynamic";
   document.getElementById("direction").value = effectiveDirectionForSlot(selectedAsset);
@@ -3465,7 +3524,10 @@ function loadConfigLocal() {
     if (config.operation3_result !== undefined) document.getElementById("operation3-result").value = config.operation3_result;
     if (config.operation4_result !== undefined) document.getElementById("operation4-result").value = config.operation4_result;
     if (config.xtb_estimated_cost_per_operation !== undefined) document.getElementById("xtb-cost-per-operation").value = config.xtb_estimated_cost_per_operation;
-    if (config.symbol) document.getElementById("symbol").value = config.symbol;
+    if (config.symbol) {
+      document.getElementById("symbol").value = config.symbol;
+      selectedAsset = findAsset(config.symbol);
+    }
     if (config.xtb_price) document.getElementById("xtb-price").value = config.xtb_price;
     if (config.target_profit_usd) document.getElementById("target-profit-usd").value = config.target_profit_usd;
     if (config.stop_risk_usd) document.getElementById("stop-risk-usd").value = config.stop_risk_usd;
@@ -3708,19 +3770,20 @@ function xtbContextAdjustment(asset, direction, price) {
   };
 }
 
-function us100StrategyProfile() {
-  const asset = findAsset(focusSymbol);
-  const quote = liveQuotes[focusSymbol] || {};
+function us100StrategyProfile(assetOverride = selectedAssetFromForm?.() || selectedAsset || findAsset(focusSymbol)) {
+  const asset = findAsset(assetOverride?.symbol || focusSymbol);
+  const symbol = asset.symbol;
+  const quote = liveQuotes[symbol] || {};
   const price = decimalValueById("xtb-price", 0) || decimalValueById("market-price", 0) || Number(quote.price || asset.marketPrice || 0);
-  const dataFreshness = xtbFreshnessState(focusSymbol);
+  const dataFreshness = xtbFreshnessState(symbol);
   const triggerFrame = chartFrameOptions["1m"];
   const bars = realCandlesForItem({ asset, zones: { price } }, triggerFrame).slice(-30);
   const pattern = detectCandlePattern(bars);
   const imbalance = detectGapFvgBag(bars);
   const trend = detectTrendProfile(bars, asset);
   const directDirection = decideUs100Direction(pattern, trend, asset);
-  const frameSummary = technicalTraceSummary(focusSymbol);
-  const dayThesis = buildUs100DayThesis(focusSymbol);
+  const frameSummary = technicalTraceSummary(symbol);
+  const dayThesis = buildUs100DayThesis(symbol);
   const direction = dayThesis.invalidated
     ? "WAIT"
     : dayThesis.direction !== "WAIT"
@@ -3736,11 +3799,11 @@ function us100StrategyProfile() {
   const stopPoints = Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const marginVolume = maxVolumeByMargin(asset, level.entry);
   const baseConfidence = clamp(Math.round(pattern.score + trend.score + imbalance.score + 10), 0, 95);
-  const cfdMovePct = cfdMovementFromQuote(focusSymbol, asset);
+  const cfdMovePct = cfdMovementFromQuote(symbol, asset);
   const cfdMove = cfdMovementScore(cfdMovePct, direction);
-  const learning = learningAdjustmentForProfile(focusSymbol);
+  const learning = learningAdjustmentForProfile(symbol);
   const xtbContext = xtbContextAdjustment(asset, direction, price);
-  const fibSetup = evaluateFibPullbackSetup(focusSymbol, levelDirection);
+  const fibSetup = evaluateFibPullbackSetup(symbol, levelDirection);
   const antiChase = antiChaseCheck(bars, levelDirection, price);
   const movementBudget = movementBudgetCheck(bars, levelDirection, price);
   const thesisScore = dayThesis.invalidated ? -28 : dayThesis.stable ? 20 : dayThesis.direction !== "WAIT" ? 8 : -8;
@@ -3759,7 +3822,7 @@ function us100StrategyProfile() {
   const targetUsd = sizingPolicy.targetUsd;
   const stopUsd = sizingPolicy.stopUsd;
   const volume = sizingPolicy.volume;
-  const pointValue = volume * asset.multiplier;
+  const pointValue = pointValueForAsset(asset, volume);
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const finalStopPoints = pointValue > 0 ? stopUsd / pointValue : stopPoints;
   const stopLoss = levelDirection === "LONG" ? level.entry - finalStopPoints : level.entry + finalStopPoints;
@@ -4565,7 +4628,7 @@ function buildDirectionalRecipe(profile, direction) {
   const targetUsd = profile.targetUsd || defaultTargetProfitUsd;
   const stopUsd = profile.stopUsd || defaultStopRiskUsd;
   const volume = preferredUs100Volume(profile.confidence, marginVolume, targetUsd, asset);
-  const pointValue = volume * asset.multiplier;
+  const pointValue = pointValueForAsset(asset, volume);
   const takePoints = pointValue > 0 ? targetUsd / pointValue : 0;
   const stopPoints = pointValue > 0 ? stopUsd / pointValue : Math.max(level.stopPoints, minimumStopPointsForAsset(asset));
   const entry = level.entry;
@@ -4958,19 +5021,21 @@ function renderSimpleDashboard() {
   const target = document.getElementById("simple-dashboard");
   if (!target) return;
   {
-  const profile = us100StrategyProfile();
+  const activeAsset = selectedAssetFromForm?.() || selectedAsset || findAsset(focusSymbol);
+  const profile = us100StrategyProfile(activeAsset);
+  const activeSymbol = profile.asset.symbol;
   const hiddenTarget = document.getElementById("target-profit-usd");
   const hiddenStop = document.getElementById("stop-risk-usd");
   if (hiddenTarget) hiddenTarget.value = String(profile.targetUsd);
   if (hiddenStop) hiddenStop.value = String(profile.stopUsd);
   const selectedChartFrame = chartFrameConfig();
   const primaryDisplay = buildAssetOpportunity(profile.asset);
-  const traceSummary = technicalTraceSummary(focusSymbol);
+  const traceSummary = technicalTraceSummary(activeSymbol);
   const capital = document.getElementById("account-balance")?.value || defaultAccountBalance;
   const dayResult = liveDayResult();
   const dayTotal = dayResult.total;
   const xtbPrice = document.getElementById("xtb-price")?.value || document.getElementById("market-price")?.value || numberText(profile.price);
-  const quoteSource = String(liveQuotes[focusSymbol]?.source || "");
+  const quoteSource = String(liveQuotes[activeSymbol]?.source || "");
   const sourceLabel = quoteSource.startsWith("xtb")
     ? quoteSource === "xtb_server_snapshot"
       ? "XTB servidor"
@@ -4987,7 +5052,7 @@ function renderSimpleDashboard() {
       ? "Lectura completa"
       : "Analizando";
   const cfdPctTone = profile.cfdMovePct < 0 ? "bear" : profile.cfdMovePct > 0 ? "bull" : "neutral";
-  const quoteSideLabel = liveQuotes[focusSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[focusSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
+  const quoteSideLabel = liveQuotes[activeSymbol]?.executable_side === "ask" ? "COMPRA/ask" : liveQuotes[activeSymbol]?.executable_side === "bid" ? "VENTA/bid" : "ultimo";
   const thesis = profile.dayThesis;
   const operateDecision = buildOperateDecision(profile);
   const professionalPlan = professionalDecisionPlan(profile, operateDecision);
@@ -5033,20 +5098,21 @@ function renderSimpleDashboard() {
     <div class="simple-shell us100-desk">
       <div class="simple-hero">
         <section class="simple-panel">
-          <h1>US100 Decision Desk</h1>
-          <p class="simple-subtitle">Un solo CFD. Mapa 4H, confirmacion 15M + Fibonacci y gatillo 1M. Si una pieza falta, la respuesta profesional es esperar.</p>
+          <h1>${activeSymbol} Decision Desk</h1>
+          <p class="simple-subtitle">Un CFD activo a la vez. El radar puede proponer alternativas; al elegir una, la receta, grafica y riesgo se recalculan con ese activo.</p>
           <div class="simple-status">
             <span class="simple-chip">Usuario ${currentDashboardUser}</span>
-            <span class="simple-chip">${focusSymbol}</span>
+            <span class="simple-chip">${activeSymbol}</span>
             <span class="simple-chip">${sourceLabel}</span>
             <span class="simple-chip">Sesion ${marketSessionLabel}</span>
             <span class="simple-chip">Bot: ${money(profile.targetUsd)} / escudo ${money(profile.stopUsd)}</span>
+            <span class="simple-chip">Prueba ${formatVolumeForXtb(profile.sizingPolicy.probeVolume, profile.asset)}</span>
             <span class="simple-chip">Valor/punto ${money(profile.pointValue)}</span>
             <span class="simple-chip warn">Confirma CFD, spread y margen en XTB</span>
           </div>
         </section>
         <section class="simple-metrics">
-          <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${focusSymbol}</span></div>
+          <div class="simple-metric"><span class="simple-label">Activo</span><span class="simple-value">${activeSymbol}</span></div>
           <div class="simple-metric"><span class="simple-label">Precio XTB</span><span class="simple-value">${xtbPrice}</span><small class="simple-metric-note">${quoteSideLabel} - CFD <b class="${cfdPctTone}">${numberText(profile.cfdMovePct)}%</b></small></div>
           <div class="simple-metric"><span class="simple-label">Decision</span><span class="simple-value">${profile.direction}</span></div>
           <div class="simple-metric"><span class="simple-label">Capital</span><span class="simple-value">${capital}</span></div>
@@ -5057,7 +5123,7 @@ function renderSimpleDashboard() {
         <div class="simple-head">
           <div>
             <span class="simple-label">Decision profesional</span>
-            <h2>${focusSymbol} ${profile.directionLabel}</h2>
+            <h2>${activeSymbol} ${profile.directionLabel}</h2>
             <p class="simple-subtitle">${profile.explanation}</p>
           </div>
           <div class="simple-score">
@@ -5313,9 +5379,11 @@ function bindSimpleDashboard() {
     }
     const topButton = event.target?.closest?.("[data-simple-top-symbol]");
     if (topButton) {
+      const symbol = topButton.dataset.simpleTopSymbol;
       const picked = [...buildTopOpportunities(), ...buildOpeningWatchlist()]
-        .find((item) => item.asset.symbol === topButton.dataset.simpleTopSymbol);
-      if (picked) applySelectedOpportunity(picked, "manual");
+        .find((item) => item.asset.symbol === symbol)
+        || { asset: findAsset(symbol), symbol };
+      applySelectedOpportunity(picked, "manual");
       return;
     }
     const chartFrameButton = event.target?.closest?.("[data-chart-frame]");
@@ -6190,12 +6258,13 @@ function notifyIfNeeded() {
     return;
   }
   if (trafficState === "yellow" && profile.direction !== "WAIT") {
-    const key = `ai-prepare:${focusSymbol}:${profile.direction}:${profile.confidence}:${Math.round(profile.entry || 0)}:${Math.round(profile.stopLoss || 0)}:${Math.round(profile.takeProfit || 0)}`;
+    const symbol = profile.asset?.symbol || selectedAsset?.symbol || focusSymbol;
+    const key = `ai-prepare:${symbol}:${profile.direction}:${profile.confidence}:${Math.round(profile.entry || 0)}:${Math.round(profile.stopLoss || 0)}:${Math.round(profile.takeProfit || 0)}`;
     if (sessionStorage.getItem("lastDecisionNotification") !== key) {
       sessionStorage.setItem("lastDecisionNotification", key);
       sendBrowserNotification(
         "MyActions IA: preparate, aun no copies",
-        `${focusSymbol} ${profile.directionLabel}. Falta confirmacion final. Entrada ${priceText(profile.entry)}, stop ${priceText(profile.stopLoss)}, TP ${priceText(profile.takeProfit)}.`
+        `${symbol} ${profile.directionLabel}. Falta confirmacion final. Entrada ${priceText(profile.entry)}, stop ${priceText(profile.stopLoss)}, TP ${priceText(profile.takeProfit)}.`
       );
     }
     return;
@@ -6333,10 +6402,9 @@ function bindInputs() {
 
 async function initDashboard() {
   await loadCurrentDashboardUser();
-  selectedAsset = findAsset(focusSymbol);
   loadConfigLocal();
-  selectedAsset = findAsset(focusSymbol);
-  document.getElementById("symbol").value = focusSymbol;
+  selectedAsset = selectedAssetFromForm();
+  document.getElementById("symbol").value = selectedAsset.symbol;
   renderTabs();
   renderAssets();
   bindInputs();
@@ -6345,10 +6413,9 @@ async function initDashboard() {
   loadLessonSummary();
   updateGoldenWindow();
   setInterval(updateGoldenWindow, 1000);
-  selectedAsset = findAsset(focusSymbol);
   resetOrderForCurrentMode(selectedAsset);
   refreshNotificationStatus();
-  await loadAnalysisTimeframes([focusSymbol]);
+  await loadAnalysisTimeframes([selectedAsset.symbol]);
   calculate();
   renderSimpleDashboard();
   updateAgentLoop();

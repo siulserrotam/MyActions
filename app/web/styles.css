@@ -1073,14 +1073,23 @@ body {
   margin-top: 14px;
 }
 
-.professional-cfd-grid > div {
+.professional-cfd-grid > div,
+.professional-cfd-grid > button {
   border: 1px solid rgb(190 255 229 / 0.12);
   border-radius: 18px;
   background: rgb(0 0 0 / 0.18);
   padding: 13px;
 }
 
-.professional-cfd-grid > div.active {
+.professional-cfd-grid > button {
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.professional-cfd-grid > div.active,
+.professional-cfd-grid > button.active {
   border-color: rgb(55 235 157 / 0.5);
   background: rgb(55 235 157 / 0.08);
 }
