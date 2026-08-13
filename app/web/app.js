@@ -4285,7 +4285,7 @@ function professionalDecisionPlan(profile, operateDecision) {
       label: "Gatillo 1M",
       ok: direction !== "WAIT" && triggerTrace?.bias === direction && profile.frameSummary?.triggerReady,
       short: triggerTrace?.bias === "WAIT" ? "sin gatillo" : triggerTrace?.bias || "sin datos",
-      detail: "La vela 1M solo habilita la orden; no cambia sola la tesis.",
+      detail: "Debe cerrar una vela 1M a favor de la tesis. Si falta, no hay receta copiable aunque 4H y 15M esten bien.",
     },
     {
       key: "price",
@@ -4458,6 +4458,7 @@ function activeRecipeProgress(recipe) {
 
 function renderRecipeOption(recipe, activeRecipe) {
   const isActive = activeRecipe?.direction === recipe.direction;
+  const canStart = recipe.allowed && recipe.status === "LISTA";
   return `
     <article class="recipe-option ${recipe.direction.toLowerCase()} ${recipe.isPrimary ? "primary" : ""} ${isActive ? "running" : ""}">
       <div class="recipe-option-head">
@@ -4474,7 +4475,7 @@ function renderRecipeOption(recipe, activeRecipe) {
         <div><span>Volumen</span><strong>${formatVolumeForXtb(recipe.volume, recipe.asset || findAsset(focusSymbol))}</strong></div>
       </div>
       <p>${recipe.note}</p>
-      <button type="button" data-simple-action="start-recipe-${recipe.direction}" ${isActive ? "disabled" : ""}>Inicio: abri esta receta</button>
+      <button type="button" data-simple-action="start-recipe-${recipe.direction}" ${isActive || !canStart ? "disabled" : ""}>${canStart ? "Inicio: abri esta receta" : "Esperar confirmacion"}</button>
     </article>
   `;
 }
@@ -4773,26 +4774,28 @@ function renderSimpleDashboard() {
   const objectiveOrderLabel = trafficState === "green"
     ? profile.directionLabel
     : trafficState === "yellow" && profile.direction !== "WAIT"
-      ? `ESPERAR confirmacion ${profile.directionLabel}`
+      ? professionalPlan.blocker
+        ? `ESPERAR: falta ${professionalPlan.blocker.label}`
+        : `ESPERAR confirmacion ${profile.directionLabel}`
       : "NO OPERAR";
   const objectiveCaption = trafficState === "green" ? "Orden" : trafficState === "yellow" ? "Plan si confirma" : "Decision";
   const objectiveWarning = trafficState === "red"
     ? trafficHint
     : trafficState === "yellow"
-      ? `${trafficHint} Puedes preparar estos niveles, pero espera el gatillo antes de copiarlos en XTB.`
+      ? `${trafficHint} No copies entrada, stop, take ni volumen mientras el semaforo no este en verde.`
       : professionalPlan.plainRule;
   const recipeUnlocked = trafficState === "green";
-  const recipePreview = trafficState === "green" || trafficState === "yellow";
+  const recipePreview = recipeUnlocked;
   const blockedRecipeText = "NO COPIAR";
   const recipeVolumeText = recipePreview ? formatVolumeForXtb(profile.volume, profile.asset) : "--";
   const recipeEntryText = recipePreview ? priceText(profile.entry) : blockedRecipeText;
   const recipeStopText = recipePreview ? priceText(profile.stopLoss) : blockedRecipeText;
   const recipeTakeProfitText = recipePreview ? priceText(profile.takeProfit) : blockedRecipeText;
   const recipeMarginText = recipePreview ? money(profile.marginRequired) : "--";
-  const recipeOperabilityText = recipePreview ? `${profile.confidence}%` : "0%";
+  const recipeOperabilityText = recipePreview ? `${profile.confidence}%` : "BLOQUEADA";
   const recipeRiskText = recipePreview
     ? `${recipeUnlocked ? "Receta habilitada" : "Preparacion, aun no ejecutar"}: puntos a meta ${numberText(profile.takePoints)}, puntos al escudo ${numberText(profile.stopPoints)}. Con volumen ${formatVolumeForXtb(profile.volume, profile.asset)}, cada punto vale aprox. ${money(profile.pointValue)}.`
-    : "Niveles no operables: Mapa 4H, Confirmacion 15M y Gatillo 1M deben mejorar antes de preparar entrada, stop o take profit.";
+    : `Niveles bloqueados: falta ${professionalPlan.blocker?.label || "confirmacion final"}. La app puede tener sesgo, pero solo entrega receta cuando Mapa 4H, Confirmacion 15M, Gatillo 1M, no perseguir y margen estan OK.`;
 
   target.innerHTML = `
     <div class="simple-shell us100-desk">
