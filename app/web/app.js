@@ -4403,6 +4403,31 @@ function dominantCandleSignal(candles, frameKey) {
   };
 }
 
+function intermediateConfirmationSignal(candles, frameKey, rawBias, trend) {
+  if (frameKey !== "15m") return null;
+  if (!Array.isArray(candles) || candles.length < 3) return null;
+  const recent = candles.slice(-3);
+  const votes = recent.map((candle) => candle.c > candle.o ? "LONG" : candle.c < candle.o ? "SHORT" : "WAIT");
+  const longVotes = votes.filter((vote) => vote === "LONG").length;
+  const shortVotes = votes.filter((vote) => vote === "SHORT").length;
+  const voteBias = longVotes >= 2 ? "LONG" : shortVotes >= 2 ? "SHORT" : "WAIT";
+  const dominant = dominantCandleSignal(candles, frameKey);
+  const trendBias = trend?.direction || "WAIT";
+  const candidate = voteBias !== "WAIT" ? voteBias : dominant?.bias || "WAIT";
+  if (candidate === "WAIT") return null;
+  const compatibleWithVotes = voteBias === candidate || voteBias === "WAIT";
+  const compatibleWithTrend = trendBias === candidate || trendBias === "WAIT";
+  const compatibleWithRaw = rawBias === candidate || rawBias === "WAIT";
+  const hasRealSupport = voteBias === candidate || dominant?.bias === candidate;
+  if (!compatibleWithVotes || !compatibleWithTrend || !compatibleWithRaw || !hasRealSupport) return null;
+  return {
+    bias: candidate,
+    note: voteBias === candidate
+      ? `15M acompana con ${candidate === "LONG" ? longVotes : shortVotes}/3 velas recientes a favor`
+      : `15M acompana por ${dominant.note}`,
+  };
+}
+
 function traceFrame(symbol, frameKey) {
   const frame = chartFrameOptions[frameKey];
   const candles = candlesForFrame(symbol, frameKey);
@@ -4420,9 +4445,13 @@ function traceFrame(symbol, frameKey) {
   const rawBias = longVotes > shortVotes ? "LONG" : shortVotes > longVotes ? "SHORT" : "WAIT";
   const stability = directionStability(candles, rawBias, frameKey);
   const dominant = dominantCandleSignal(candles, frameKey);
+  const intermediate = intermediateConfirmationSignal(candles, frameKey, rawBias, trend);
   let bias = rawBias === "WAIT" || stability.confirmed ? rawBias : "WAIT";
   if (frameKey === "4h" && dominant && (rawBias === "WAIT" || rawBias === dominant.bias)) {
     bias = dominant.bias;
+  }
+  if (frameKey === "15m" && intermediate) {
+    bias = intermediate.bias;
   }
   return {
     key: frameKey,
@@ -4432,6 +4461,7 @@ function traceFrame(symbol, frameKey) {
     bias,
     rawBias,
     dominant,
+    intermediate,
     stability,
     movePct,
     pattern,
@@ -4450,6 +4480,9 @@ function traceDirectionNote(trace) {
   if (trace.candles < 3) return `${trace.role}: faltan velas reales para leer este marco.`;
   if (trace.key === "4h" && trace.dominant && trace.bias !== "WAIT") {
     return `${trace.role}: ${trace.bias} en formacion por ${trace.dominant.note}. No autoriza entrada sin 15M y 1M.`;
+  }
+  if (trace.key === "15m" && trace.intermediate && trace.bias !== "WAIT") {
+    return `${trace.role}: ${trace.bias} en preparacion. ${trace.intermediate.note}. Aun exige Fibonacci o gatillo fino antes de copiar niveles.`;
   }
   return `${trace.role}: ${biasText}. ${trace.stability?.note || ""}. Patron ${trace.pattern.name}. Tendencia ${trace.trend.direction}. Movimiento ${move}%.`;
 }
@@ -4740,6 +4773,8 @@ function professionalDecisionPlan(profile, operateDecision) {
   const fibConfirmed = Boolean(profile.fibSetup?.ready);
   const fibRejected = Boolean(profile.fibSetup?.rejected);
   const fibWaiting = !fibConfirmed && !fibRejected;
+  const confirmationAligned = direction !== "WAIT" && confirmTrace?.bias === direction;
+  const confirmationPreparing = confirmationAligned && Boolean(confirmTrace?.intermediate);
   const mapShort = mapTrace?.bias === "WAIT"
     ? "sin direccion"
     : mapTrace?.dominant
@@ -4766,18 +4801,22 @@ function professionalDecisionPlan(profile, operateDecision) {
     {
       key: "confirmation",
       label: "Confirmacion 15M",
-      ok: direction !== "WAIT" && confirmTrace?.bias === direction && fibConfirmed,
+      ok: confirmationAligned && fibConfirmed,
       short: fibRejected
         ? "Fib invalida"
         : fibConfirmed
           ? "15M + Fib OK"
-          : confirmTrace?.bias === direction
-            ? "esperar Fib"
+          : confirmationPreparing
+            ? "15M preparando"
+            : confirmationAligned
+              ? "esperar Fib"
             : "esperar",
       detail: fibRejected
         ? profile.fibSetup?.detail || "Fibonacci 15M invalido la lectura."
-        : fibWaiting && confirmTrace?.bias === direction
-          ? profile.fibSetup?.detail || "El 15M esta alineado, pero falta rechazo claro en zona Fibonacci 80-90."
+        : fibWaiting && confirmationPreparing
+          ? `${confirmTrace.intermediate.note}. Falta que Fibonacci 80-90 o una vela clara de rechazo autorice la receta.`
+          : fibWaiting && confirmationAligned
+            ? profile.fibSetup?.detail || "El 15M esta alineado, pero falta rechazo claro en zona Fibonacci 80-90."
           : "El 15M debe confirmar direccion y el filtro Fibonacci debe mostrar rechazo a favor.",
     },
     {
